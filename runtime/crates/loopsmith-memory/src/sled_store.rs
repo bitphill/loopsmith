@@ -1,0 +1,302 @@
+//! `sled` implementation of [`Store`].
+//!
+//! Key layout is prefix-and-zero-padded so `scan_prefix` returns records in
+//! insertion order without a secondary index:
+//!
+//! ```text
+//! ep/<run>/<seq:020>      episode
+//! gs/<run>/<target>       goal state
+//! lg/<run>/<seq:020>      ledger entry
+//! ck/<run>                checkpoint
+//! sp/<run>/<key>          scratchpad
+//! ```
+
+use crate::{Checkpoint, Episode, GoalState, LedgerEntry, MemError, Result, Store};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
+pub struct SledStore {
+    db: sled::Db,
+}
+
+impl SledStore {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let db = sled::open(path).map_err(|e| MemError::Backend(e.to_string()))?;
+        Ok(Self { db })
+    }
+
+    /// Monotonic sequence shared by every keyspace; only ordering matters.
+    fn next_seq(&self) -> Result<u64> {
+        self.db
+            .generate_id()
+            .map_err(|e| MemError::Backend(e.to_string()))
+    }
+
+    fn put(&self, key: String, value: Vec<u8>) -> Result<()> {
+        self.db
+            .insert(key.as_bytes(), value)
+            .map_err(|e| MemError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    fn scan<T: serde::de::DeserializeOwned>(&self, prefix: &str) -> Result<Vec<T>> {
+        let mut out = Vec::new();
+        for item in self.db.scan_prefix(prefix.as_bytes()) {
+            let (_, v) = item.map_err(|e| MemError::Backend(e.to_string()))?;
+            out.push(serde_json::from_slice::<T>(&v)?);
+        }
+        Ok(out)
+    }
+}
+
+impl Store for SledStore {
+    fn put_episode(&self, ep: &Episode) -> Result<u64> {
+        // Validate before writing — bad data compounds.
+        ep.check()?;
+        let seq = self.next_seq()?;
+        self.put(
+            format!("ep/{}/{:020}", ep.run_id, seq),
+            serde_json::to_vec(ep)?,
+        )?;
+        Ok(seq)
+    }
+
+    fn episodes(&self, run_id: &str) -> Result<Vec<Episode>> {
+        self.scan(&format!("ep/{run_id}/"))
+    }
+
+    fn set_goal_state(&self, run_id: &str, st: &GoalState) -> Result<()> {
+        if st.target.trim().is_empty() {
+            return Err(MemError::Rejected("goal state target is empty".into()));
+        }
+        if st.total < st.passed + st.failed {
+            return Err(MemError::Rejected(format!(
+                "goal state for `{}` is inconsistent: passed {} + failed {} exceeds total {}",
+                st.target, st.passed, st.failed, st.total
+            )));
+        }
+        self.put(
+            format!("gs/{run_id}/{}", st.target),
+            serde_json::to_vec(st)?,
+        )
+    }
+
+    fn goal_state(&self, run_id: &str, target: &str) -> Result<Option<GoalState>> {
+        let v = self
+            .db
+            .get(format!("gs/{run_id}/{target}").as_bytes())
+            .map_err(|e| MemError::Backend(e.to_string()))?;
+        match v {
+            Some(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn goal_states(&self, run_id: &str) -> Result<BTreeMap<String, GoalState>> {
+        let list: Vec<GoalState> = self.scan(&format!("gs/{run_id}/"))?;
+        Ok(list.into_iter().map(|g| (g.target.clone(), g)).collect())
+    }
+
+    fn append_ledger(&self, entry: &LedgerEntry) -> Result<u64> {
+        if entry.run_id.trim().is_empty() {
+            return Err(MemError::Rejected("ledger entry run_id is empty".into()));
+        }
+        let seq = self.next_seq()?;
+        self.put(
+            format!("lg/{}/{:020}", entry.run_id, seq),
+            serde_json::to_vec(entry)?,
+        )?;
+        Ok(seq)
+    }
+
+    fn ledger(&self, run_id: &str) -> Result<Vec<LedgerEntry>> {
+        self.scan(&format!("lg/{run_id}/"))
+    }
+
+    fn save_checkpoint(&self, cp: &Checkpoint) -> Result<()> {
+        self.put(format!("ck/{}", cp.run_id), serde_json::to_vec(cp)?)?;
+        // A checkpoint is the resume contract; make it durable immediately
+        // rather than trusting the background flusher to beat a crash.
+        self.flush()
+    }
+
+    fn checkpoint(&self, run_id: &str) -> Result<Option<Checkpoint>> {
+        let v = self
+            .db
+            .get(format!("ck/{run_id}").as_bytes())
+            .map_err(|e| MemError::Backend(e.to_string()))?;
+        match v {
+            Some(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn set_scratchpad(&self, run_id: &str, key: &str, value: &str) -> Result<()> {
+        self.put(format!("sp/{run_id}/{key}"), value.as_bytes().to_vec())
+    }
+
+    fn scratchpad(&self, run_id: &str, key: &str) -> Result<Option<String>> {
+        let v = self
+            .db
+            .get(format!("sp/{run_id}/{key}").as_bytes())
+            .map_err(|e| MemError::Backend(e.to_string()))?;
+        Ok(v.map(|b| String::from_utf8_lossy(&b).to_string()))
+    }
+
+    fn runs(&self) -> Result<Vec<String>> {
+        let mut set = BTreeSet::new();
+        for item in self.db.scan_prefix(b"ck/") {
+            let (k, _) = item.map_err(|e| MemError::Backend(e.to_string()))?;
+            if let Some(rest) = String::from_utf8_lossy(&k).strip_prefix("ck/") {
+                set.insert(rest.to_string());
+            }
+        }
+        Ok(set.into_iter().collect())
+    }
+
+    fn flush(&self) -> Result<()> {
+        self.db
+            .flush()
+            .map_err(|e| MemError::Backend(e.to_string()))?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{now_ms, sample_episode, LedgerKind};
+
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// Unique directory per call. `now_ms()` alone is not enough: tests run in
+    /// parallel threads and collide inside the same millisecond, which shows
+    /// up as a sled lock error rather than as the bug it is.
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::env::temp_dir().join(format!(
+            "loopsmith-test-{tag}-{}-{}-{n}",
+            std::process::id(),
+            now_ms()
+        ))
+    }
+
+    fn tmp(tag: &str) -> (SledStore, std::path::PathBuf) {
+        let p = tmp_dir(tag);
+        (SledStore::open(&p).unwrap(), p)
+    }
+
+    #[test]
+    fn episodes_round_trip_in_order() {
+        let (s, p) = tmp("episodes");
+        for i in 0..5 {
+            let mut e = sample_episode("r1", &format!("n{i}"));
+            e.iteration = i;
+            s.put_episode(&e).unwrap();
+        }
+        let got = s.episodes("r1").unwrap();
+        assert_eq!(got.len(), 5);
+        assert_eq!(got[0].node_id, "n0");
+        assert_eq!(got[4].node_id, "n4");
+        let _ = std::fs::remove_dir_all(p);
+    }
+
+    #[test]
+    fn malformed_episodes_are_rejected_not_stored() {
+        let (s, p) = tmp("malformed");
+        let mut bad = sample_episode("r1", "n1");
+        bad.provider_id = "".into();
+        assert!(matches!(s.put_episode(&bad), Err(MemError::Rejected(_))));
+        assert!(s.episodes("r1").unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(p);
+    }
+
+    #[test]
+    fn inconsistent_goal_state_is_rejected() {
+        let (s, p) = tmp("goalstate");
+        let st = GoalState {
+            target: "g1".into(),
+            satisfied: true,
+            passed: 3,
+            failed: 3,
+            total: 4,
+            reason: "bogus".into(),
+            iteration: 1,
+            updated_ms: now_ms(),
+        };
+        assert!(matches!(
+            s.set_goal_state("r1", &st),
+            Err(MemError::Rejected(_))
+        ));
+        let _ = std::fs::remove_dir_all(p);
+    }
+
+    #[test]
+    fn runs_are_discovered_from_checkpoints() {
+        let (s, p) = tmp("runs");
+        for r in ["alpha", "beta"] {
+            s.save_checkpoint(&Checkpoint {
+                run_id: r.into(),
+                iteration: 1,
+                completed_nodes: vec![],
+                tokens_used: 0,
+                cost_usd: 0.0,
+                started_ms: now_ms(),
+                updated_ms: now_ms(),
+            })
+            .unwrap();
+        }
+        assert_eq!(s.runs().unwrap(), vec!["alpha", "beta"]);
+        let _ = std::fs::remove_dir_all(p);
+    }
+
+    #[test]
+    fn checkpoint_survives_reopen() {
+        let dir = tmp_dir("resume");
+        {
+            let s = SledStore::open(&dir).unwrap();
+            s.save_checkpoint(&Checkpoint {
+                run_id: "r1".into(),
+                iteration: 7,
+                completed_nodes: vec!["a".into(), "b".into()],
+                tokens_used: 1234,
+                cost_usd: 0.5,
+                started_ms: now_ms(),
+                updated_ms: now_ms(),
+            })
+            .unwrap();
+            s.append_ledger(&LedgerEntry {
+                run_id: "r1".into(),
+                iteration: 7,
+                kind: LedgerKind::IterationStarted,
+                detail: "seven".into(),
+                node_id: None,
+                tokens: None,
+                cost_usd: None,
+                created_ms: now_ms(),
+            })
+            .unwrap();
+            s.flush().unwrap();
+        }
+        // Drop and reopen: this is the resume-after-crash path.
+        let s2 = SledStore::open(&dir).unwrap();
+        let cp = s2.checkpoint("r1").unwrap().expect("checkpoint survives");
+        assert_eq!(cp.iteration, 7);
+        assert_eq!(cp.completed_nodes, vec!["a", "b"]);
+        assert_eq!(s2.ledger("r1").unwrap().len(), 1);
+        drop(s2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn scratchpad_carries_reasoning_between_iterations() {
+        let (s, p) = tmp("scratchpad");
+        s.set_scratchpad("r1", "g1", "depth 0 reasoning").unwrap();
+        assert_eq!(
+            s.scratchpad("r1", "g1").unwrap().as_deref(),
+            Some("depth 0 reasoning")
+        );
+        assert!(s.scratchpad("r1", "missing").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(p);
+    }
+}

@@ -1,0 +1,46 @@
+# ── Rust ──────────────────────────────────────────────────────────
+target/
+**/*.rs.bk
+*.pdb
+
+# ── Loop run state ────────────────────────────────────────────────
+# Regenerable, machine-local, and often large. The ledger is an audit
+# trail for a run, not source for the repository.
+state/
+**/state/
+out/
+**/out/
+*.log
+
+# ── Quarantine ────────────────────────────────────────────────────
+# Auto-acquired sub-agents wait here for human promotion. They are
+# proposals, not source, and must never be committed by accident.
+generated-skills/
+**/generated-skills/
+
+# ── Proposals ─────────────────────────────────────────────────────
+# What the loop wants to change about its own goals. Reviewed, then
+# applied by hand — the file itself is transient.
+proposals/*
+!proposals/.gitkeep
+
+# ── Source documents ──────────────────────────────────────────────
+# The reading corpus is large, mostly PDF duplicates of the markdown,
+# and not ours to redistribute. The distillation lives in
+# loops-engineering-cheat-sheet.md instead.
+docs/
+
+# ── Secrets ───────────────────────────────────────────────────────
+# loopsmith never reads env values, but nothing stops a local override
+# file from existing. Keep them out.
+.env
+.env.*
+*.pem
+*.key
+.claude/settings.local.json
+
+# ── macOS / editors ───────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp

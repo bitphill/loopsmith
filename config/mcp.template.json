@@ -1,0 +1,33 @@
+{
+  "$comment": "Register the loopsmith control plane as a local MCP server. Copy the `mcpServers` block into .mcp.json at your project root, or run: claude mcp add loopsmith -- loopsmith mcp --state ./state",
+
+  "mcpServers": {
+    "loopsmith": {
+      "command": "loopsmith",
+      "args": ["mcp", "--state", "./state"],
+      "env": {}
+    }
+  },
+
+  "$tools": {
+    "$comment": "What the server exposes. Note the omission: there is no tool that sets a goal satisfied. The gate owns that ruling and is not reachable as a mutation, which is what keeps a hands-off run honest.",
+    "loopsmith_plan": "Waves, critical path, parallel fraction, chosen concurrency, predicted speedup.",
+    "loopsmith_gate_evaluate": "Run the deterministic gate and return per-check verdicts. Reports a ruling; cannot set one.",
+    "loopsmith_ledger": "Append-only audit trail for a run, including every stop-gate trigger.",
+    "loopsmith_goal_states": "Current gate rulings for every goal plus `overall`.",
+    "loopsmith_record_episode": "Record what a node produced. Refused without provider provenance.",
+    "loopsmith_scratchpad": "Read or write the per-goal notes carried between iterations."
+  },
+
+  "$alternative_transports": {
+    "$comment": "If the binary is not on PATH, point at it directly.",
+    "absolute_path": {
+      "command": "/usr/local/bin/loopsmith",
+      "args": ["mcp", "--state", "./state"]
+    },
+    "cargo_dev": {
+      "command": "cargo",
+      "args": ["run", "--release", "-p", "loopsmith-cli", "--", "mcp", "--state", "./state"]
+    }
+  }
+}

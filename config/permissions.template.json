@@ -1,0 +1,45 @@
+{
+  "$comment": "Consolidated permission grant for a hands-off run. Generate the real one from your config with `loopsmith permissions <config> --write .claude/settings.local.json` — it derives the narrowest set your loop actually needs instead of asking for everything. This file is the shape, not the answer.",
+
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+
+      "Bash(loopsmith:*)",
+
+      "Bash(claude:*)",
+      "Bash(ollama:*)",
+      "Bash(grok:*)",
+      "Bash(gemini:*)",
+      "Bash(curl:*)",
+
+      "Bash(cargo:*)",
+      "Bash(npm:*)",
+      "Bash(pytest:*)",
+
+      "Bash(npx skills:*)",
+      "WebFetch(domain:claudemarketplaces.com)"
+    ],
+
+    "$deny_note": "Nothing is denied here by default. Denial is not the mechanism that protects you — the constraint block in the loop config is, because it stops on irreversible actions regardless of what this file allows."
+  },
+
+  "$sections": {
+    "core_tools": "Read/Write/Edit/Glob/Grep — the loop reads and writes inside its own directory.",
+    "control_plane": "Bash(loopsmith:*) — plan, gate, ledger, resume.",
+    "providers": "One Bash rule per provider command declared in the config. Providers you have not configured are omitted; there is no reason to pre-authorise a binary you never call.",
+    "detectors": "One Bash rule per script detector, so the gate can run its checks without a prompt mid-run.",
+    "acquisition": "Only present when skills.acquisition_order includes `marketplace`. A loop that never reaches the marketplace never asks for network access."
+  },
+
+  "$still_stops": [
+    "Anything listed in constraints.human_checkpoint",
+    "Publishing, sending, deleting, or paying",
+    "Promoting a quarantined sub-agent out of generated-skills/",
+    "Applying anything written to proposals/"
+  ]
+}

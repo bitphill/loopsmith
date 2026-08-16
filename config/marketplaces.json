@@ -1,0 +1,72 @@
+{
+  "$comment": "Where loopsmith looks when a node needs a sub-agent it does not have. Sources are tried in the order given. Trust thresholds exist because an auto-installed skill runs with your permissions.",
+
+  "sources": [
+    {
+      "id": "claudemarketplaces",
+      "kind": "plugin_marketplace_index",
+      "index_url": "https://claudemarketplaces.com/api/marketplaces",
+      "browse_url": "https://claudemarketplaces.com/",
+      "response_shape": {
+        "$comment": "Flat JSON array. Fields observed on every entry.",
+        "type": "array",
+        "item_fields": [
+          "repo",
+          "slug",
+          "description",
+          "pluginCount",
+          "categories",
+          "pluginKeywords",
+          "discoveredAt",
+          "lastUpdated",
+          "source",
+          "stars",
+          "starsFetchedAt"
+        ]
+      },
+      "search": {
+        "match_fields": ["repo", "description", "categories", "pluginKeywords"],
+        "rank_by": ["stars", "pluginCount"]
+      },
+      "install": [
+        "claude plugin marketplace add {repo}",
+        "claude plugin install {plugin}@{marketplace}"
+      ]
+    },
+    {
+      "id": "skills-sh",
+      "kind": "skills_cli",
+      "browse_url": "https://skills.sh/",
+      "search": "npx skills find {query}",
+      "search_scoped": "npx skills find {query} --owner {owner}",
+      "install": "npx skills add {owner}/{repo}@{skill} -g -y",
+      "$comment": "The find-skills skill drives this. Prefer it for single skills; prefer the marketplace index for whole plugin bundles."
+    }
+  ],
+
+  "trust": {
+    "min_stars": 100,
+    "min_installs": 1000,
+    "trusted_owners": [
+      "anthropics",
+      "vercel-labs",
+      "microsoft",
+      "obra",
+      "bitphill"
+    ],
+    "$comment": "A skill from a trusted owner bypasses the star and install floors. Everything else must clear both, because an installed skill runs with whatever the permission grant allowed."
+  },
+
+  "policy": {
+    "acquisition_order": ["installed", "marketplace", "generate"],
+    "quarantine_dir": "generated-skills",
+    "require_human_promotion": true,
+    "never_auto_install_matching": [
+      "*credential*",
+      "*secret*",
+      "*exfil*",
+      "*keylog*"
+    ],
+    "$comment": "Quarantine is the point: an auto-acquired sub-agent is a proposal, not a decision. Promotion to ~/.claude/skills/ stays a human act."
+  }
+}

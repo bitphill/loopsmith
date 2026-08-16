@@ -1,0 +1,40 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/loopsmith-core",
+    "crates/loopsmith-memory",
+    "crates/loopsmith-graph",
+    "crates/loopsmith-gate",
+    "crates/loopsmith-provider",
+    "crates/loopsmith-mcp",
+    "crates/loopsmith-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/bitphill/loopsmith"
+authors = ["bitphill"]
+
+[workspace.dependencies]
+loopsmith-core = { path = "crates/loopsmith-core" }
+loopsmith-memory = { path = "crates/loopsmith-memory" }
+loopsmith-graph = { path = "crates/loopsmith-graph" }
+loopsmith-gate = { path = "crates/loopsmith-gate" }
+loopsmith-provider = { path = "crates/loopsmith-provider" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+sled = "0.34"
+regex = "1"
+time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+strip = true

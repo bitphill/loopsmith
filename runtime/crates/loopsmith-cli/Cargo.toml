@@ -1,0 +1,24 @@
+[package]
+name = "loopsmith-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "loopsmith CLI: plan, run, resume, and gate self-evolving agent loops"
+
+[[bin]]
+name = "loopsmith"
+path = "src/main.rs"
+
+[dependencies]
+loopsmith-core = { workspace = true }
+loopsmith-memory = { workspace = true }
+loopsmith-graph = { workspace = true }
+loopsmith-gate = { workspace = true }
+loopsmith-provider = { workspace = true }
+loopsmith-mcp = { path = "../loopsmith-mcp" }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
