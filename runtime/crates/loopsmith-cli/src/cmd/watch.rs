@@ -43,7 +43,10 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
         return Ok(ExitCode::SUCCESS);
     }
 
-    let mut watcher = schedule::Watcher::new();
+    // The success export is written into the loop directory whenever a run
+    // meets its bar, so a `file_change` trigger on the root would see it and
+    // start another run — which would write it again.
+    let mut watcher = schedule::Watcher::ignoring(vec![format!("{}-success", cfg.name)]);
     watcher.prime(&cfg.schedules, &root);
     let mut runs = 0u32;
 

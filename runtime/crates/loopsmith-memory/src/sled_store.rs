@@ -284,13 +284,8 @@ mod tests {
         let (s, p) = tmp("runs");
         for r in ["alpha", "beta"] {
             s.save_checkpoint(&Checkpoint {
-                run_id: r.into(),
                 iteration: 1,
-                completed_nodes: vec![],
-                tokens_used: 0,
-                cost_usd: 0.0,
-                started_ms: now_ms(),
-                updated_ms: now_ms(),
+                ..Checkpoint::new(r)
             })
             .unwrap();
         }
@@ -304,13 +299,14 @@ mod tests {
         {
             let s = SledStore::open(&dir).unwrap();
             s.save_checkpoint(&Checkpoint {
-                run_id: "r1".into(),
                 iteration: 7,
                 completed_nodes: vec!["a".into(), "b".into()],
                 tokens_used: 1234,
                 cost_usd: 0.5,
-                started_ms: now_ms(),
-                updated_ms: now_ms(),
+                revisions: [("a".to_string(), 2u32)].into_iter().collect(),
+                stale_iterations: 3,
+                last_signature: "g1=false".into(),
+                ..Checkpoint::new("r1")
             })
             .unwrap();
             s.append_ledger(&LedgerEntry {
@@ -331,6 +327,11 @@ mod tests {
         let cp = s2.checkpoint("r1").unwrap().expect("checkpoint survives");
         assert_eq!(cp.iteration, 7);
         assert_eq!(cp.completed_nodes, vec!["a", "b"]);
+        // The stop gates' own accounting has to survive too, or a loop that
+        // resumes often gets its revision budget back every time.
+        assert_eq!(cp.revisions.get("a"), Some(&2));
+        assert_eq!(cp.stale_iterations, 3);
+        assert_eq!(cp.last_signature, "g1=false");
         assert_eq!(s2.ledger("r1").unwrap().len(), 1);
         drop(s2);
         let _ = std::fs::remove_dir_all(dir);

@@ -166,11 +166,24 @@ pub fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
+/// Directories a `file_change` trigger must never see, at any depth.
+///
+/// Every one of these is written *by* a run. A watcher that noticed them would
+/// fire a run, which would write them, which would fire a run: the loop would
+/// never be idle again and nothing in the output would say why. `logs/` belongs
+/// here for exactly the same reason `state/` does — the run log is written on
+/// every single iteration.
+const NEVER_WATCHED: [&str; 3] = ["state", ".git", "logs"];
+
 /// Newest mtime anywhere under a path, as seconds. Directories are walked; a
 /// missing path reports 0 rather than erroring, because a watched path that
 /// does not exist yet is a normal state.
-pub fn newest_mtime(path: &Path) -> u64 {
-    fn walk(p: &Path, best: &mut u64, depth: u32) {
+///
+/// `extra` names directories to skip beyond [`NEVER_WATCHED`] — the ones only
+/// the caller knows, chiefly the success export, whose directory is named after
+/// the loop and is written whenever a run meets its bar.
+pub fn newest_mtime_ignoring(path: &Path, extra: &[String]) -> u64 {
+    fn walk(p: &Path, best: &mut u64, depth: u32, extra: &[String]) {
         if depth > 24 {
             return;
         }
@@ -186,18 +199,19 @@ pub fn newest_mtime(path: &Path) -> u64 {
             if let Ok(entries) = std::fs::read_dir(p) {
                 for e in entries.flatten() {
                     let child = e.path();
-                    // Never descend into the loop's own state; it changes on
-                    // every run and would retrigger the watcher forever.
-                    if child.file_name().is_some_and(|n| n == "state" || n == ".git") {
+                    let skip = child.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                        NEVER_WATCHED.contains(&n) || extra.iter().any(|x| x == n)
+                    });
+                    if skip {
                         continue;
                     }
-                    walk(&child, best, depth + 1);
+                    walk(&child, best, depth + 1, extra);
                 }
             }
         }
     }
     let mut best = 0;
-    walk(path, &mut best, 0);
+    walk(path, &mut best, 0, extra);
     best
 }
 
@@ -230,11 +244,18 @@ pub struct Watcher {
     last_interval_run: BTreeMap<u64, i64>,
     last_mtime: BTreeMap<String, u64>,
     satisfied_seen: BTreeMap<String, bool>,
+    /// Directory names this watcher must not treat as a change, beyond the
+    /// ones every loop writes. In practice: the success export.
+    ignore: Vec<String>,
 }
 
 impl Watcher {
-    pub fn new() -> Self {
-        Self::default()
+    /// A watcher that also ignores these directory names.
+    pub fn ignoring(ignore: Vec<String>) -> Self {
+        Self {
+            ignore,
+            ..Self::default()
+        }
     }
 
     /// Prime file and goal state without firing, so starting the watcher does
@@ -242,8 +263,10 @@ impl Watcher {
     pub fn prime(&mut self, triggers: &[Trigger], root: &Path) {
         for t in triggers {
             if let Trigger::FileChange { path } = t {
-                self.last_mtime
-                    .insert(path.clone(), newest_mtime(&root.join(path)));
+                self.last_mtime.insert(
+                    path.clone(),
+                    newest_mtime_ignoring(&root.join(path), &self.ignore),
+                );
             }
         }
     }
@@ -284,7 +307,7 @@ impl Watcher {
                     }
                 }
                 Trigger::FileChange { path } => {
-                    let current = newest_mtime(&root.join(path));
+                    let current = newest_mtime_ignoring(&root.join(path), &self.ignore);
                     let prev = self.last_mtime.get(path).copied();
                     self.last_mtime.insert(path.clone(), current);
                     if let Some(p) = prev {
@@ -445,7 +468,7 @@ mod tests {
 
     #[test]
     fn a_cron_trigger_fires_once_per_minute_not_once_per_poll() {
-        let mut w = Watcher::new();
+        let mut w = Watcher::default();
         let triggers = vec![Trigger::Cron {
             expr: "* * * * *".into(),
         }];
@@ -466,7 +489,7 @@ mod tests {
 
     #[test]
     fn an_interval_waits_before_its_first_repeat() {
-        let mut w = Watcher::new();
+        let mut w = Watcher::default();
         let triggers = vec![Trigger::Interval { seconds: 100 }];
         let root = std::env::temp_dir();
         let sat = BTreeMap::new();
@@ -484,7 +507,7 @@ mod tests {
         let triggers = vec![Trigger::FileChange {
             path: "watched.txt".into(),
         }];
-        let mut w = Watcher::new();
+        let mut w = Watcher::default();
         w.prime(&triggers, &dir);
         let sat = BTreeMap::new();
 
@@ -505,7 +528,7 @@ mod tests {
 
     #[test]
     fn goal_satisfied_fires_on_the_transition_only() {
-        let mut w = Watcher::new();
+        let mut w = Watcher::default();
         let triggers = vec![Trigger::GoalSatisfied { goal: "g1".into() }];
         let root = std::env::temp_dir();
 
@@ -523,7 +546,7 @@ mod tests {
 
     #[test]
     fn manual_only_configs_never_fire() {
-        let mut w = Watcher::new();
+        let mut w = Watcher::default();
         let triggers = vec![Trigger::Manual];
         assert!(w
             .poll(&triggers, &std::env::temp_dir(), now_unix(), &BTreeMap::new())
@@ -550,12 +573,46 @@ mod tests {
         let dir = loopsmith_util::testing::temp_dir("self-state");
         std::fs::create_dir_all(dir.join("state")).unwrap();
         std::fs::write(dir.join("keep.txt"), "x").unwrap();
-        let before = newest_mtime(&dir);
+        let before = newest_mtime_ignoring(&dir, &[]);
 
         let f = std::fs::File::create(dir.join("state/db")).unwrap();
         f.set_modified(SystemTime::now() + Duration::from_secs(600)).unwrap();
 
-        assert_eq!(newest_mtime(&dir), before, "state/ must not count as a change");
+        assert_eq!(newest_mtime_ignoring(&dir, &[]), before, "state/ must not count as a change");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_watcher_ignores_the_run_log_and_the_success_export() {
+        // `logs/` was not in the skip list, and a run writes to it on every
+        // iteration. A `file_change` trigger on the loop root would therefore
+        // see the run it had just started and start another one. The success
+        // export is the same shape of mistake with a longer fuse: it is
+        // written only when a run meets its bar, so the loop would go into a
+        // permanent cycle exactly when it succeeded.
+        let dir = loopsmith_util::testing::temp_dir("self-output");
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        std::fs::create_dir_all(dir.join("demo-success")).unwrap();
+        std::fs::write(dir.join("keep.txt"), "x").unwrap();
+        let ignore = vec!["demo-success".to_string()];
+        let before = newest_mtime_ignoring(&dir, &ignore);
+
+        for rel in ["logs/run-1.log", "demo-success/SKILL.md"] {
+            let f = std::fs::File::create(dir.join(rel)).unwrap();
+            f.set_modified(SystemTime::now() + Duration::from_secs(600))
+                .unwrap();
+        }
+
+        assert_eq!(
+            newest_mtime_ignoring(&dir, &ignore),
+            before,
+            "a run's own output must not look like a change to the watcher"
+        );
+        // And a real edit still does, or the trigger would be inert.
+        let f = std::fs::File::create(dir.join("keep.txt")).unwrap();
+        f.set_modified(SystemTime::now() + Duration::from_secs(600))
+            .unwrap();
+        assert!(newest_mtime_ignoring(&dir, &ignore) > before);
         let _ = std::fs::remove_dir_all(dir);
     }
 

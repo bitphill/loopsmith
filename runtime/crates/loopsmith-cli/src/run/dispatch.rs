@@ -28,7 +28,10 @@ pub struct NodeOutcome {
     pub duration_ms: u64,
     pub skipped: Vec<String>,
     pub error: Option<String>,
-    pub isolation: String,
+    /// Where the node actually ran. Carried out structurally rather than as
+    /// prose because the caller has to publish an isolated node's work back
+    /// into the loop root, and cannot do that from a description of it.
+    pub isolation: Isolation,
 }
 
 /// Resolve the sub-agents a node declares, acquiring what is missing.
@@ -151,7 +154,7 @@ pub fn run_node(
             duration_ms: resp.duration_ms,
             skipped,
             error: None,
-            isolation: iso.describe(),
+            isolation: iso,
         },
         Err(e) => NodeOutcome {
             node_id: node.id.clone(),
@@ -165,7 +168,7 @@ pub fn run_node(
             duration_ms: 0,
             skipped: vec![],
             error: Some(e.to_string()),
-            isolation: iso.describe(),
+            isolation: iso,
         },
     }
 }

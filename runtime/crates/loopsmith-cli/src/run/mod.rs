@@ -30,6 +30,7 @@ pub mod export;
 pub mod perturb;
 pub mod phases;
 pub mod prompts;
+pub mod publish;
 pub mod stop;
 pub mod summary;
 
@@ -142,16 +143,15 @@ pub fn install_default_skills<S: Store>(cfg: &LoopConfig, root: &Path, rec: &Rec
     }
 }
 
-fn fresh_checkpoint(run_id: &str) -> Checkpoint {
-    Checkpoint {
-        run_id: run_id.to_string(),
-        iteration: 0,
-        completed_nodes: vec![],
-        tokens_used: 0,
-        cost_usd: 0.0,
-        started_ms: now_ms(),
-        updated_ms: now_ms(),
-    }
+/// Last iteration's rulings, as the checkpoint carries them.
+///
+/// The checkpoint holds them as text because the gate crate depends on the
+/// memory crate and not the other way round. Unreadable stored verdicts are
+/// dropped rather than guessed at: a resumed run that reports no deltas on its
+/// first iteration is a small loss, and one that reports invented deltas is
+/// not.
+fn restore_verdicts(cp: &Checkpoint) -> Option<BTreeMap<String, TargetVerdict>> {
+    serde_json::from_str(cp.verdicts_json.as_deref()?).ok()
 }
 
 pub fn execute<S: Store>(
@@ -180,9 +180,9 @@ pub fn execute<S: Store>(
         store
             .checkpoint(&opts.run_id)
             .map_err(|e| e.to_string())?
-            .unwrap_or_else(|| fresh_checkpoint(&opts.run_id))
+            .unwrap_or_else(|| Checkpoint::new(&opts.run_id))
     } else {
-        fresh_checkpoint(&opts.run_id)
+        Checkpoint::new(&opts.run_id)
     };
 
     rec.entry(
@@ -207,17 +207,23 @@ pub fn execute<S: Store>(
         install_default_skills(cfg, root, &rec);
     }
 
-    let mut last_signature = String::new();
-    let mut stale_iterations = 0u32;
+    // The stop gates' accounting is restored from the checkpoint rather than
+    // started from nothing, so a resumed run cannot be handed a fresh revision
+    // budget and a no-progress counter of zero every time it pauses. On a
+    // first run these are the fresh checkpoint's defaults, which is what they
+    // were before.
+    let mut last_signature = checkpoint.last_signature.clone();
+    let mut stale_iterations = checkpoint.stale_iterations;
     let mut any_estimated = false;
     let mut proposals_written = 0usize;
     // How many times each node has been re-run with its goals still
     // unsatisfied. This is what `max_revisions_per_node` bounds: one stuck
     // node must not be allowed to spend the whole iteration budget.
-    let mut revisions: BTreeMap<String, u32> = BTreeMap::new();
+    let mut revisions: BTreeMap<String, u32> = checkpoint.revisions.clone();
     // Last iteration's rulings, so the summary can report what *changed*
     // rather than only what is currently true.
-    let mut previous_verdicts: Option<BTreeMap<String, TargetVerdict>> = None;
+    let mut previous_verdicts: Option<BTreeMap<String, TargetVerdict>> =
+        restore_verdicts(&checkpoint);
     let gates = &cfg.stop_gates;
     let width = plan.concurrency.max(1);
 
@@ -253,11 +259,18 @@ pub fn execute<S: Store>(
             &store.summaries(&opts.run_id).unwrap_or_default(),
         );
 
-        let mut episodes_this_iteration: Vec<(String, String, Role, Vec<String>)> = Vec::new();
+        let mut episodes_this_iteration: Vec<evolve::RanNode> = Vec::new();
+        // Nodes that spent their last revision this iteration, so the graph
+        // can be questioned rather than the node re-run forever.
+        let mut exhausted_nodes: Vec<String> = Vec::new();
         // Every dispatch including failures, for the summary.
         let mut dispatch_log: Vec<(String, String, Role, bool)> = Vec::new();
         let mut outputs_this_iteration: Vec<(String, String)> = Vec::new();
         let mut node_skills: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+        // Which node published each path this iteration, so two isolated
+        // builders writing the same file is reported rather than resolved by
+        // whichever thread happened to finish last.
+        let mut claimed_paths: BTreeMap<String, String> = BTreeMap::new();
         let mut explore_now =
             evolve::next_candidate(cfg, &store.skill_trials().unwrap_or_default());
 
@@ -496,17 +509,36 @@ pub fn execute<S: Store>(
                             o.duration_ms,
                             o.tokens.unwrap_or(0),
                             if o.tokens_estimated { " (est)" } else { "" },
-                            o.isolation
+                            o.isolation.describe()
                         ),
                         Some(o.node_id.clone()),
                     );
+
+                    // Isolation is a property of the wave, not of the run. The
+                    // node wrote in its own worktree so its neighbours could
+                    // not tread on it; now the wave has joined, what it
+                    // produced is published into the loop root, because the
+                    // gate collects evidence there and nowhere else.
+                    let published =
+                        publish::publish(root, &o.node_id, &o.isolation, &mut claimed_paths);
+                    if let Some(line) = published.describe(&o.node_id) {
+                        rec.entry(
+                            it,
+                            if published.conflicts.is_empty() {
+                                LedgerKind::NodeSucceeded
+                            } else {
+                                LedgerKind::NodeFailed
+                            },
+                            line,
+                            Some(o.node_id.clone()),
+                        );
+                    }
                     outputs_this_iteration.push((o.node_id.clone(), o.output.clone()));
-                    episodes_this_iteration.push((
-                        o.node_id.clone(),
-                        o.provider_id.clone(),
-                        o.role,
-                        node_goals,
-                    ));
+                    episodes_this_iteration.push(evolve::RanNode {
+                        node_id: o.node_id.clone(),
+                        goals: node_goals,
+                        tokens: o.tokens,
+                    });
                 }
             }
         }
@@ -577,15 +609,20 @@ pub fn execute<S: Store>(
         // A node that ran and left its goals unsatisfied has spent a revision.
         // Nodes with no declared goals are never counted: there is nothing to
         // measure them against, so capping them would be arbitrary.
-        for (node_id, _provider, _role, goals) in &episodes_this_iteration {
-            if goals.is_empty() {
+        for ep in &episodes_this_iteration {
+            if ep.goals.is_empty() {
                 continue;
             }
-            let unsatisfied = goals
+            let unsatisfied = ep
+                .goals
                 .iter()
                 .any(|g| current.get(g).map(|v| !v.satisfied).unwrap_or(true));
             if unsatisfied {
-                *revisions.entry(node_id.clone()).or_insert(0) += 1;
+                let spent = revisions.entry(ep.node_id.clone()).or_insert(0);
+                *spent += 1;
+                if *spent >= gates.max_revisions_per_node {
+                    exhausted_nodes.push(ep.node_id.clone());
+                }
             }
         }
 
@@ -597,7 +634,15 @@ pub fn execute<S: Store>(
             &node_skills,
             &current,
         );
-        proposals_written += evolve::write_proposals(cfg, &rec, it);
+        proposals_written += evolve::write_proposals(
+            cfg,
+            &rec,
+            it,
+            &evolve::Observed {
+                exhausted_nodes: &exhausted_nodes,
+                verdicts: &current,
+            },
+        );
 
         // --- stop gates ------------------------------------------------------
         let sig = progress_signature(&current);
@@ -622,10 +667,18 @@ pub fn execute<S: Store>(
             break (reason, current);
         }
 
+        checkpoint.revisions = revisions.clone();
+        checkpoint.stale_iterations = stale_iterations;
+        checkpoint.last_signature = last_signature.clone();
+        checkpoint.verdicts_json = serde_json::to_string(&current).ok();
         checkpoint.updated_ms = now_ms();
         let _ = store.save_checkpoint(&checkpoint);
     };
 
+    checkpoint.revisions = revisions;
+    checkpoint.stale_iterations = stale_iterations;
+    checkpoint.last_signature = last_signature;
+    checkpoint.verdicts_json = serde_json::to_string(&verdicts).ok();
     checkpoint.updated_ms = now_ms();
     let _ = store.save_checkpoint(&checkpoint);
 

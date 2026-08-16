@@ -196,16 +196,68 @@ pub enum ProposalKind {
 }
 
 /// Where to pick up after a crash or a scheduled pause.
+///
+/// "Where to pick up" includes the stop gates' own accounting. A loop that
+/// resumes often would otherwise be handed a fresh revision budget and a
+/// no-progress counter of zero every time, so a run that is going nowhere could
+/// never reach the halt that exists to stop it — the ceilings would apply only
+/// to runs that never paused.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Checkpoint {
     pub run_id: String,
     pub iteration: u32,
-    /// Node ids already completed in this iteration.
+    /// Node ids completed at any point in this run, not in one iteration.
+    ///
+    /// It is only ever appended to, and phase completion is computed from it,
+    /// so it has to mean "has this node ever run" rather than "did it run just
+    /// now" — otherwise a phase would reopen every iteration.
     pub completed_nodes: Vec<String>,
     pub tokens_used: u64,
     pub cost_usd: f64,
     pub started_ms: u64,
     pub updated_ms: u64,
+
+    /// How many times each node has run with its goals still unsatisfied. This
+    /// is what `max_revisions_per_node` bounds, and it survives a resume so the
+    /// ceiling cannot be refunded by pausing.
+    #[serde(default)]
+    pub revisions: BTreeMap<String, u32>,
+    /// Consecutive iterations in which no verdict moved.
+    #[serde(default)]
+    pub stale_iterations: u32,
+    /// The rulings' signature at the last iteration, so the first one after a
+    /// resume is compared against something instead of always looking like
+    /// progress.
+    #[serde(default)]
+    pub last_signature: String,
+    /// Last iteration's gate rulings, serialised.
+    ///
+    /// Held as text rather than as the verdict type because the gate crate
+    /// depends on this one, and that direction is what keeps the only
+    /// constructor of a satisfied [`GoalState`] inside the gate. A resumed run
+    /// reads this so its first summary can report deltas rather than claiming
+    /// everything is new.
+    #[serde(default)]
+    pub verdicts_json: Option<String>,
+}
+
+impl Checkpoint {
+    /// A checkpoint for a run that has not started yet.
+    pub fn new(run_id: &str) -> Self {
+        Self {
+            run_id: run_id.to_string(),
+            iteration: 0,
+            completed_nodes: vec![],
+            tokens_used: 0,
+            cost_usd: 0.0,
+            started_ms: now_ms(),
+            updated_ms: now_ms(),
+            revisions: BTreeMap::new(),
+            stale_iterations: 0,
+            last_signature: String::new(),
+            verdicts_json: None,
+        }
+    }
 }
 
 /// What one iteration amounted to, compressed.
