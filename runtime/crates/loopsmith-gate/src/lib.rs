@@ -578,8 +578,7 @@ validations:
     statement: the report exists
     detector: { type: file_exists, path: report.md, non_empty: true }"#,
         );
-        let dir = std::env::temp_dir().join(format!("loopsmith-gate-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = loopsmith_util::testing::temp_dir("gate-revoke");
         let file = dir.join("report.md");
         std::fs::write(&file, b"content").unwrap();
 

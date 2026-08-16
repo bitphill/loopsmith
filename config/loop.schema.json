@@ -231,7 +231,12 @@
           "type": "number",
           "minimum": 0
         },
-        "no_progress_iterations": {
+          "no_progress_iterations_randomness": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Perturb the run after this many stalled iterations instead of waiting to halt at no_progress_iterations. Must be strictly less than no_progress_iterations. Omit to halt without ever varying. When it fires, a cheap-tier agent is asked which of four tactics to try - reorder, escalate, explore, or reframe - and a seeded fallback picks from the same four if no agent answers. The seed is written to the ledger so the run replays."
+        },
+      "no_progress_iterations": {
           "type": "integer",
           "minimum": 0,
           "default": 3,
@@ -264,6 +269,34 @@
             "$ref": "#/$defs/constraintSet"
           }
         }
+      }
+    },
+    "execution_guidelines": {
+      "description": "I - named phases, each with a standing instruction and a place in an ordering. Nodes join a phase with `stage`. Use this for ordering that is about method rather than data; `graph.depends_on` is only for a node that genuinely reads another node's output.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/guideline"
+          }
+        },
+        "dependency": {
+          "description": "Ordering, one chain per entry: `gather -> draft`, or `gather -> draft -> review`. Guidelines with no arrow between them run in parallel. Cycles are refused.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^>]+(->[^>]+)+$"
+          }
+        }
+      }
+    },
+    "default_skills": {
+      "description": "J - sub-agents installed before the loop starts. Installation is idempotent and runs at the start of every run, so a loop directory can be recreated from its config alone.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/defaultSkill"
       }
     },
     "graph": {
@@ -367,6 +400,29 @@
         }
       },
       "description": "Sub-agent acquisition and the experiment loop. Outcomes are recorded per skill and turned into proposals; the loop never edits its own config."
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How much of the previous iterations each prompt carries. Each iteration is compressed to a summary; only the last few summaries are sent forward, so prompt size stops growing with the run.",
+      "properties": {
+        "carry_summaries": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2,
+          "description": "How many previous iteration summaries a node's prompt carries. 0 disables carry-forward."
+        },
+        "summary_provider": {
+          "type": "string",
+          "description": "Provider id used to write the optional prose half of a summary. Omit it and summaries are still written - the deterministic facts are always present. This only buys narrative, and narrative costs tokens every iteration."
+        },
+        "max_summary_chars": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1200,
+          "description": "Ceiling on the narrative. A summary that grows without limit defeats the purpose of having one."
+        }
+      }
     }
   },
   "$defs": {
@@ -684,6 +740,10 @@
             "type": "string"
           }
         },
+        "stage": {
+          "type": "string",
+          "description": "Execution guideline (section I) this node belongs to. The node is not dispatched until that phase is active. A node with no stage is always eligible."
+        },
         "weight": {
           "type": "number",
           "exclusiveMinimum": 0,
@@ -693,6 +753,65 @@
           "type": "boolean",
           "default": false,
           "description": "Run in its own git worktree. Required for builders that may run in parallel."
+        }
+      }
+    },
+    "defaultSkill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Directory name the skill installs under, and the name nodes use in their `skills` list."
+        },
+        "source": {
+          "enum": [
+            "marketplace",
+            "github",
+            "local"
+          ],
+          "default": "marketplace",
+          "description": "`github` clones an https repo into the quarantine directory; `marketplace` uses the skills CLI; `local` is only checked for, never fetched."
+        },
+        "url": {
+          "type": "string",
+          "description": "Required for `github`, and it must be https - git://, ssh:// and file:// are refused. For `marketplace` it may be an owner/repo@skill spec. Ignored for `local`."
+        },
+        "init_command": {
+          "type": "string",
+          "description": "Setup step run inside the installed directory. This is an ARGV LINE, NOT A SHELL LINE: it is split on whitespace and executed directly, so &&, | and $(...) are literal arguments."
+        },
+        "note": {
+          "type": "string",
+          "description": "Why this loop needs it. For the human; never sent to a node."
+        }
+      }
+    },
+    "guideline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "guideline"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Referenced by `graph.nodes[].stage` and by the `dependency` arrows."
+        },
+        "guideline": {
+          "type": "string",
+          "minLength": 12,
+          "description": "The standing instruction for this phase, injected into the prompt of every node that joins it. Say what the phase is for and what it must not do yet."
+        },
+        "note": {
+          "type": "string",
+          "description": "For the human reading the config. Not sent to any node."
         }
       }
     },

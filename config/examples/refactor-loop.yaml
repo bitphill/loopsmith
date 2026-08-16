@@ -44,7 +44,7 @@ validations:
   - target: no-test-edits
     name: tests-unchanged
     mode: objective
-    statement: No file under tests/ or any #[cfg(test)] block was modified.
+    statement: "No file under tests/ or any #[cfg(test)] block was modified."
     # The failure this exists to catch: a loop "fixing" a red test by
     # weakening the test rather than the code. Watching one run is how you
     # learn to add this; it is cheaper to start with it.

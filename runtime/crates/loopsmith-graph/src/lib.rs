@@ -10,7 +10,7 @@
 //!    single node is dispatched, which is the point: you can decide the fleet
 //!    size from arithmetic instead of from optimism.
 
-use loopsmith_core::{Concurrency, GraphSpec, NodeSpec, Role};
+use loopsmith_core::{Concurrency, GraphSpec, NodeSpec, Phase, Role};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Debug, thiserror::Error)]
@@ -69,23 +69,67 @@ pub fn speedup_ceiling(p: f64) -> f64 {
     }
 }
 
-fn index_nodes(nodes: &[NodeSpec]) -> BTreeMap<&str, &NodeSpec> {
-    nodes.iter().map(|n| (n.id.as_str(), n)).collect()
+/// The three things scheduling actually needs from a node: what it is called,
+/// what it waits for, and what it costs.
+///
+/// This exists so the scheduler is not welded to `NodeSpec`. The execution
+/// graph (section G) and the execution-guideline phase graph (section I) are
+/// different types with different fields, but they are the same DAG problem,
+/// and a second copy of Kahn's algorithm is a second place for a cycle bug to
+/// hide.
+pub trait DagNode {
+    fn id(&self) -> &str;
+    fn deps(&self) -> &[String];
+    /// Relative cost, used only for critical-path weighting. Nodes that have
+    /// no meaningful cost should return `1.0`.
+    fn weight(&self) -> f64;
+}
+
+impl DagNode for NodeSpec {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn deps(&self) -> &[String] {
+        &self.depends_on
+    }
+    fn weight(&self) -> f64 {
+        self.weight
+    }
+}
+
+/// Execution guidelines (section I) are a second DAG over the same scheduler.
+/// Phases carry no cost of their own — the work is in the nodes assigned to
+/// them — so every phase weighs the same and the critical path through the
+/// phase graph is simply its longest chain.
+impl DagNode for Phase {
+    fn id(&self) -> &str {
+        &self.name
+    }
+    fn deps(&self) -> &[String] {
+        &self.depends_on
+    }
+    fn weight(&self) -> f64 {
+        1.0
+    }
+}
+
+fn index_nodes<N: DagNode>(nodes: &[N]) -> BTreeMap<&str, &N> {
+    nodes.iter().map(|n| (n.id(), n)).collect()
 }
 
 /// Kahn's algorithm, grouped by level so each level is a wave.
-pub fn waves(nodes: &[NodeSpec]) -> Result<Vec<Wave>, GraphError> {
+pub fn waves<N: DagNode>(nodes: &[N]) -> Result<Vec<Wave>, GraphError> {
     let by_id = index_nodes(nodes);
-    let mut indegree: BTreeMap<&str, usize> = nodes.iter().map(|n| (n.id.as_str(), 0)).collect();
+    let mut indegree: BTreeMap<&str, usize> = nodes.iter().map(|n| (n.id(), 0)).collect();
     let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
 
     for n in nodes {
-        for d in &n.depends_on {
+        for d in n.deps() {
             if !by_id.contains_key(d.as_str()) {
                 return Err(GraphError::UnknownNode(d.clone()));
             }
-            *indegree.get_mut(n.id.as_str()).unwrap() += 1;
-            dependents.entry(d.as_str()).or_default().push(n.id.as_str());
+            *indegree.get_mut(n.id()).unwrap() += 1;
+            dependents.entry(d.as_str()).or_default().push(n.id());
         }
     }
 
@@ -132,7 +176,7 @@ pub fn waves(nodes: &[NodeSpec]) -> Result<Vec<Wave>, GraphError> {
 
 /// Longest weighted path through the DAG — the floor on wall-clock time no
 /// amount of parallelism can lower.
-pub fn critical_path(nodes: &[NodeSpec]) -> Result<(Vec<String>, f64), GraphError> {
+pub fn critical_path<N: DagNode>(nodes: &[N]) -> Result<(Vec<String>, f64), GraphError> {
     let by_id = index_nodes(nodes);
     let order = waves(nodes)?;
     let flat: Vec<&str> = order
@@ -147,14 +191,14 @@ pub fn critical_path(nodes: &[NodeSpec]) -> Result<(Vec<String>, f64), GraphErro
         let node = by_id[id];
         let mut chosen: Option<&str> = None;
         let mut base = 0.0f64;
-        for d in &node.depends_on {
+        for d in node.deps() {
             let c = best[d.as_str()];
             if c > base {
                 base = c;
                 chosen = Some(d.as_str());
             }
         }
-        best.insert(id, base + node.weight);
+        best.insert(id, base + node.weight());
         prev.insert(id, chosen);
     }
 
@@ -275,6 +319,7 @@ mod tests {
             goals: vec![],
             tier: Tier::Standard,
             provider: None,
+            stage: None,
             skills: vec![],
             weight,
             isolated: false,
@@ -397,5 +442,64 @@ mod tests {
         let w = waves(&spec.nodes).unwrap();
         let flagged = unisolated_parallel_writers(&spec, &w);
         assert_eq!(flagged.len(), 2);
+    }
+
+    /// A node type with nothing in common with `NodeSpec` — no role, no
+    /// provider, no instruction. If the scheduler still handles it, the
+    /// topology layer is genuinely decoupled and the execution-guideline phase
+    /// graph does not need its own copy of Kahn's algorithm.
+    struct Step {
+        id: String,
+        deps: Vec<String>,
+    }
+
+    impl DagNode for Step {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn deps(&self) -> &[String] {
+            &self.deps
+        }
+        fn weight(&self) -> f64 {
+            1.0
+        }
+    }
+
+    fn step(id: &str, deps: &[&str]) -> Step {
+        Step {
+            id: id.into(),
+            deps: deps.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn any_dag_node_type_schedules_through_the_same_code() {
+        let steps = vec![
+            step("research", &[]),
+            step("outline", &["research"]),
+            step("draft", &["research"]),
+            step("publish", &["outline", "draft"]),
+        ];
+        let w = waves(&steps).unwrap();
+        assert_eq!(w.len(), 3);
+        assert_eq!(w[0].nodes, vec!["research"]);
+        assert_eq!(w[1].nodes, vec!["draft", "outline"]);
+        assert_eq!(w[2].nodes, vec!["publish"]);
+
+        let (path, cost) = critical_path(&steps).unwrap();
+        assert_eq!(cost, 3.0);
+        assert_eq!(path.last().unwrap(), "publish");
+    }
+
+    #[test]
+    fn a_cycle_in_a_foreign_node_type_is_still_caught() {
+        let steps = vec![step("a", &["b"]), step("b", &["a"])];
+        assert!(matches!(waves(&steps), Err(GraphError::Cycle(_))));
+    }
+
+    #[test]
+    fn an_unknown_dependency_in_a_foreign_node_type_is_still_caught() {
+        let steps = vec![step("a", &["nope"])];
+        assert!(matches!(waves(&steps), Err(GraphError::UnknownNode(_))));
     }
 }

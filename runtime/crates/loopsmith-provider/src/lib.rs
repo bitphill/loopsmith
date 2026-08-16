@@ -20,7 +20,7 @@ use loopsmith_core::{LoopConfig, ProviderKind, ProviderSpec, Tier};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -145,33 +145,10 @@ impl Availability {
     }
 }
 
-/// Minimal `which`: absolute paths are checked directly, bare names are
-/// resolved against PATH.
-pub fn which(cmd: &str) -> Option<PathBuf> {
-    let p = Path::new(cmd);
-    if p.is_absolute() || cmd.contains('/') {
-        return is_executable(p).then(|| p.to_path_buf());
-    }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).find_map(|dir| {
-        let candidate = dir.join(cmd);
-        is_executable(&candidate).then_some(candidate)
-    })
-}
-
-fn is_executable(p: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(p)
-            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            .unwrap_or(false)
-    }
-    #[cfg(not(unix))]
-    {
-        p.is_file()
-    }
-}
+/// Command lookup. Re-exported so existing callers keep this path; the
+/// implementation moved to `loopsmith-util` once it turned out to have been
+/// written three times across the workspace, in three states of correctness.
+pub use loopsmith_util::which;
 
 /// Substitute the supported placeholders into a template.
 pub fn render(template: &str, vars: &BTreeMap<&str, &str>) -> String {

@@ -194,10 +194,76 @@ override**. Fields: `rules`, `forbidden_paths`, `forbidden_commands`,
 
 `human_checkpoint` stops and waits regardless of any permission grant.
 
+### F, continued · `no_progress_iterations_randomness`
+Fires *before* `no_progress_iterations` and must be strictly less than it —
+otherwise the loop halts before it ever tries something different, and validation
+refuses the config.
+
+When it fires, a cheap-tier agent is shown the failing checks and the recent
+iteration summaries, and picks one of exactly four tactics: `reorder`,
+`escalate`, `explore`, or `reframe`. The menu is fixed, so the agent can change
+how the loop works and cannot change what counts as done. If no cheap provider is
+reachable, or the answer is not on the menu, a seeded fallback picks instead. The
+seed is derived from the run id and iteration and written to the ledger, so a run
+that took a strange turn replays exactly.
+
+### I · `execution_guidelines`
+Named **phases**, each with a standing instruction and a place in an ordering.
+Nodes join a phase with `stage:`, and a node is not dispatched until its phase
+is active.
+
+```yaml
+execution_guidelines:
+  items:
+    - name: gather
+      guideline: Collect sources. Write nothing yet.
+    - name: draft
+      guideline: Write only from what gather collected.
+  dependency:
+    - gather -> draft -> review     # chains are allowed
+```
+
+Use this for ordering that is about **method**; `graph.depends_on` is only for a
+node that genuinely reads another node's output. Overloading `depends_on` with
+both makes the critical path meaningless.
+
+A phase opens when everything before it is complete, and completes when its own
+nodes have run and the gate has satisfied the goals they advance. A phase with no
+nodes gates nothing and completes on sight. Guidelines with no arrow between them
+run in parallel. Cycles and unknown names are validation errors, caught before
+anything is dispatched.
+
+### J · `default_skills`
+Sub-agents installed before the loop starts. Idempotent, so it runs at the start
+of every run and a loop directory can be rebuilt from its config alone.
+
+```yaml
+default_skills:
+  - name: agent-reach
+    source: github                  # marketplace | github | local
+    url: https://github.com/Panniantong/agent-reach
+    init_command: npm install       # ARGV, not a shell line
+```
+
+`github` clones an **https** repo into the quarantine directory — `git://`,
+`ssh://` and `file://` are refused. `init_command` is split on whitespace and
+executed directly, so `&&`, `|` and `$(…)` are literal arguments rather than
+shell syntax. `loopsmith skills install <config>` runs this without starting a
+run.
+
+### `context`
+How much of the previous iterations each prompt carries. Each iteration is
+compressed to a summary; only the last few are sent forward, so prompt size stops
+growing with the run.
+
+`carry_summaries` (default 2, `0` disables), `summary_provider` (optional — the
+deterministic facts are always written, this only buys prose), `max_summary_chars`
+(default 1200).
+
 ### `graph`
 Nodes: `id`, `role` (`builder|judge|manager|adversary|researcher`),
 `instruction` (min 16 chars), `depends_on`, `goals`, `tier`, `provider`,
-`skills`, `weight`, `isolated`.
+`stage`, `skills`, `weight`, `isolated`.
 
 Only list a dependency whose output the node actually reads.
 

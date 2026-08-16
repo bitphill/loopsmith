@@ -340,15 +340,8 @@ mod tests {
     use super::*;
     use loopsmith_memory::SledStore;
 
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
     fn server() -> (Server<SledStore>, PathBuf) {
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!(
-            "loopsmith-mcp-{}-{}-{n}",
-            std::process::id(),
-            loopsmith_memory::now_ms()
-        ));
+        let dir = loopsmith_util::testing::temp_path("mcp");
         (Server::new(SledStore::open(&dir).unwrap()), dir)
     }
 

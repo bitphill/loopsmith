@@ -14,3 +14,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
+
+[dev-dependencies]
+loopsmith-util = { workspace = true, features = ["testing"] }

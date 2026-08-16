@@ -168,8 +168,7 @@ providers:
 
     #[test]
     fn merging_preserves_existing_rules_and_adds_new_ones() {
-        let dir = std::env::temp_dir().join(format!("loopsmith-perm-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = loopsmith_util::testing::temp_dir("perm-merge");
         let file = dir.join("settings.local.json");
         std::fs::write(
             &file,
@@ -191,8 +190,7 @@ providers:
 
     #[test]
     fn merging_is_idempotent() {
-        let dir = std::env::temp_dir().join(format!("loopsmith-perm2-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = loopsmith_util::testing::temp_dir("perm-idempotent");
         let file = dir.join("s.json");
         let grant = vec!["Bash(ollama:*)".to_string()];
         merge_into(&file, &grant).unwrap();

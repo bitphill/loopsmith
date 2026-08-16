@@ -8,8 +8,12 @@ repository.workspace = true
 description = "Sub-agent acquisition for loopsmith: installed skills, claudemarketplaces.com, the skills CLI, quarantine, and outcome-ranked selection"
 
 [dependencies]
+loopsmith-util = { workspace = true }
 loopsmith-core = { workspace = true }
 loopsmith-memory = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+loopsmith-util = { workspace = true, features = ["testing"] }

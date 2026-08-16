@@ -37,13 +37,9 @@ pub enum MemError {
 pub type Result<T> = std::result::Result<T, MemError>;
 
 /// Milliseconds since the Unix epoch. Stored as a number so the ledger stays
-/// sortable without a date parser.
-pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
+/// sortable without a date parser. Re-exported from `loopsmith-util` so the
+/// whole workspace reads one clock.
+pub use loopsmith_util::now_ms;
 
 /// What one node did on one iteration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +208,46 @@ pub struct Checkpoint {
     pub updated_ms: u64,
 }
 
+/// What one iteration amounted to, compressed.
+///
+/// This is the record that makes a long run affordable. Without it, iteration
+/// N+1 either re-sends every prior episode (which grows without bound) or sends
+/// nothing at all (which is what the runtime did before, and is why a stalled
+/// loop kept producing the byte-identical prompt it had already failed with).
+///
+/// `facts` is written by Rust from the gate's own verdicts and is always
+/// present. `narrative` is optional prose from a model. The split matters: a
+/// model may describe what happened, but the record of *what was satisfied* is
+/// never something a model wrote.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IterationSummary {
+    pub run_id: String,
+    pub iteration: u32,
+    /// One line: the shape of the iteration.
+    pub headline: String,
+    /// Deterministic bullet facts, derived from verdicts and episodes.
+    pub facts: Vec<String>,
+    /// Optional model-written prose. Never load-bearing.
+    pub narrative: Option<String>,
+    pub created_ms: u64,
+}
+
+impl IterationSummary {
+    /// Render for injection into a later prompt.
+    pub fn render(&self) -> String {
+        let mut s = format!("### Iteration {}\n{}\n", self.iteration, self.headline);
+        for f in &self.facts {
+            s.push_str(&format!("- {f}\n"));
+        }
+        if let Some(n) = &self.narrative {
+            if !n.trim().is_empty() {
+                s.push_str(&format!("\n{}\n", n.trim()));
+            }
+        }
+        s
+    }
+}
+
 /// Backend-agnostic persistence contract.
 pub trait Store: Send + Sync {
     fn put_episode(&self, ep: &Episode) -> Result<u64>;
@@ -229,6 +265,10 @@ pub trait Store: Send + Sync {
 
     fn set_scratchpad(&self, run_id: &str, key: &str, value: &str) -> Result<()>;
     fn scratchpad(&self, run_id: &str, key: &str) -> Result<Option<String>>;
+
+    fn put_summary(&self, s: &IterationSummary) -> Result<()>;
+    /// Every iteration summary for a run, oldest first.
+    fn summaries(&self, run_id: &str) -> Result<Vec<IterationSummary>>;
 
     fn put_skill_trial(&self, t: &SkillTrial) -> Result<u64>;
     /// Trials across every run, so a skill's record survives one bad loop.

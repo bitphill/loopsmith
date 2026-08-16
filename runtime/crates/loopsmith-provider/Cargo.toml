@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Provider routing for loopsmith: Claude Code, Ollama, Grok, OpenAI, Gemini, Hermes, MCP, and any BYOK command"
 
 [dependencies]
+loopsmith-util = { workspace = true }
 loopsmith-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

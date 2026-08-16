@@ -1,0 +1,15 @@
+[package]
+name = "loopsmith-util"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Dependency-free primitives shared across loopsmith crates: PATH lookup, wall-clock, and test scaffolding"
+
+[features]
+# Test scaffolding is opt-in so it never ships in a release build. Crates enable
+# it from `[dev-dependencies]`; resolver 2 keeps that out of the normal build.
+testing = []
+
+[dependencies]

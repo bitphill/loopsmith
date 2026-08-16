@@ -19,12 +19,23 @@ pub struct NewLoopArgs {
     pub name: String,
     pub purpose: String,
     pub force: bool,
+    /// A complete config supplied by the caller, instead of the starter.
+    pub config: Option<ProvidedConfig>,
+}
+
+/// Config text handed in whole, from a file or from stdin.
+#[derive(Debug, Clone)]
+pub struct ProvidedConfig {
+    pub text: String,
+    pub markdown: bool,
 }
 
 /// Files written into the new loop directory.
 #[derive(Debug)]
 pub struct Scaffold {
     pub written: Vec<PathBuf>,
+    /// `loop.yaml` or `loop.md`, whichever was written.
+    pub config_file: String,
 }
 
 pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
@@ -108,10 +119,17 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             max_tokens: Some(2_000_000),
             max_cost_usd: Some(5.0),
             no_progress_iterations: 3,
+            no_progress_iterations_randomness: Some(2),
             stop_on_overall_success: true,
         },
 
         schedules: vec![Trigger::Manual],
+
+        execution_guidelines: Default::default(),
+
+        // Section J is empty in the starter: a fresh loop should not reach the
+        // network on its first run to fetch something nobody asked for.
+        default_skills: vec![],
 
         constraints: Constraints {
             global: ConstraintSet {
@@ -139,6 +157,7 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
                     goals: vec!["primary".into()],
                     tier: Tier::Standard,
                     provider: None,
+                    stage: None,
                     skills: vec![],
                     weight: 3.0,
                     isolated: true,
@@ -151,6 +170,7 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
                     goals: vec!["primary".into()],
                     tier: Tier::Strong,
                     provider: None,
+                    stage: None,
                     skills: vec![],
                     weight: 1.0,
                     isolated: false,
@@ -181,12 +201,15 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             explore_candidates: vec![],
             min_trials: 3,
         },
+
+        context: Default::default(),
     }
 }
 
 const GITIGNORE: &str = "\
 # loopsmith run state — regenerable, machine-local, and often large
 state/
+logs/
 out/
 *.log
 
@@ -194,34 +217,178 @@ out/
 generated-skills/
 ";
 
-fn readme(name: &str, purpose: &str) -> String {
+// The harness templates are compiled in rather than read from the install
+// directory. That is what makes a new loop self-contained and makes it
+// impossible for `loopsmith new` to depend on — or touch — the loopsmith
+// checkout it was launched from.
+const MCP_TEMPLATE: &str = include_str!("../../../../config/mcp.template.json");
+const PERMISSIONS_TEMPLATE: &str = include_str!("../../../../config/permissions.template.json");
+const MARKETPLACES: &str = include_str!("../../../../config/marketplaces.json");
+
+fn readme(name: &str, purpose: &str, config_file: &str) -> String {
     format!(
         "# {name}\n\n\
 A loopsmith loop.\n\n\
 **Purpose:** {purpose}\n\n\
 ## Run it\n\n\
 ```bash\n\
-loopsmith validate loop.yaml     # A-H model must be complete\n\
-loopsmith plan     loop.yaml     # waves, critical path, predicted speedup\n\
-loopsmith run      loop.yaml     # hands-off after the permission grant\n\
+./run.sh\n\
+```\n\n\
+That is `loopsmith run {config_file}` with this directory's absolute paths \
+already filled in. If the loop stops before it is done, `./resume.sh <run-id>` \
+picks up from the last checkpoint — the run id is printed at the end of every \
+run and appears in `logs/`.\n\n\
+The long way, when you want to see each step:\n\n\
+```bash\n\
+loopsmith validate {config_file}   # the A-J model must be complete\n\
+loopsmith plan     {config_file}   # waves, critical path, predicted speedup\n\
+loopsmith run      {config_file}\n\
 ```\n\n\
 ## Before the first run\n\n\
-`pre_execution` in `loop.yaml` is deliberately unfinished. Run the task by \
+`pre_execution` in `{config_file}` is deliberately unfinished. Run the task by \
 hand once, record what you learned, and set each step to `done: true`. \
 Validation fails until you do, because automating a process you cannot \
 describe produces fast, confident garbage.\n\n\
+## Secrets\n\n\
+Providers name the environment variables they need under `requires_env`. \
+loopsmith checks that those variables **exist** and never reads their values, \
+so a key never reaches a prompt, a log, or the ledger. Export them in your \
+shell:\n\n\
+```bash\n\
+export OPENAI_API_KEY=...   # in your shell, not in this repo\n\
+```\n\n\
+Never paste a key into a chat window, a config file, or an issue. If one is \
+ever pasted somewhere it should not be, rotate it rather than deleting the \
+message.\n\n\
 ## Layout\n\n\
 | Path | What it is |\n\
 |---|---|\n\
-| `loop.yaml` | The A-H config: goals, validations, success, stop gates, schedules, constraints |\n\
-| `state/` | sled memory: episodes, goal state, ledger, checkpoints |\n\
+| `{config_file}` | The A-J config: goals, validations, success, stop gates, schedules, constraints, phases, default skills |\n\
+| `run.sh` / `resume.sh` | This loop's exact commands, with absolute paths |\n\
+| `.mcp.json` | MCP server definition, so an agent can read this loop's memory |\n\
+| `.claude/settings.local.json` | Permission grant this config needs |\n\
+| `marketplaces.json` | Sub-agent index sources |\n\
+| `state/` | sled memory: episodes, goal state, ledger, checkpoints, summaries |\n\
+| `logs/` | Plain-text run logs, one per run |\n\
 | `out/` | Deliverables the nodes produce |\n\
-| `proposals/` | Changes the loop wants to make to its own goals — review these |\n\
+| `proposals/` | Changes the loop wants to make to itself — review these |\n\
 | `generated-skills/` | Auto-created sub-agents awaiting promotion |\n"
     )
 }
 
+/// Refuse a `--path` that would put a loop somewhere it must not go.
+///
+/// The load-bearing one is the install-directory check. A purpose-specific loop
+/// writes state, clones sub-agents, and lets nodes edit files; pointing it at
+/// the loopsmith checkout would let a loop modify the thing that runs it.
+pub fn guard_path(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("--path is empty; a loop needs a directory of its own".into());
+    }
+
+    let target = absolutize(path);
+
+    if target.parent().is_none() {
+        return Err(format!(
+            "{} is a filesystem root; give the loop a directory of its own",
+            target.display()
+        ));
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        if target == absolutize(&home) {
+            return Err("--path is your home directory; give the loop a subdirectory".into());
+        }
+    }
+    if let Some(install) = install_root() {
+        if target == install || target.starts_with(&install) {
+            return Err(format!(
+                "{} is inside the loopsmith installation at {}.\n\
+                 A loop edits files, installs sub-agents, and writes state — it must not be \
+                 pointed at the tool that runs it.\n\
+                 Pick a directory outside it, for example: --path ~/loops/{}",
+                target.display(),
+                install.display(),
+                path.file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("my-loop")
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Best-effort absolute path that does not require the path to exist.
+fn absolutize(p: &Path) -> PathBuf {
+    if let Ok(c) = p.canonicalize() {
+        return c;
+    }
+    if p.is_absolute() {
+        return p.to_path_buf();
+    }
+    std::env::current_dir()
+        .map(|cwd| cwd.join(p))
+        .unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Where loopsmith itself lives, if it can be found.
+///
+/// Identified by the two files only a loopsmith checkout has together. Walking
+/// up from the running binary covers `cargo run`, an installed `target/release`
+/// binary, and a symlink into the repo.
+pub fn install_root() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.canonicalize().unwrap_or(exe);
+    while dir.pop() {
+        if dir.join("config/loop.schema.json").is_file() && dir.join("runtime/Cargo.toml").is_file()
+        {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// The absolute path of the running binary, for the generated scripts. Falls
+/// back to the bare name so the scripts still work when it is on `PATH`.
+fn binary_path() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.canonicalize().ok())
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "loopsmith".into())
+}
+
+fn run_script(binary: &str, config_file: &str) -> String {
+    format!(
+        "#!/bin/sh\n\
+# Generated by `loopsmith new`. Paths are absolute so this works from anywhere,\n\
+# including from cron and launchd, which do not inherit your shell's PATH.\n\
+set -e\n\
+cd \"$(dirname \"$0\")\"\n\
+exec \"{binary}\" run \"{config_file}\" \"$@\"\n"
+    )
+}
+
+fn resume_script(binary: &str, config_file: &str) -> String {
+    format!(
+        "#!/bin/sh\n\
+# Generated by `loopsmith new`. Usage: ./resume.sh <run-id>\n\
+# The run id is printed at the end of every run and names the file in logs/.\n\
+set -e\n\
+cd \"$(dirname \"$0\")\"\n\
+if [ -z \"$1\" ]; then\n\
+  echo \"usage: ./resume.sh <run-id>\" >&2\n\
+  echo \"recent runs:\" >&2\n\
+  ls -1t logs/ 2>/dev/null | head -5 | sed 's/\\.log$//' | sed 's/^/  /' >&2\n\
+  exit 2\n\
+fi\n\
+exec \"{binary}\" resume \"{config_file}\" \"$1\"\n"
+    )
+}
+
 pub fn scaffold(args: &NewLoopArgs) -> std::io::Result<Scaffold> {
+    guard_path(&args.path)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+
     let root = &args.path;
     if root.exists() && !args.force {
         let non_empty = std::fs::read_dir(root)?.next().is_some();
@@ -237,28 +404,99 @@ pub fn scaffold(args: &NewLoopArgs) -> std::io::Result<Scaffold> {
     }
 
     let mut written = Vec::new();
-    for sub in ["state", "out", "proposals", "generated-skills"] {
+    for sub in [
+        "state",
+        "logs",
+        "out",
+        "proposals",
+        "generated-skills",
+        ".claude/skills",
+    ] {
         std::fs::create_dir_all(root.join(sub))?;
     }
 
-    let cfg = starter_config(&args.name, &args.purpose);
-    let yaml = serde_yaml::to_string(&cfg)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    // A config supplied by the caller is parsed before it is written: a new
+    // loop directory holding an unparseable config is worse than no directory.
+    let (config_file, config_text, cfg) = match &args.config {
+        Some(provided) => {
+            let name = if provided.markdown {
+                "loop.md"
+            } else {
+                "loop.yaml"
+            };
+            let parsed = if provided.markdown {
+                loopsmith_core::parse_md(&provided.text, name)
+            } else {
+                loopsmith_core::parse_str(&provided.text, name)
+            }
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+            (name, provided.text.clone(), parsed)
+        }
+        None => {
+            let cfg = starter_config(&args.name, &args.purpose);
+            let yaml = serde_yaml::to_string(&cfg).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+            })?;
+            ("loop.yaml", yaml, cfg)
+        }
+    };
 
-    write_file(root.join("loop.yaml"), &yaml, &mut written)?;
+    write_file(root.join(config_file), &config_text, &mut written)?;
     write_file(root.join(".gitignore"), GITIGNORE, &mut written)?;
     write_file(
         root.join("README.md"),
-        &readme(&args.name, &args.purpose),
+        &readme(&args.name, &args.purpose, config_file),
         &mut written,
     )?;
+    write_file(root.join("proposals/.gitkeep"), "", &mut written)?;
+
+    // --- the harness ------------------------------------------------------
+    // Everything the base tool can reach, the new loop can reach: its own MCP
+    // server definition, its own permission grant, its own sub-agent index, and
+    // its own skills directory.
+    write_file(root.join(".mcp.json"), MCP_TEMPLATE, &mut written)?;
+    write_file(root.join("marketplaces.json"), MARKETPLACES, &mut written)?;
     write_file(
-        root.join("proposals/.gitkeep"),
-        "",
+        root.join("permissions.template.json"),
+        PERMISSIONS_TEMPLATE,
         &mut written,
     )?;
 
-    Ok(Scaffold { written })
+    let grant = crate::permissions::required(&cfg);
+    let settings = crate::permissions::merge_into(&root.join(".claude/settings.local.json"), &grant)
+        .unwrap_or_else(|_| crate::permissions::render(&grant));
+    write_file(
+        root.join(".claude/settings.local.json"),
+        &settings,
+        &mut written,
+    )?;
+
+    let binary = binary_path();
+    write_script(
+        root.join("run.sh"),
+        &run_script(&binary, config_file),
+        &mut written,
+    )?;
+    write_script(
+        root.join("resume.sh"),
+        &resume_script(&binary, config_file),
+        &mut written,
+    )?;
+
+    Ok(Scaffold {
+        written,
+        config_file: config_file.to_string(),
+    })
+}
+
+fn write_script(path: PathBuf, contents: &str, written: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    write_file(path.clone(), contents, written)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
 }
 
 fn write_file(path: PathBuf, contents: &str, written: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -283,14 +521,220 @@ pub fn name_from_path(p: &Path) -> String {
 mod tests {
     use super::*;
 
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    use loopsmith_util::testing::temp_path as tmp;
 
-    fn tmp(tag: &str) -> PathBuf {
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        std::env::temp_dir().join(format!(
-            "loopsmith-scaffold-{tag}-{}-{n}",
-            std::process::id()
-        ))
+    fn args(path: &Path) -> NewLoopArgs {
+        NewLoopArgs {
+            path: path.to_path_buf(),
+            name: "demo".into(),
+            purpose: "a demo loop".into(),
+            force: false,
+            config: None,
+        }
+    }
+
+    /// (path, len, mtime) for everything under a directory, so a test can prove
+    /// nothing changed.
+    fn fingerprint(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&d) else {
+                continue;
+            };
+            for e in entries.flatten() {
+                let p = e.path();
+                let Ok(m) = e.metadata() else { continue };
+                if m.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push((p, m.len(), m.modified().unwrap_or(std::time::UNIX_EPOCH)));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn an_empty_path_is_refused() {
+        let err = guard_path(Path::new("")).unwrap_err();
+        assert!(err.contains("--path is empty"), "got: {err}");
+    }
+
+    #[test]
+    fn a_filesystem_root_is_refused() {
+        let err = guard_path(Path::new("/")).unwrap_err();
+        assert!(err.contains("filesystem root"), "got: {err}");
+    }
+
+    #[test]
+    fn a_loop_cannot_be_created_inside_the_loopsmith_installation() {
+        // A loop edits files, clones sub-agents, and writes state. Pointing one
+        // at the checkout that runs it would let a loop modify its own runtime.
+        let Some(install) = install_root() else {
+            // Installed outside a checkout; there is nothing to protect.
+            return;
+        };
+
+        for candidate in [
+            install.join("my-loop"),
+            install.join("config/examples/my-loop"),
+            install.clone(),
+        ] {
+            let err = match guard_path(&candidate) {
+                Err(e) => e,
+                Ok(()) => panic!("{} should have been refused", candidate.display()),
+            };
+            assert!(
+                err.contains("inside the loopsmith installation"),
+                "for {}: {err}",
+                candidate.display()
+            );
+            assert!(
+                err.contains("--path ~/loops/"),
+                "the refusal must suggest somewhere that works: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn creating_a_loop_leaves_the_loopsmith_installation_untouched() {
+        let Some(install) = install_root() else {
+            return;
+        };
+        // `config/` and `skills/` are what a misbehaving scaffold would write
+        // into; `target/` and `.git/` churn for unrelated reasons.
+        let before = (
+            fingerprint(&install.join("config")),
+            fingerprint(&install.join("skills")),
+        );
+
+        let root = tmp("isolation");
+        scaffold(&args(&root)).expect("scaffold succeeds outside the install root");
+
+        let after = (
+            fingerprint(&install.join("config")),
+            fingerprint(&install.join("skills")),
+        );
+        assert_eq!(before.0, after.0, "config/ must not change");
+        assert_eq!(before.1, after.1, "skills/ must not change");
+
+        loopsmith_util::testing::cleanup(&root);
+    }
+
+    #[test]
+    fn the_harness_travels_with_the_new_loop() {
+        // Requirement: whatever the base tool can reach, the new loop can reach.
+        let root = tmp("harness");
+        scaffold(&args(&root)).unwrap();
+
+        for expected in [
+            "loop.yaml",
+            ".mcp.json",
+            "marketplaces.json",
+            "permissions.template.json",
+            ".claude/settings.local.json",
+            "run.sh",
+            "resume.sh",
+            "README.md",
+            ".gitignore",
+        ] {
+            assert!(
+                root.join(expected).is_file(),
+                "{expected} is missing from the new loop"
+            );
+        }
+        for dir in ["state", "logs", "out", "proposals", "generated-skills", ".claude/skills"] {
+            assert!(root.join(dir).is_dir(), "{dir}/ is missing");
+        }
+
+        // The permission grant is real, not a copied placeholder.
+        let settings = std::fs::read_to_string(root.join(".claude/settings.local.json")).unwrap();
+        assert!(
+            settings.contains("permissions"),
+            "the grant should be materialised: {settings}"
+        );
+
+        loopsmith_util::testing::cleanup(&root);
+    }
+
+    #[test]
+    fn the_generated_scripts_pin_an_absolute_binary_and_are_executable() {
+        let root = tmp("scripts");
+        scaffold(&args(&root)).unwrap();
+
+        let run = std::fs::read_to_string(root.join("run.sh")).unwrap();
+        assert!(run.contains("cd \"$(dirname \"$0\")\""), "got: {run}");
+        assert!(run.contains(" run \"loop.yaml\""), "got: {run}");
+        // Absolute, because cron and launchd do not inherit a shell PATH.
+        let binary = binary_path();
+        assert!(run.contains(&binary), "run.sh should pin {binary}: {run}");
+
+        let resume = std::fs::read_to_string(root.join("resume.sh")).unwrap();
+        assert!(resume.contains("usage: ./resume.sh <run-id>"), "got: {resume}");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(root.join("run.sh")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111, "run.sh must be executable");
+        }
+
+        loopsmith_util::testing::cleanup(&root);
+    }
+
+    #[test]
+    fn a_supplied_config_is_used_instead_of_the_starter() {
+        let root = tmp("supplied");
+        let mut a = args(&root);
+        a.config = Some(ProvidedConfig {
+            markdown: false,
+            text: "name: handed-over\ngoals:\n  - name: g1\n    description: a sufficiently long goal description\nvalidations:\n  - target: g1\n    name: v\n    mode: objective\n    statement: it exists\n    detector: { type: file_exists, path: out.txt }\n".into(),
+        });
+        let s = scaffold(&a).unwrap();
+
+        assert_eq!(s.config_file, "loop.yaml");
+        let written = std::fs::read_to_string(root.join("loop.yaml")).unwrap();
+        assert!(written.contains("handed-over"), "got: {written}");
+        loopsmith_util::testing::cleanup(&root);
+    }
+
+    #[test]
+    fn a_supplied_markdown_config_is_written_as_md() {
+        let root = tmp("supplied-md");
+        let mut a = args(&root);
+        a.config = Some(ProvidedConfig {
+            markdown: true,
+            text: "# md-loop\n\n## C. Goals\n\n### g1\n- description: a sufficiently long goal description\n\n## D. Validations\n\n### v\n- target: g1\n- mode: objective\n- statement: it exists\n- detector:\n  - type: file_exists\n  - path: out.txt\n".into(),
+        });
+        let s = scaffold(&a).unwrap();
+
+        assert_eq!(s.config_file, "loop.md");
+        assert!(root.join("loop.md").is_file());
+        assert!(!root.join("loop.yaml").exists());
+        // run.sh must point at the config that actually exists.
+        let run = std::fs::read_to_string(root.join("run.sh")).unwrap();
+        assert!(run.contains(" run \"loop.md\""), "got: {run}");
+        loopsmith_util::testing::cleanup(&root);
+    }
+
+    #[test]
+    fn an_unparseable_supplied_config_writes_no_directory_contents() {
+        // A loop directory holding a config that cannot be read is worse than
+        // no directory at all.
+        let root = tmp("bad-config");
+        let mut a = args(&root);
+        a.config = Some(ProvidedConfig {
+            markdown: false,
+            text: "name: broken\ngoals: this is not a list\n".into(),
+        });
+        assert!(scaffold(&a).is_err());
+        assert!(
+            !root.join("loop.yaml").exists(),
+            "a rejected config must not be written"
+        );
+        loopsmith_util::testing::cleanup(&root);
     }
 
     #[test]
@@ -313,6 +757,7 @@ mod tests {
             name: "demo".into(),
             purpose: "a demo loop".into(),
             force: false,
+            config: None,
         })
         .unwrap();
         assert!(root.join("loop.yaml").exists());
@@ -332,6 +777,7 @@ mod tests {
             name: "demo".into(),
             purpose: "a demo loop".into(),
             force: false,
+            config: None,
         })
         .unwrap();
         let cfg = loopsmith_core::load(root.join("loop.yaml")).expect("reloads");
@@ -351,6 +797,7 @@ mod tests {
             name: "demo".into(),
             purpose: "p".into(),
             force: false,
+            config: None,
         })
         .unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
@@ -367,6 +814,7 @@ mod tests {
             name: "demo".into(),
             purpose: "p".into(),
             force: true,
+            config: None,
         })
         .is_ok());
         let _ = std::fs::remove_dir_all(root);

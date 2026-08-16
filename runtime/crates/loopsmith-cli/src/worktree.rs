@@ -114,25 +114,14 @@ pub fn remove(root: &Path, iso: &Isolation) {
 }
 
 fn which_git() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).find_map(|d| {
-        let c = d.join("git");
-        c.is_file().then_some(c)
-    })
+    loopsmith_util::which("git")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-    fn tmp(tag: &str) -> PathBuf {
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let p = std::env::temp_dir().join(format!("loopsmith-wt-{tag}-{}-{n}", std::process::id()));
-        std::fs::create_dir_all(&p).unwrap();
-        p
-    }
+    use loopsmith_util::testing::temp_dir as tmp;
 
     fn init_repo(p: &Path) {
         for args in [

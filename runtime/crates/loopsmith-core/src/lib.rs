@@ -16,9 +16,11 @@
 //! the config is rejected rather than run.
 
 pub mod config;
+pub mod md;
 pub mod validate;
 
 pub use config::*;
+pub use md::{parse_md, render_md};
 pub use validate::{validate, Issue, Severity, ValidationReport};
 
 use std::path::Path;
@@ -41,16 +43,31 @@ pub enum CoreError {
     Invalid(String),
 }
 
-/// Load a config from YAML or JSON, chosen by extension with a fallback that
-/// tries both. Does not validate — call [`validate`] separately so callers can
-/// decide whether warnings are fatal.
+/// Load a config from Markdown, YAML, or JSON.
+///
+/// Markdown is chosen by extension, because a `.md` config is a different
+/// grammar rather than a different serialization — guessing at it would mean
+/// reporting a YAML parse error for a document that was never YAML.
+/// Everything else falls through to [`parse_str`], which tries YAML then JSON.
 pub fn load(path: impl AsRef<Path>) -> Result<LoopConfig, CoreError> {
     let path = path.as_ref();
     let text = std::fs::read_to_string(path).map_err(|source| CoreError::Io {
         path: path.display().to_string(),
         source,
     })?;
-    parse_str(&text, &path.display().to_string())
+    let origin = path.display().to_string();
+    if is_markdown(path) {
+        return md::parse_md(&text, &origin);
+    }
+    parse_str(&text, &origin)
+}
+
+/// Whether a path should be read as a markdown config.
+pub fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+        .unwrap_or(false)
 }
 
 /// Parse config text, trying YAML first (a superset of JSON in practice) and

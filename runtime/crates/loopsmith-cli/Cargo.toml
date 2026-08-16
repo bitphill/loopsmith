@@ -12,6 +12,7 @@ name = "loopsmith"
 path = "src/main.rs"
 
 [dependencies]
+loopsmith-util = { workspace = true }
 loopsmith-core = { workspace = true }
 loopsmith-memory = { workspace = true }
 loopsmith-graph = { workspace = true }
@@ -23,3 +24,6 @@ clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+
+[dev-dependencies]
+loopsmith-util = { workspace = true, features = ["testing"] }

@@ -8,7 +8,11 @@ repository.workspace = true
 description = "Shared embedded memory for loopsmith: episodes, goal state, ledger, checkpoints"
 
 [dependencies]
+loopsmith-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 sled = { workspace = true }
+
+[dev-dependencies]
+loopsmith-util = { workspace = true, features = ["testing"] }

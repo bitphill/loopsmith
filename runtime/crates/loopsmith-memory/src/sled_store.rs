@@ -9,10 +9,14 @@
 //! lg/<run>/<seq:020>      ledger entry
 //! ck/<run>                checkpoint
 //! sp/<run>/<key>          scratchpad
+//! su/<run>/<iter:020>     iteration summary
+//! st/<seq:020>            skill trial (global, deliberately not per run)
+//! pr/<run>/<seq:020>      proposal
 //! ```
 
 use crate::{
-    Checkpoint, Episode, GoalState, LedgerEntry, MemError, Proposal, Result, SkillTrial, Store,
+    Checkpoint, Episode, GoalState, IterationSummary, LedgerEntry, MemError, Proposal, Result,
+    SkillTrial, Store,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -145,6 +149,24 @@ impl Store for SledStore {
         Ok(v.map(|b| String::from_utf8_lossy(&b).to_string()))
     }
 
+    fn put_summary(&self, s: &IterationSummary) -> Result<()> {
+        if s.run_id.trim().is_empty() {
+            return Err(MemError::Rejected("iteration summary has no run_id".into()));
+        }
+        // Keyed by iteration rather than by sequence: re-summarising an
+        // iteration must replace it, not append a second version that a later
+        // read would silently include twice.
+        self.put(
+            format!("su/{}/{:020}", s.run_id, s.iteration),
+            serde_json::to_vec(s)?,
+        )?;
+        Ok(())
+    }
+
+    fn summaries(&self, run_id: &str) -> Result<Vec<IterationSummary>> {
+        self.scan(&format!("su/{run_id}/"))
+    }
+
     fn put_skill_trial(&self, t: &SkillTrial) -> Result<u64> {
         if t.skill.trim().is_empty() {
             return Err(MemError::Rejected("skill trial has no skill name".into()));
@@ -205,20 +227,7 @@ impl Store for SledStore {
 mod tests {
     use super::*;
     use crate::{now_ms, sample_episode, LedgerKind};
-
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-    /// Unique directory per call. `now_ms()` alone is not enough: tests run in
-    /// parallel threads and collide inside the same millisecond, which shows
-    /// up as a sled lock error rather than as the bug it is.
-    fn tmp_dir(tag: &str) -> std::path::PathBuf {
-        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        std::env::temp_dir().join(format!(
-            "loopsmith-test-{tag}-{}-{}-{n}",
-            std::process::id(),
-            now_ms()
-        ))
-    }
+    use loopsmith_util::testing::temp_path as tmp_dir;
 
     fn tmp(tag: &str) -> (SledStore, std::path::PathBuf) {
         let p = tmp_dir(tag);

@@ -17,7 +17,9 @@
 //! That keeps the crate dependency-free, and means a machine without either
 //! degrades to "installed only" instead of failing to build.
 
-use loopsmith_core::{AcquisitionSource, SkillPolicy};
+use loopsmith_core::{
+    is_safe_repo_url, AcquisitionSource, DefaultSkill, SkillOrigin, SkillPolicy,
+};
 use loopsmith_memory::{score_skills, SkillScore, SkillTrial};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -156,13 +158,10 @@ fn run(cmd: &str, args: &[&str], cwd: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-pub fn which(cmd: &str) -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).find_map(|d| {
-        let c = d.join(cmd);
-        c.is_file().then_some(c)
-    })
-}
+/// Command lookup, shared with the provider plane. This used to be a
+/// PATH-only copy that accepted any file, so a non-executable `curl` on PATH
+/// read as "curl is available"; the shared version checks the executable bit.
+pub use loopsmith_util::which;
 
 /// A name that is safe to use as a directory and to pass to a package manager.
 /// Anything else is refused rather than sanitised, because a silently rewritten
@@ -221,6 +220,81 @@ pub fn install_from_cli(spec: &str, quarantine: &Path) -> Result<ResolvedSkill> 
         name,
         source: Source::Marketplace,
         path,
+        quarantined: true,
+    })
+}
+
+/// Install one of the loop's declared default sub-agents (section J).
+///
+/// Idempotent: a skill already on disk is reported and left alone, so this is
+/// safe to run at the start of every run rather than only once.
+pub fn install_default(spec: &DefaultSkill, policy: &SkillPolicy, root: &Path) -> Result<ResolvedSkill> {
+    if !is_safe_name(&spec.name) {
+        return Err(SkillError::Refused(format!(
+            "`{}` is not a safe skill name",
+            spec.name
+        )));
+    }
+    if is_blocklisted(&spec.name) {
+        return Err(SkillError::Refused(format!(
+            "`{}` matches the never-auto-install list",
+            spec.name
+        )));
+    }
+    if let Some(found) = find_installed(&spec.name, root) {
+        return Ok(found);
+    }
+
+    let quarantine = root.join(&policy.quarantine_dir);
+    let resolved = match spec.source {
+        SkillOrigin::Local => {
+            return Err(SkillError::Missing(format!(
+                "{} (declared as `local`, so it is never fetched — put it under \
+                 .claude/skills/ or change its source)",
+                spec.name
+            )))
+        }
+        SkillOrigin::Marketplace => {
+            let target = spec.url.as_deref().unwrap_or(&spec.name);
+            install_from_cli(target, &quarantine)?
+        }
+        SkillOrigin::Github => clone_repo(spec, &quarantine)?,
+    };
+
+    // Setup runs inside the installed directory, as argv. See the note on
+    // `DefaultSkill::init_argv`: this is deliberately not a shell.
+    let argv = spec.init_argv();
+    if !argv.is_empty() {
+        let args: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
+        run(&argv[0], &args, &resolved.path)?;
+    }
+    Ok(resolved)
+}
+
+fn clone_repo(spec: &DefaultSkill, quarantine: &Path) -> Result<ResolvedSkill> {
+    let Some(url) = spec.url.as_deref() else {
+        return Err(SkillError::Refused(format!(
+            "`{}` is declared as `github` but has no url",
+            spec.name
+        )));
+    };
+    if !is_safe_repo_url(url) {
+        return Err(SkillError::Refused(format!(
+            "`{url}` is not an https git URL; only https is accepted"
+        )));
+    }
+    std::fs::create_dir_all(quarantine)?;
+    let dir = quarantine.join(&spec.name);
+    // `--depth 1`: a loop wants the skill, not its history.
+    run(
+        "git",
+        &["clone", "--depth", "1", url, &spec.name],
+        quarantine,
+    )?;
+    Ok(ResolvedSkill {
+        name: spec.name.clone(),
+        source: Source::Marketplace,
+        path: dir,
         quarantined: true,
     })
 }
@@ -320,18 +394,7 @@ pub fn recommend(
 mod tests {
     use super::*;
     use loopsmith_memory::now_ms;
-
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-    fn tmp(tag: &str) -> PathBuf {
-        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let p = std::env::temp_dir().join(format!(
-            "loopsmith-skills-{tag}-{}-{n}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        p
-    }
+    use loopsmith_util::testing::temp_dir as tmp;
 
     fn make_skill(root: &Path, dir: &str, name: &str) {
         let d = root.join(dir).join(name);

@@ -477,8 +477,7 @@ mod tests {
 
     #[test]
     fn a_file_change_fires_once_per_change() {
-        let dir = std::env::temp_dir().join(format!("loopsmith-fc-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = loopsmith_util::testing::temp_dir("file-change");
         let watched = dir.join("watched.txt");
         std::fs::write(&watched, "one").unwrap();
 
@@ -548,7 +547,7 @@ mod tests {
     fn the_watcher_ignores_its_own_state_directory() {
         // Without this the ledger's own writes would retrigger the loop on
         // every poll, forever.
-        let dir = std::env::temp_dir().join(format!("loopsmith-selfstate-{}", std::process::id()));
+        let dir = loopsmith_util::testing::temp_dir("self-state");
         std::fs::create_dir_all(dir.join("state")).unwrap();
         std::fs::write(dir.join("keep.txt"), "x").unwrap();
         let before = newest_mtime(&dir);
