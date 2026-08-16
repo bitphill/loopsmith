@@ -286,7 +286,31 @@ fn check_pre_execution(cfg: &LoopConfig, r: &mut ValidationReport) {
     }
 }
 
+/// Artifact names a `regex_match` detector can refer to.
+///
+/// Evidence is collected from the files this config's own `file_exists`
+/// detectors name, registered under both the full path and the stem. A regex
+/// naming anything else has nothing to match and fails closed for the whole
+/// life of the loop, which reads as "the work is not done" rather than as "this
+/// check was never wired up".
+fn available_artifacts(cfg: &LoopConfig) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for v in &cfg.validations {
+        if let Detector::FileExists { path, .. } = &v.detector {
+            if let Some(stem) = std::path::Path::new(path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+            {
+                out.insert(stem.to_string());
+            }
+            out.insert(path.clone());
+        }
+    }
+    out
+}
+
 fn check_validations(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationReport) {
+    let artifacts = available_artifacts(cfg);
     let mut covered: BTreeMap<&str, usize> = BTreeMap::new();
     for (i, v) in cfg.validations.iter().enumerate() {
         let f = format!("validations[{i}]");
@@ -308,6 +332,25 @@ fn check_validations(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut Validatio
             Detector::Threshold { metric, .. } if metric.trim().is_empty() => {
                 r.issues
                     .push(Issue::err(format!("{f}.detector.metric"), "must not be empty"));
+            }
+            Detector::RegexMatch { artifact, .. } if !artifacts.contains(artifact) => {
+                r.issues.push(Issue::err(
+                    format!("{f}.detector.artifact"),
+                    format!(
+                        "no `file_exists` detector produces `{artifact}`, so this check can \
+                         never match. Artifacts are named by the file's stem or its full path; \
+                         available here: {}",
+                        if artifacts.is_empty() {
+                            "none".to_string()
+                        } else {
+                            artifacts
+                                .iter()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                    ),
+                ));
             }
             Detector::Judge { standard, .. } => {
                 if standard.trim().is_empty() {
@@ -634,6 +677,66 @@ pre_execution:
     fn minimal_config_is_valid() {
         let r = validate(&minimal());
         assert!(!r.has_errors(), "unexpected errors:\n{}", r.render());
+    }
+
+    #[test]
+    fn a_regex_naming_an_artifact_nobody_produces_is_an_error() {
+        // Evidence is collected from the files `file_exists` detectors name.
+        // A regex naming anything else has nothing to match and fails closed
+        // for the life of the loop, which reads as "the work is not done"
+        // rather than as "this check was never wired up".
+        let mut c = minimal();
+        c.validations.push(crate::Validation {
+            target: "g1".into(),
+            name: "cited".into(),
+            mode: Mode::Objective,
+            statement: "the notes carry source URLs".into(),
+            detector: Detector::RegexMatch {
+                artifact: "notes".into(),
+                pattern: "https?://".into(),
+            },
+            blocking: true,
+        });
+        let r = validate(&c);
+        assert!(r.has_errors(), "{}", r.render());
+        assert!(
+            r.render().contains("can never match"),
+            "the error must say why: {}",
+            r.render()
+        );
+    }
+
+    #[test]
+    fn a_regex_over_a_file_the_config_declares_is_accepted() {
+        let mut c = minimal();
+        c.validations.push(crate::Validation {
+            target: "g1".into(),
+            name: "notes-exist".into(),
+            mode: Mode::Objective,
+            statement: "the notes exist".into(),
+            detector: Detector::FileExists {
+                path: "out/notes.md".into(),
+                non_empty: true,
+            },
+            blocking: true,
+        });
+        // Both spellings resolve: the file's stem and its full path.
+        for artifact in ["notes", "out/notes.md"] {
+            let mut c = c.clone();
+            c.validations.push(crate::Validation {
+                target: "g1".into(),
+                name: "cited".into(),
+                mode: Mode::Objective,
+                statement: "the notes carry source URLs".into(),
+                detector: Detector::RegexMatch {
+                    artifact: artifact.into(),
+                    pattern: "https?://".into(),
+                },
+                blocking: true,
+            });
+            let r = validate(&c);
+            assert!(!r.has_errors(), "`{artifact}` should resolve:\n{}", r.render());
+        }
     }
 
     #[test]

@@ -80,7 +80,7 @@ validations:
     name: every-trend-cited
     mode: objective
     statement: Every trend in the report cites at least one post ID.
-    detector: { type: regex_match, artifact: report, pattern: "post_id:" }
+    detector: { type: regex_match, artifact: trends, pattern: "post_id:" }
   - target: overall
     name: no-invented-trends
     mode: subjective

@@ -129,6 +129,60 @@ fn every_example_survives_a_run_where_nothing_passes() {
 }
 
 // ---------------------------------------------------------------------------
+// Detectors
+// ---------------------------------------------------------------------------
+
+/// A `regex_match` detector must have something to match against.
+///
+/// `Evidence.artifacts` was populated by nobody in the runtime, so every regex
+/// detector reported "artifact was not collected" for the whole life of a run:
+/// a check that reads as rigour while being permanently unsatisfiable. Three
+/// shipped examples use one.
+#[test]
+fn a_regex_detector_reads_the_file_the_loop_produced() {
+    let mut f = Fixture::example("blogger-loop", "regex");
+    cap(&mut f.cfg, 1);
+    f.write_config();
+    let f = f
+        .stub_scripts(Stubs::Pass)
+        .satisfy_files()
+        .satisfy_metrics();
+
+    let run_id = "regex-pass";
+    f.run_loop(run_id, &[]);
+
+    let store = f.store();
+    let states = store.goal_states(run_id).unwrap();
+    let researched = &states["researched"];
+    assert!(
+        researched.satisfied,
+        "the artifact carries a URL, so `sources-cited` should match: {}",
+        researched.reason
+    );
+    drop(store);
+    f.cleanup();
+
+    // And the other way: the same file without a URL must fail the check
+    // rather than pass by default.
+    let mut g = Fixture::example("blogger-loop", "regex-neg");
+    cap(&mut g.cfg, 1);
+    g.write_config();
+    let g = g
+        .stub_scripts(Stubs::Pass)
+        .write_artifacts("no links in here at all\n")
+        .satisfy_metrics();
+
+    g.run_loop("regex-fail", &[]);
+    let store = g.store();
+    assert!(
+        !store.goal_states("regex-fail").unwrap()["researched"].satisfied,
+        "a file with no URL must not satisfy a check that requires one"
+    );
+    drop(store);
+    g.cleanup();
+}
+
+// ---------------------------------------------------------------------------
 // Section I — phases under a real multi-iteration run
 // ---------------------------------------------------------------------------
 

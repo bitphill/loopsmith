@@ -55,6 +55,7 @@ This was a plan. It is now a record. Every row below has run.
 |---|---|---|
 | One iteration, end to end | `every_example_completes_an_iteration_and_leaves_a_consistent_record` | all 13 |
 | Nothing satisfiable, no crash | `every_example_survives_a_run_where_nothing_passes` | all 13 |
+| Regex detectors, both directions | `a_regex_detector_reads_the_file_the_loop_produced` | `blogger-loop` |
 | Phase DAG, long linear chain | `phases_open_one_at_a_time_across_a_real_run` | `traffic-loop` |
 | A phase that never closes | `a_phase_that_never_satisfies_its_goals_never_opens_the_next_one` | `traffic-loop` |
 | Phases + perturbation | `perturbation_and_phases_do_not_dispatch_a_shut_phase` | `traffic-loop` |
@@ -135,3 +136,8 @@ provider, not to get a good answer.
 - **A judge PASS with no evidence is demoted to FAIL.** Any stub judge payload
   needs an `EVIDENCE:` line or every subjective validation becomes permanently
   unsatisfiable.
+- **`satisfy_files` writes a body, not a placeholder.** The files a
+  `file_exists` detector names are the same files a `regex_match` detector
+  reads, so the default body carries a URL and a `post_id:` line — the tokens
+  the shipped examples look for. `write_artifacts` takes a specific body when a
+  scenario needs one.

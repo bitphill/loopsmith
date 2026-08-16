@@ -104,7 +104,7 @@
 - statement: Every trend in the report cites at least one post ID.
 - detector:
   - type: regex_match
-  - artifact: report
+  - artifact: trends
   - pattern: "post_id:"
 - blocking: true
 

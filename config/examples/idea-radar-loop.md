@@ -118,7 +118,7 @@
 - statement: Every idea in the report cites complaint URLs.
 - detector:
   - type: regex_match
-  - artifact: report
+  - artifact: ideas
   - pattern: https?://
 - blocking: true
 

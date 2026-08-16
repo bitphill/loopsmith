@@ -95,7 +95,7 @@ validations:
     name: every-idea-cited
     mode: objective
     statement: Every idea in the report cites complaint URLs.
-    detector: { type: regex_match, artifact: report, pattern: "https?://" }
+    detector: { type: regex_match, artifact: ideas, pattern: "https?://" }
   - target: overall
     name: no-invented-pain
     mode: subjective

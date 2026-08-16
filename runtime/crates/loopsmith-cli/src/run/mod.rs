@@ -74,7 +74,14 @@ pub struct RunOutcome {
 /// Collect evidence for the gate. Deliberately narrow: a node's own claim that
 /// it finished is not evidence, so only artifacts on disk, reported metrics,
 /// and parsed judge verdicts count.
+///
+/// Artifacts are the files the config's own `file_exists` detectors name, read
+/// from disk and registered under both their full path and their stem. Without
+/// this a `regex_match` detector has nothing to match against and reports
+/// "artifact was not collected" forever — a check that looks like rigour while
+/// being permanently unsatisfiable, which is the worst kind.
 pub fn collect_evidence(
+    cfg: &LoopConfig,
     workdir: &Path,
     metrics_file: Option<&Path>,
     judgments: Vec<Judgment>,
@@ -87,8 +94,33 @@ pub fn collect_evidence(
             }
         }
     }
+    for path in artifact_paths(cfg) {
+        let Ok(text) = std::fs::read_to_string(workdir.join(&path)) else {
+            continue;
+        };
+        if let Some(stem) = Path::new(&path).file_stem().and_then(|s| s.to_str()) {
+            ev.artifacts.insert(stem.to_string(), text.clone());
+        }
+        ev.artifacts.insert(path, text);
+    }
     ev.judgments = judgments;
     ev
+}
+
+/// Every file the config's `file_exists` detectors name.
+///
+/// That set is the config's own answer to "what is this loop supposed to
+/// produce", so it is the right thing to make readable to regex checks. A
+/// regex naming anything else is reported by validation rather than failing
+/// silently at runtime.
+fn artifact_paths(cfg: &LoopConfig) -> Vec<String> {
+    cfg.validations
+        .iter()
+        .filter_map(|v| match &v.detector {
+            loopsmith_core::Detector::FileExists { path, .. } => Some(path.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Blocking checks that failed, as `(target, check name, evidence)`.
@@ -558,7 +590,7 @@ pub fn execute<S: Store>(
         }
 
         // --- gate ----------------------------------------------------------
-        let ev = collect_evidence(root, Some(&root.join("metrics.json")), judgments);
+        let ev = collect_evidence(cfg, root, Some(&root.join("metrics.json")), judgments);
         let current = loopsmith_gate::evaluate_all(cfg, &ev);
         for (target, v) in &current {
             let _ = store.set_goal_state(&opts.run_id, &v.to_goal_state(it));

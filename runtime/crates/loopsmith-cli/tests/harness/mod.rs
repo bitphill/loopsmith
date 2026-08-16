@@ -73,6 +73,18 @@ pub enum Stubs {
     PassFrom(u32),
 }
 
+/// Default contents for a produced artifact.
+///
+/// Carries a URL and a `post_id:` line because those are what the shipped
+/// examples' `regex_match` detectors look for. Without them the file exists,
+/// the `file_exists` check passes, and the regex on the same file fails —
+/// which is a confusing way for a stress run to go red.
+const ARTIFACT_BODY: &str = "\
+written by the stress harness
+source: https://example.invalid/reference
+post_id: 1
+";
+
 pub struct Fixture {
     pub dir: PathBuf,
     pub config: PathBuf,
@@ -165,13 +177,24 @@ impl Fixture {
 
     /// Create every path a `file_exists` detector points at, so the objective
     /// half of the gate can be satisfied without a real builder.
+    ///
+    /// The contents are not arbitrary. Those same files are what `regex_match`
+    /// detectors read — evidence collection registers them under their stem —
+    /// so the body carries the tokens the shipped examples look for. A harness
+    /// cannot synthesise a string for an arbitrary pattern; use
+    /// [`Fixture::write_artifacts`] when a scenario needs something specific.
     pub fn satisfy_files(self) -> Self {
+        self.write_artifacts(ARTIFACT_BODY)
+    }
+
+    /// Write the same body into every file a `file_exists` detector names.
+    pub fn write_artifacts(self, body: &str) -> Self {
         for (path, _) in self.file_detectors() {
             let p = self.dir.join(&path);
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).expect("artifact parent is creatable");
             }
-            std::fs::write(&p, "written by the stress harness\n").expect("artifact is writable");
+            std::fs::write(&p, body).expect("artifact is writable");
         }
         self
     }
