@@ -249,6 +249,7 @@ dependencies = [
  "loopsmith-mcp",
  "loopsmith-memory",
  "loopsmith-provider",
+ "loopsmith-skills",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -313,6 +314,18 @@ name = "loopsmith-provider"
 version = "0.1.0"
 dependencies = [
  "loopsmith-core",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "loopsmith-skills"
+version = "0.1.0"
+dependencies = [
+ "loopsmith-core",
+ "loopsmith-memory",
  "serde",
  "serde_json",
  "thiserror",

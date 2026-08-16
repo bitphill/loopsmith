@@ -4,330 +4,744 @@
   "title": "loopsmith loop config",
   "description": "The A-H model. `loopsmith validate` enforces this schema plus cross-field rules the schema cannot express - most importantly, that every goal carries at least one blocking validation.",
   "type": "object",
-  "required": ["name", "goals", "validations"],
+  "required": [
+    "name",
+    "goals",
+    "validations"
+  ],
   "additionalProperties": false,
-
   "properties": {
-    "name": { "type": "string", "minLength": 1, "description": "Loop identity. Becomes the sled tree name and the generated skill name." },
-    "version": { "type": "string", "default": "0.1.0" },
-    "description": { "type": "string" },
-
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Loop identity. Becomes the sled tree name and the generated skill name."
+    },
+    "version": {
+      "type": "string",
+      "default": "0.1.0"
+    },
+    "description": {
+      "type": "string"
+    },
     "information": {
       "description": "A - static context handed to every node.",
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["key", "value"],
+        "required": [
+          "key",
+          "value"
+        ],
         "additionalProperties": false,
         "properties": {
-          "key": { "type": "string", "minLength": 1 },
-          "value": { "type": "string" },
-          "note": { "type": "string" }
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
         }
       }
     },
-
     "pre_execution": {
       "description": "B - the manual work that must happen before automation is allowed. Every step must be done:true or validation fails.",
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["step"],
+        "required": [
+          "step"
+        ],
         "additionalProperties": false,
         "properties": {
-          "step": { "type": "string", "minLength": 1 },
-          "done": { "type": "boolean", "default": false },
-          "evidence": { "type": "string" }
+          "step": {
+            "type": "string",
+            "minLength": 1
+          },
+          "done": {
+            "type": "boolean",
+            "default": false
+          },
+          "evidence": {
+            "type": "string"
+          }
         }
       }
     },
-
     "goals": {
       "description": "C - named objectives in natural language.",
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "description"],
+        "required": [
+          "name",
+          "description"
+        ],
         "additionalProperties": false,
         "properties": {
-          "name": { "type": "string", "minLength": 1, "not": { "const": "overall" }, "description": "`overall` is reserved for whole-loop targets." },
-          "description": { "type": "string", "minLength": 12 },
-          "depends_on": { "type": "array", "items": { "type": "string" } },
-          "priority": { "type": "integer", "minimum": 0 }
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "not": {
+              "const": "overall"
+            },
+            "description": "`overall` is reserved for whole-loop targets."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 12
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       }
     },
-
     "validations": {
       "description": "D - how each goal is checked. Target is a goal name or `overall`.",
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["target", "name", "mode", "statement", "detector"],
+        "required": [
+          "target",
+          "name",
+          "mode",
+          "statement",
+          "detector"
+        ],
         "additionalProperties": false,
         "properties": {
-          "target": { "type": "string", "minLength": 1 },
-          "name": { "type": "string", "minLength": 1 },
-          "mode": { "$ref": "#/$defs/mode" },
-          "statement": { "type": "string", "minLength": 1 },
-          "blocking": { "type": "boolean", "default": true, "description": "Blocking validations hold the gate shut. Non-blocking ones are recorded only." },
-          "detector": { "$ref": "#/$defs/detector" }
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "$ref": "#/$defs/mode"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean",
+            "default": true,
+            "description": "Blocking validations hold the gate shut. Non-blocking ones are recorded only."
+          },
+          "detector": {
+            "$ref": "#/$defs/detector"
+          }
         }
       }
     },
-
     "success": {
       "description": "E - what counts as success, per goal or `overall`.",
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["target", "name", "mode", "statement"],
+        "required": [
+          "target",
+          "name",
+          "mode",
+          "statement"
+        ],
         "additionalProperties": false,
         "properties": {
-          "target": { "type": "string", "minLength": 1 },
-          "name": { "type": "string", "minLength": 1 },
-          "mode": { "$ref": "#/$defs/mode" },
-          "statement": { "type": "string" },
-          "threshold": { "type": "number", "minimum": 0, "maximum": 1, "description": "Required when mode is percentage: the fraction of blocking validations that must pass." }
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mode": {
+            "$ref": "#/$defs/mode"
+          },
+          "statement": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Required when mode is percentage: the fraction of blocking validations that must pass."
+          }
         },
         "allOf": [
           {
-            "if": { "properties": { "mode": { "const": "percentage" } }, "required": ["mode"] },
-            "then": { "required": ["threshold"] }
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "percentage"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "threshold"
+              ]
+            }
           }
         ]
       }
     },
-
     "stop_gates": {
       "description": "F - the layered exits. All are evaluated every iteration; any one halts the run.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "max_iterations": { "type": "integer", "minimum": 1, "default": 10 },
-        "max_revisions_per_node": { "type": "integer", "minimum": 1, "default": 3 },
-        "max_wall_clock_seconds": { "type": "integer", "minimum": 1 },
-        "max_tokens": { "type": "integer", "minimum": 1 },
-        "max_cost_usd": { "type": "number", "minimum": 0 },
-        "no_progress_iterations": { "type": "integer", "minimum": 0, "default": 3, "description": "Jidoka: halt after this many iterations with no measurable change. 0 disables." },
-        "stop_on_overall_success": { "type": "boolean", "default": true }
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10
+        },
+        "max_revisions_per_node": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        },
+        "max_wall_clock_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "no_progress_iterations": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 3,
+          "description": "Jidoka: halt after this many iterations with no measurable change. 0 disables."
+        },
+        "stop_on_overall_success": {
+          "type": "boolean",
+          "default": true
+        }
       }
     },
-
     "schedules": {
-      "description": "G - time or event triggers.",
+      "description": "G - time or event triggers. `loopsmith watch` polls these and runs the loop when one fires; `loopsmith schedule --install` hands the job to launchd or cron. Cron expressions are evaluated in UTC.",
       "type": "array",
-      "items": { "$ref": "#/$defs/trigger" }
+      "items": {
+        "$ref": "#/$defs/trigger"
+      }
     },
-
     "constraints": {
       "description": "H - limits applied per node or globally.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "global": { "$ref": "#/$defs/constraintSet" },
+        "global": {
+          "$ref": "#/$defs/constraintSet"
+        },
         "per_node": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/constraintSet" }
+          "additionalProperties": {
+            "$ref": "#/$defs/constraintSet"
+          }
         }
       }
     },
-
     "graph": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-        "concurrency": { "$ref": "#/$defs/concurrency" }
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "concurrency": {
+          "$ref": "#/$defs/concurrency"
+        }
       }
     },
-
     "providers": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "providers": { "type": "array", "items": { "$ref": "#/$defs/provider" } },
+        "providers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/provider"
+          }
+        },
         "cascade": {
           "type": "object",
           "description": "Ordered fallback per tier. First reachable provider serves the call.",
-          "propertyNames": { "enum": ["cheap", "standard", "strong"] },
-          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+          "propertyNames": {
+            "enum": [
+              "cheap",
+              "standard",
+              "strong"
+            ]
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         },
-        "enforce_judge_independence": { "type": "boolean", "default": true, "description": "Refuse a judge verdict produced by the same provider as the work it judges." }
+        "enforce_judge_independence": {
+          "type": "boolean",
+          "default": true,
+          "description": "Refuse a judge verdict produced by the same provider as the work it judges."
+        }
       }
     },
-
     "skills": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "acquisition_order": {
           "type": "array",
-          "items": { "enum": ["installed", "marketplace", "generate"] },
-          "default": ["installed", "marketplace", "generate"]
+          "items": {
+            "enum": [
+              "installed",
+              "marketplace",
+              "generate"
+            ]
+          },
+          "default": [
+            "installed",
+            "marketplace",
+            "generate"
+          ]
         },
-        "quarantine_dir": { "type": "string", "default": "generated-skills" },
-        "min_marketplace_stars": { "type": "integer", "minimum": 0, "default": 100 },
-        "require_human_promotion": { "type": "boolean", "default": true }
-      }
+        "quarantine_dir": {
+          "type": "string",
+          "default": "generated-skills"
+        },
+        "min_marketplace_stars": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 100
+        },
+        "require_human_promotion": {
+          "type": "boolean",
+          "default": true
+        },
+        "explore": {
+          "type": "boolean",
+          "default": false,
+          "description": "Try a candidate sub-agent that is NOT in the config, so the loop can discover what helps rather than only confirming what it was told. Off by default: exploration spends real money."
+        },
+        "explore_candidates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Candidates to trial when explore is on. Each is attached to a builder node until it has min_trials behind it."
+        },
+        "min_trials": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Trials needed before a candidate can be proposed or dismissed. One lucky run is not evidence."
+        }
+      },
+      "description": "Sub-agent acquisition and the experiment loop. Outcomes are recorded per skill and turned into proposals; the loop never edits its own config."
     }
   },
-
   "$defs": {
     "mode": {
-      "enum": ["subjective", "objective", "percentage"],
+      "enum": [
+        "subjective",
+        "objective",
+        "percentage"
+      ],
       "description": "How the check is expressed. The mode does not decide the rigour - the detector does."
     },
-
     "detector": {
       "description": "How a validation is decided. Script, file_exists, regex_match, and threshold are deterministic; judge is a model verdict and requires an independent provider.",
       "oneOf": [
         {
           "type": "object",
-          "required": ["type", "command"],
+          "required": [
+            "type",
+            "command"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "script" },
-            "command": { "type": "string", "minLength": 1 },
-            "args": { "type": "array", "items": { "type": "string" } },
-            "expect_exit": { "type": "integer", "default": 0 }
+            "type": {
+              "const": "script"
+            },
+            "command": {
+              "type": "string",
+              "minLength": 1
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "expect_exit": {
+              "type": "integer",
+              "default": 0
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type", "path"],
+          "required": [
+            "type",
+            "path"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "file_exists" },
-            "path": { "type": "string", "minLength": 1 },
-            "non_empty": { "type": "boolean", "default": false }
+            "type": {
+              "const": "file_exists"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "non_empty": {
+              "type": "boolean",
+              "default": false
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type", "artifact", "pattern"],
+          "required": [
+            "type",
+            "artifact",
+            "pattern"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "regex_match" },
-            "artifact": { "type": "string", "minLength": 1 },
-            "pattern": { "type": "string", "minLength": 1 }
+            "type": {
+              "const": "regex_match"
+            },
+            "artifact": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pattern": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type", "metric", "op", "value"],
+          "required": [
+            "type",
+            "metric",
+            "op",
+            "value"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "threshold" },
-            "metric": { "type": "string", "minLength": 1 },
-            "op": { "enum": ["gt", "gte", "lt", "lte", "eq"] },
-            "value": { "type": "number" }
+            "type": {
+              "const": "threshold"
+            },
+            "metric": {
+              "type": "string",
+              "minLength": 1
+            },
+            "op": {
+              "enum": [
+                "gt",
+                "gte",
+                "lt",
+                "lte",
+                "eq"
+              ]
+            },
+            "value": {
+              "type": "number"
+            }
           }
         },
         {
           "type": "object",
-          "required": ["type", "standard"],
+          "required": [
+            "type",
+            "standard"
+          ],
           "additionalProperties": false,
           "properties": {
-            "type": { "const": "judge" },
-            "standard": { "type": "string", "minLength": 1, "description": "Name the external standard the judge checks against. An unnamed standard is an opinion." },
-            "min_score": { "type": "number" }
+            "type": {
+              "const": "judge"
+            },
+            "standard": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Name the external standard the judge checks against. An unnamed standard is an opinion."
+            },
+            "min_score": {
+              "type": "number"
+            }
           }
         }
       ]
     },
-
     "trigger": {
       "oneOf": [
         {
           "type": "object",
-          "required": ["type", "expr"],
+          "required": [
+            "type",
+            "expr"
+          ],
           "additionalProperties": false,
-          "properties": { "type": { "const": "cron" }, "expr": { "type": "string" } }
+          "properties": {
+            "type": {
+              "const": "cron"
+            },
+            "expr": {
+              "type": "string"
+            }
+          }
         },
         {
           "type": "object",
-          "required": ["type", "path"],
+          "required": [
+            "type",
+            "seconds"
+          ],
           "additionalProperties": false,
-          "properties": { "type": { "const": "file_change" }, "path": { "type": "string" } }
+          "properties": {
+            "type": {
+              "const": "interval"
+            },
+            "seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Fire every N seconds. Timezone-independent, unlike cron, which loopsmith evaluates in UTC."
+            }
+          }
         },
         {
           "type": "object",
-          "required": ["type", "goal"],
+          "required": [
+            "type",
+            "path"
+          ],
           "additionalProperties": false,
-          "properties": { "type": { "const": "goal_satisfied" }, "goal": { "type": "string" } }
+          "properties": {
+            "type": {
+              "const": "file_change"
+            },
+            "path": {
+              "type": "string"
+            }
+          }
         },
         {
           "type": "object",
-          "required": ["type"],
+          "required": [
+            "type",
+            "goal"
+          ],
           "additionalProperties": false,
-          "properties": { "type": { "const": "manual" } }
+          "properties": {
+            "type": {
+              "const": "goal_satisfied"
+            },
+            "goal": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "manual"
+            }
+          }
         }
       ]
     },
-
     "constraintSet": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "rules": { "type": "array", "items": { "type": "string" } },
-        "forbidden_paths": { "type": "array", "items": { "type": "string" } },
-        "forbidden_commands": { "type": "array", "items": { "type": "string" } },
-        "max_tokens": { "type": "integer", "minimum": 1 },
-        "max_seconds": { "type": "integer", "minimum": 1 },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "forbidden_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "forbidden_commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
         "human_checkpoint": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Irreversible actions. These stop and wait regardless of any permission grant."
         }
       }
     },
-
     "node": {
       "type": "object",
-      "required": ["id", "role", "instruction"],
+      "required": [
+        "id",
+        "role",
+        "instruction"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "role": { "enum": ["builder", "judge", "manager", "adversary", "researcher"] },
-        "instruction": { "type": "string", "minLength": 16, "description": "Tight instructions produce tight output; vague ones produce whatever the model felt like." },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "builder",
+            "judge",
+            "manager",
+            "adversary",
+            "researcher"
+          ]
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 16,
+          "description": "Tight instructions produce tight output; vague ones produce whatever the model felt like."
+        },
         "depends_on": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Only list a node whose output this node actually reads. An 'and then' that is not read is not an edge."
         },
-        "goals": { "type": "array", "items": { "type": "string" } },
-        "tier": { "enum": ["cheap", "standard", "strong"], "default": "standard" },
-        "provider": { "type": "string", "description": "Pin a provider. Judges should be pinned to a family different from the builder." },
-        "skills": { "type": "array", "items": { "type": "string" } },
-        "weight": { "type": "number", "exclusiveMinimum": 0, "default": 1 },
-        "isolated": { "type": "boolean", "default": false, "description": "Run in its own git worktree. Required for builders that may run in parallel." }
+        "goals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tier": {
+          "enum": [
+            "cheap",
+            "standard",
+            "strong"
+          ],
+          "default": "standard"
+        },
+        "provider": {
+          "type": "string",
+          "description": "Pin a provider. Judges should be pinned to a family different from the builder."
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "weight": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1
+        },
+        "isolated": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run in its own git worktree. Required for builders that may run in parallel."
+        }
       }
     },
-
     "concurrency": {
       "oneOf": [
         {
           "type": "object",
-          "required": ["mode"],
-          "additionalProperties": false,
-          "properties": { "mode": { "const": "sequential" } }
-        },
-        {
-          "type": "object",
-          "required": ["mode", "max_parallel"],
-          "additionalProperties": false,
-          "properties": { "mode": { "const": "fixed" }, "max_parallel": { "type": "integer", "minimum": 1 } }
-        },
-        {
-          "type": "object",
-          "required": ["mode"],
+          "required": [
+            "mode"
+          ],
           "additionalProperties": false,
           "properties": {
-            "mode": { "const": "auto" },
-            "cap": { "type": "integer", "minimum": 1, "default": 16 },
+            "mode": {
+              "const": "sequential"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode",
+            "max_parallel"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "const": "fixed"
+            },
+            "max_parallel": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "const": "auto"
+            },
+            "cap": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 16
+            },
             "min_marginal_gain": {
               "type": "number",
               "minimum": 0,
@@ -338,28 +752,81 @@
         }
       ]
     },
-
     "provider": {
       "type": "object",
-      "required": ["id", "kind", "command"],
+      "required": [
+        "id",
+        "kind",
+        "command"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
         "kind": {
-          "enum": ["claude_code", "ollama", "grok_cli", "grok_build", "hermes", "openai", "gemini", "byok", "mcp"],
+          "enum": [
+            "claude_code",
+            "ollama",
+            "grok_cli",
+            "grok_build",
+            "hermes",
+            "openai",
+            "gemini",
+            "byok",
+            "mcp"
+          ],
           "description": "Aliases are accepted: claude, grok, open_ai, google_gemini, custom, MCP."
         },
-        "tiers": { "type": "array", "items": { "enum": ["cheap", "standard", "strong"] } },
-        "command": { "type": "string", "minLength": 1, "description": "Any executable. Placeholders {prompt} {system} {model} {tier} {node} are substituted in args." },
-        "args": { "type": "array", "items": { "type": "string" } },
-        "model": { "type": "string" },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "cheap",
+              "standard",
+              "strong"
+            ]
+          }
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Any executable. Placeholders {prompt} {system} {model} {tier} {node} are substituted in args."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "model": {
+          "type": "string"
+        },
         "requires_env": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Key names only. Values are never read, substituted, or logged."
         },
-        "timeout_seconds": { "type": "integer", "minimum": 1 },
-        "prompt_on_stdin": { "type": "boolean", "default": false }
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prompt_on_stdin": {
+          "type": "boolean",
+          "default": false
+        },
+        "usage_regex": {
+          "type": "string",
+          "description": "Regex with one capture group extracting a token count from the provider's output. Without it, usage is estimated at ~4 characters per token \u2014 enough to make a budget ceiling real, but not exact."
+        },
+        "cost_per_1k_tokens": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Price per thousand tokens, used by the max_cost_usd stop gate."
+        }
       }
     }
   }

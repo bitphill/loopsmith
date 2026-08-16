@@ -11,7 +11,9 @@
 //! sp/<run>/<key>          scratchpad
 //! ```
 
-use crate::{Checkpoint, Episode, GoalState, LedgerEntry, MemError, Result, Store};
+use crate::{
+    Checkpoint, Episode, GoalState, LedgerEntry, MemError, Proposal, Result, SkillTrial, Store,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -141,6 +143,43 @@ impl Store for SledStore {
             .get(format!("sp/{run_id}/{key}").as_bytes())
             .map_err(|e| MemError::Backend(e.to_string()))?;
         Ok(v.map(|b| String::from_utf8_lossy(&b).to_string()))
+    }
+
+    fn put_skill_trial(&self, t: &SkillTrial) -> Result<u64> {
+        if t.skill.trim().is_empty() {
+            return Err(MemError::Rejected("skill trial has no skill name".into()));
+        }
+        if !(0.0..=1.0).contains(&t.pass_rate) {
+            return Err(MemError::Rejected(format!(
+                "skill trial pass_rate {} is outside 0.0..=1.0",
+                t.pass_rate
+            )));
+        }
+        let seq = self.next_seq()?;
+        // Keyed globally rather than per run: a skill's track record is only
+        // meaningful across runs.
+        self.put(format!("st/{seq:020}"), serde_json::to_vec(t)?)?;
+        Ok(seq)
+    }
+
+    fn skill_trials(&self) -> Result<Vec<SkillTrial>> {
+        self.scan("st/")
+    }
+
+    fn put_proposal(&self, p: &Proposal) -> Result<u64> {
+        if p.run_id.trim().is_empty() {
+            return Err(MemError::Rejected("proposal has no run_id".into()));
+        }
+        let seq = self.next_seq()?;
+        self.put(
+            format!("pr/{}/{:020}", p.run_id, seq),
+            serde_json::to_vec(p)?,
+        )?;
+        Ok(seq)
+    }
+
+    fn proposals(&self, run_id: &str) -> Result<Vec<Proposal>> {
+        self.scan(&format!("pr/{run_id}/"))
     }
 
     fn runs(&self) -> Result<Vec<String>> {
@@ -286,6 +325,73 @@ mod tests {
         assert_eq!(s2.ledger("r1").unwrap().len(), 1);
         drop(s2);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn skill_trials_accumulate_across_runs_and_rank_by_outcome() {
+        let (s, p) = tmp("trials");
+        let mk = |run: &str, skill: &str, ok: bool, rate: f64| SkillTrial {
+            run_id: run.into(),
+            iteration: 1,
+            node_id: "n1".into(),
+            skill: skill.into(),
+            source: "marketplace".into(),
+            pass_rate: rate,
+            satisfied: ok,
+            tokens: None,
+            created_ms: now_ms(),
+        };
+        // `good` helps in both runs; `bad` never does.
+        s.put_skill_trial(&mk("r1", "good", true, 1.0)).unwrap();
+        s.put_skill_trial(&mk("r2", "good", true, 0.9)).unwrap();
+        s.put_skill_trial(&mk("r1", "bad", false, 0.2)).unwrap();
+        s.put_skill_trial(&mk("r2", "bad", false, 0.1)).unwrap();
+
+        let scored = crate::score_skills(&s.skill_trials().unwrap());
+        assert_eq!(scored[0].skill, "good");
+        assert_eq!(scored[0].trials, 2);
+        assert!((scored[0].satisfaction_rate() - 1.0).abs() < 1e-9);
+        assert_eq!(scored[1].skill, "bad");
+        assert!(scored[1].satisfaction_rate() < 0.01);
+        let _ = std::fs::remove_dir_all(p);
+    }
+
+    #[test]
+    fn an_out_of_range_pass_rate_is_rejected() {
+        let (s, p) = tmp("badtrial");
+        let t = SkillTrial {
+            run_id: "r1".into(),
+            iteration: 1,
+            node_id: "n".into(),
+            skill: "x".into(),
+            source: "installed".into(),
+            pass_rate: 1.7,
+            satisfied: true,
+            tokens: None,
+            created_ms: now_ms(),
+        };
+        assert!(matches!(s.put_skill_trial(&t), Err(MemError::Rejected(_))));
+        let _ = std::fs::remove_dir_all(p);
+    }
+
+    #[test]
+    fn proposals_are_scoped_per_run() {
+        let (s, p) = tmp("proposals");
+        let mk = |run: &str, subject: &str| crate::Proposal {
+            run_id: run.into(),
+            iteration: 2,
+            kind: crate::ProposalKind::AdoptSkill,
+            subject: subject.into(),
+            rationale: "it correlates with satisfied goals".into(),
+            patch: Some("skills: [x]".into()),
+            created_ms: now_ms(),
+        };
+        s.put_proposal(&mk("r1", "a")).unwrap();
+        s.put_proposal(&mk("r1", "b")).unwrap();
+        s.put_proposal(&mk("r2", "c")).unwrap();
+        assert_eq!(s.proposals("r1").unwrap().len(), 2);
+        assert_eq!(s.proposals("r2").unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(p);
     }
 
     #[test]

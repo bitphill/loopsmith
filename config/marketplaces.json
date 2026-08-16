@@ -8,21 +8,22 @@
       "index_url": "https://claudemarketplaces.com/api/marketplaces",
       "browse_url": "https://claudemarketplaces.com/",
       "response_shape": {
-        "$comment": "Flat JSON array. Fields observed on every entry.",
+        "$comment": "Flat JSON array of ~2,600 entries. Types verified against the live endpoint: stars and pluginCount are NUMBERS, categories and pluginKeywords are ARRAYS, and stars is ABSENT on roughly a third of entries. Parsing them as strings makes every request fail, which looks identical to an empty result set.",
         "type": "array",
-        "item_fields": [
-          "repo",
-          "slug",
-          "description",
-          "pluginCount",
-          "categories",
-          "pluginKeywords",
-          "discoveredAt",
-          "lastUpdated",
-          "source",
-          "stars",
-          "starsFetchedAt"
-        ]
+        "item_fields": {
+          "repo": "string",
+          "slug": "string",
+          "description": "string",
+          "pluginCount": "number",
+          "categories": "array of string",
+          "pluginKeywords": "array of string",
+          "stars": "number, sometimes absent",
+          "discoveredAt": "string",
+          "lastUpdated": "string",
+          "source": "string",
+          "starsFetchedAt": "string",
+          "createdAt": "string"
+        }
       },
       "search": {
         "match_fields": ["repo", "description", "categories", "pluginKeywords"],

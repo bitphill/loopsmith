@@ -50,6 +50,36 @@ spending anything: sixteen workers at p=0.95 buy ×9.14, not ×16.
 it once. After that the run is hands-off, except for anything the config marks
 as a human checkpoint — those stop regardless of the grant.
 
+## Keep it running
+
+`run` executes once. `watch` is what makes a loop live for weeks:
+
+```bash
+loopsmith watch <path>/loop.yaml --check      # list triggers, run nothing
+loopsmith watch <path>/loop.yaml              # until interrupted
+loopsmith schedule <path>/loop.yaml --install # survive a reboot
+```
+
+Triggers: `cron` (UTC), `interval`, `file_change`, `goal_satisfied`. A failed
+run logs and the watcher continues — that is the difference between a
+scheduler and a one-shot. `watch` refuses a manual-only config rather than
+sleeping forever.
+
+## Let it find what works
+
+```bash
+loopsmith skills search <terms...>            # claudemarketplaces.com + skills.sh
+loopsmith skills acquire <config> <name>      # into quarantine
+loopsmith skills list <config>                # what this loop can see
+loopsmith skills scores <config>              # ranked by gate outcomes
+loopsmith proposals <config> <run-id>         # what it wants changed
+```
+
+Set `skills.explore: true` with `explore_candidates` and the loop trials
+sub-agents it was not told to use, then proposes the ones that correlate with
+satisfied goals. It cannot adopt them itself — apply a proposal by editing the
+config.
+
 ## When a run ends
 
 ```bash

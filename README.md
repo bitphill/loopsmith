@@ -4,7 +4,7 @@
   <p><em>Self-evolving agent loops. The gate is code, so "done" cannot be argued.</em></p>
   <p>
     <img alt="rust" src="https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white" />
-    <img alt="tests" src="https://img.shields.io/badge/tests-83%20passing-2A5A8A" />
+    <img alt="tests" src="https://img.shields.io/badge/tests-148%20passing-2A5A8A" />
     <img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" />
     <img alt="platforms" src="https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A" />
   </p>
@@ -89,13 +89,21 @@ The orchestrator is a binary rather than a chat session because a loop has to su
 | `new --path <dir>` | Scaffold a purpose-specific loop. `--path` is required |
 | `validate <config>` | Check the A–H model; fails on unfinished manual work |
 | `plan <config>` | Waves, critical path, parallel fraction, predicted speedup |
-| `run <config>` | Execute. `--dry-run` plans without spending anything |
+| `run <config>` | Execute once. `--dry-run` plans without spending anything |
+| **`watch <config>`** | **Stay resident and run whenever a trigger fires — this is what makes a loop live for weeks** |
+| `schedule <config> [--install]` | Hand the schedule to launchd or cron so it survives a reboot |
 | `resume <config> <run-id>` | Continue from the last checkpoint |
 | `status <config> <run-id>` | Gate rulings per goal |
 | `ledger <config> <run-id>` | Everything that happened, including every stop-gate trigger |
 | `gate <config> --target <goal>` | Ask the gate now, without a provider call |
+| `skills search <terms...>` | Search claudemarketplaces.com and skills.sh |
+| `skills acquire <config> <name>` | Install a sub-agent into quarantine |
+| `skills list <config> [--all]` | Sub-agents this loop can see |
+| `skills scores <config>` | Rank sub-agents by the gate outcomes that followed their use |
+| `proposals <config> <run-id>` | What the loop wants changed about itself |
 | `providers <config>` | Which providers are usable, and why not |
 | `permissions <config> [--write f]` | Derive and merge the narrowest grant |
+| `prune <config>` | Remove the git worktrees this loop created |
 | `mcp --state <dir>` | Serve the control plane over stdio MCP |
 
 ---
@@ -210,6 +218,14 @@ gemini       unavailable  command not found on PATH; missing env: GEMINI_API_KEY
 
 Cheap tiers carry mechanical, high-volume work; strong tiers carry judgment. Spending frontier reasoning on extraction is where loop budgets die.
 
+**Spend accounting.** Set `usage_regex` to pull a real token count out of a provider's output and `cost_per_1k_tokens` to price it. Without a regex, usage is estimated at roughly four characters per token and every report says so:
+
+```
+spend:       263 tokens (estimated: no provider reported usage), $0.0000
+```
+
+An approximate ceiling that fires beats an exact one that never does, which is what an unaccounted budget gate amounts to.
+
 ---
 
 ## Why the gate is Rust
@@ -227,18 +243,59 @@ The MCP server makes the same point by omission: it exposes the plan, the ledger
 
 ---
 
+## Running for weeks
+
+`run` executes once. `watch` is the process that keeps a loop alive:
+
+```bash
+loopsmith watch loop.yaml              # until interrupted
+loopsmith watch loop.yaml --check      # show triggers, run nothing
+loopsmith schedule loop.yaml --install # survive a reboot (launchd / cron)
+```
+
+Triggers: `cron` (five fields, **evaluated in UTC**), `interval` (timezone-independent, preferred for plain cadence), `file_change`, and `goal_satisfied`. File and goal triggers fire on the *edge*, not the level, so a satisfied goal does not retrigger forever, and the watcher ignores its own `state/` directory so the ledger's writes cannot retrigger it.
+
+A failed run logs and the watcher continues. That difference — a crash ending one run instead of the whole schedule — is what separates a scheduler from a one-shot.
+
 ## Self-evolution, bounded
 
-| The loop may, on its own | The loop must propose |
+The loop **discovers** which sub-agents help rather than being told:
+
+```yaml
+skills:
+  explore: true                                  # off by default; it spends money
+  explore_candidates: [table-formatter, chart-maker]
+  min_trials: 3
+```
+
+Each iteration attaches one under-trialled candidate to a builder, records the gate outcome that followed, and ranks by satisfaction rate. What correlates with satisfied goals becomes a proposal:
+
+```
+$ loopsmith skills scores loop.yaml
+skill                         trials satisfied   mean pass  source
+chart-maker                        3      100%       1.00  generated
+table-formatter                    3       33%       0.42  generated
+
+$ loopsmith proposals loop.yaml run-1786861783335
+[AdoptSkill] chart-maker (iteration 3)
+  goals were satisfied in 100% of 3 trials using `chart-maker`; it is not in the config
+  suggested: skills: [chart-maker]
+
+Apply these by editing the config yourself. The loop cannot.
+```
+
+| The loop does, on its own | The loop only proposes |
 |---|---|
-| Acquire or generate sub-agents (quarantined) | Goals |
-| Tune skill descriptions for triggering | Validations |
-| Reshape the graph after repeated node failure | Success scenarios |
-| Write scratchpad notes between iterations | Stop gates |
+| Acquire, install, or generate sub-agents (quarantined) | Goals |
+| Trial candidates and score them against gate outcomes | Validations |
+| Write scratchpad notes between iterations | Success scenarios |
+| | Which skills the config uses |
 
-Everything in the right column is written to `proposals/` for human review. The loop cannot move its own goalposts — a system that rewrites the criteria it is judged against cannot certify that it met them.
+The loop cannot move its own goalposts, and cannot silently adopt a tool. A system that rewrites the criteria it is judged against cannot certify that it met them.
 
-Sub-agents are sourced **installed → marketplace → generate**, with trust floors configured in [`config/marketplaces.json`](config/marketplaces.json). Anything acquired lands in `generated-skills/` and stays there until a human promotes it; an auto-acquired sub-agent runs with whatever your permission grant allowed, so promotion is a decision, not a default.
+**One lucky run is not evidence.** Below `min_trials`, a candidate is recorded and ignored.
+
+Sub-agents are sourced **installed → marketplace → generate**, with trust floors in [`config/marketplaces.json`](config/marketplaces.json). Names matching credential-shaped patterns are never auto-installed regardless of star count — popularity is not trust. Everything acquired lands in `generated-skills/` until a human promotes it, because an acquired sub-agent runs with whatever your permission grant allowed.
 
 ---
 
@@ -265,9 +322,10 @@ loops/
         ├── loopsmith-memory           Store trait + sled backend
         ├── loopsmith-graph            DAG, waves, critical path, Amdahl
         ├── loopsmith-gate             deterministic verdicts
-        ├── loopsmith-provider         command-template routing
+        ├── loopsmith-provider         command-template routing + usage accounting
+        ├── loopsmith-skills           acquisition, marketplace, outcome ranking
         ├── loopsmith-mcp              stdio MCP server
-        └── loopsmith-cli              the binary
+        └── loopsmith-cli              the binary, scheduler, judge parsing
 ```
 
 `sled` is shipped but sits behind a `Store` trait — it is effectively frozen upstream, and the trait means a swap to `redb` never reaches callers.
@@ -281,7 +339,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd runtime && cargo test --workspace
 ```
 
-83 tests, no warnings. The ones worth knowing about:
+148 tests, no warnings. The ones worth knowing about:
 
 - `the_gate_can_take_done_back` — satisfied flips to unsatisfied when the artifact disappears
 - `judge_on_the_builders_provider_is_refused` — self-judgment cannot satisfy the gate
@@ -290,6 +348,16 @@ cd runtime && cargo test --workspace
 - `amdahl_matches_the_published_table` — the sizing arithmetic
 - `checkpoint_survives_reopen` — resume after a crash
 - `an_unsatisfiable_loop_stops_on_no_progress_not_on_success`
+- `a_judge_verdict_now_reaches_the_gate` / `a_judge_on_the_builders_provider_still_cannot_satisfy_the_gate`
+- `a_bare_pass_without_evidence_is_demoted_to_fail` — a verdict with no evidence is an assertion
+- `tokens_are_now_accounted_so_the_budget_gate_can_fire`
+- `independent_nodes_in_a_wave_run_concurrently` — timed, not asserted by inspection
+- `two_nodes_get_separate_directories` — worktree isolation actually isolates
+- `one_lucky_run_is_not_evidence` — a single trial cannot drive a config change
+- `a_high_star_credential_grabber_is_still_excluded` — popularity is not trust
+- `the_live_payload_shape_parses` — guards the field-type bug that made search silently return nothing
+- `a_cron_trigger_fires_once_per_minute_not_once_per_poll`
+- `the_watcher_ignores_its_own_state_directory`
 
 ---
 

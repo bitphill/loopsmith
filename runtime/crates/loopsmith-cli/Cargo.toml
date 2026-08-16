@@ -17,6 +17,7 @@ loopsmith-memory = { workspace = true }
 loopsmith-graph = { workspace = true }
 loopsmith-gate = { workspace = true }
 loopsmith-provider = { workspace = true }
+loopsmith-skills = { workspace = true }
 loopsmith-mcp = { path = "../loopsmith-mcp" }
 clap = { workspace = true }
 serde = { workspace = true }

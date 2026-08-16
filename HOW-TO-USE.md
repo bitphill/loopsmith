@@ -17,6 +17,7 @@ produces, how the pieces fit, and what every configuration field is for.
 10. [Failure playbook](#10-failure-playbook)
 11. [Self-evolution and the proposals directory](#11-self-evolution-and-the-proposals-directory)
 12. [Promotion path](#12-promotion-path)
+13. [Running for weeks](#13-running-for-weeks)
 
 ---
 
@@ -35,7 +36,8 @@ CONTROL PLANE   loopsmith (Rust)                  ← owns truth
                   ├─ memory    sled: episodes, goal state, ledger, checkpoints
                   ├─ gate      deterministic verdicts — the ONLY writer of
                   │            goal_satisfied, and able to revoke it
-                  ├─ provider  command-template routing across any CLI or API
+                  ├─ provider  command-template routing, token/cost accounting
+                  ├─ skills    acquire, trial, rank, propose
                   └─ mcp       stdio server exposing plan, ledger, gate, pad
                        │
 EXECUTION       Any provider                       ← owns judgment
@@ -173,8 +175,17 @@ Fields: `target`, `name`, `mode`, `statement`, `threshold` (required for
 warns if you declare none.
 
 ### G · `schedules`
-`manual`, `cron` (`expr`), `file_change` (`path`), `goal_satisfied` (`goal`).
-Schedule last, after the loop is reliable by hand.
+`manual`, `cron` (`expr`), `interval` (`seconds`), `file_change` (`path`),
+`goal_satisfied` (`goal`). Schedule last, after the loop is reliable by hand.
+
+**Cron is evaluated in UTC.** Deriving a correct local offset in a
+multithreaded process is unsound on Unix without care, and a scheduler quietly
+an hour off twice a year is worse than one honestly in UTC. For plain cadence,
+`interval` avoids the question entirely.
+
+`file_change` and `goal_satisfied` fire on the **edge**, not the level: a goal
+that stays satisfied does not retrigger, and the watcher skips its own `state/`
+directory so ledger writes cannot retrigger it.
 
 ### H · `constraints`
 `global` plus `per_node` overrides. Merge semantics: **rules append, limits
@@ -327,18 +338,38 @@ the ledger.
 
 ## 11. Self-evolution and the proposals directory
 
-| The loop may, on its own | The loop must propose |
+The loop finds out which sub-agents help by trying them and watching the gate.
+
+```yaml
+skills:
+  explore: true                                  # off by default; it spends money
+  explore_candidates: [table-formatter, chart-maker]
+  min_trials: 3
+```
+
+Each iteration attaches one under-trialled candidate to a **builder** node —
+judges and adversaries keep a fixed toolset, so the check does not drift while
+the work does. After the gate rules, every skill used is paired with the
+outcome for the goals that node advances, and stored as a trial.
+
+```bash
+loopsmith skills scores loop.yaml       # ranked by satisfaction rate
+loopsmith proposals loop.yaml <run-id>  # what it wants changed
+```
+
+| The loop does, on its own | The loop only proposes |
 |---|---|
-| Acquire or generate sub-agents (quarantined) | Goals |
-| Tune skill descriptions for triggering | Validations |
-| Reshape the graph after repeated node failure | Success scenarios |
-| Write scratchpad notes between iterations | Stop gates |
+| Acquire, install, or generate sub-agents (quarantined) | Goals |
+| Trial candidates and score them against gate outcomes | Validations |
+| Write scratchpad notes between iterations | Success scenarios |
+| | Which skills the config uses |
 
-Everything in the right column is written to `proposals/` for review. The loop
-cannot move its own goalposts — a system that rewrites the criteria it is
-judged against cannot certify that it met them.
+A candidate below `min_trials` is recorded and ignored — one lucky run is not
+evidence. A skill already in the config is never re-proposed; a configured
+skill that consistently fails is proposed for removal.
 
-Review `proposals/` after every run that produced one.
+The loop cannot move its own goalposts, and cannot silently adopt a tool.
+Apply a proposal by editing the config yourself.
 
 ---
 
@@ -356,3 +387,43 @@ generated-skills/<name>/     auto-acquired, quarantined, runs nowhere yet
 
 Read the whole `SKILL.md` before promoting, including `allowed-tools` and any
 bundled scripts. Promotion grants it your permissions.
+
+---
+
+## 13. Running for weeks
+
+`run` executes once and exits. `watch` is what keeps a loop alive.
+
+```bash
+loopsmith watch loop.yaml                 # until interrupted
+loopsmith watch loop.yaml --check         # list triggers, run nothing
+loopsmith watch loop.yaml --max-runs 5    # bounded, useful for a first soak
+loopsmith schedule loop.yaml              # print the launchd agent / crontab line
+loopsmith schedule loop.yaml --install    # write it (loading it stays your call)
+```
+
+`watch` refuses to start on a manual-only config rather than sleeping forever.
+Poll interval is derived from the trigger set: 5s when a file is watched, a
+quarter of the shortest interval, 20s when cron is involved, 30s otherwise.
+
+**A failed run does not stop the watcher.** It logs and waits for the next
+trigger — the difference between a scheduler and a one-shot.
+
+`schedule --install` writes the launchd plist but does not load it. Loading is
+a persistent change to your machine, so the `launchctl load -w` command is
+printed for you to run.
+
+### What a long run actually needs
+
+| Concern | What handles it |
+|---|---|
+| Surviving a crash | Checkpoint after every iteration; `resume` continues rather than restarting |
+| Not spending forever | Token, cost, and wall-clock ceilings, all evaluated every iteration |
+| Not spinning | `no_progress_iterations` halts when verdicts stop changing |
+| Knowing what happened | Append-only ledger, including every stop-gate trigger |
+| Parallel writers colliding | `isolated: true` puts the node in its own git worktree |
+| Leftover state | `loopsmith prune` removes the worktrees |
+
+Worktrees are reused across iterations rather than recreated, so a node's
+in-progress work survives the next pass. Outside a git repository, isolation
+degrades to the shared directory and says so in the ledger rather than failing.

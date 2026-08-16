@@ -183,12 +183,19 @@ its ceiling constantly is telling you its judge is miscalibrated.
 schedules:
   - type: manual
   - type: cron
-    expr: "0 2 * * *"
+    expr: "0 2 * * *"       # five fields, evaluated in UTC
+  - type: interval
+    seconds: 3600           # timezone-independent; prefer this for cadence
   - type: file_change
     path: src/
   - type: goal_satisfied
     goal: gather
 ```
+
+`loopsmith watch <config>` stays resident and runs the loop whenever one of
+these fires; `loopsmith schedule <config> --install` hands the job to launchd
+or cron so it survives a reboot. File and goal triggers fire on the *edge*, so
+a goal that stays satisfied does not retrigger.
 
 Schedule last. Scheduling something you have not made reliable by hand is how
 loops blow up overnight.
@@ -285,6 +292,18 @@ Placeholders: `{prompt}` `{system}` `{model}` `{tier}` `{node}`.
 substituted, or logged — pass secrets through the command itself (`curl`
 expanding `$OPENAI_API_KEY`) so they never enter the ledger.
 
+**Spend accounting.** Add `usage_regex` to pull a real token count out of the
+provider's output, and `cost_per_1k_tokens` to price it:
+
+```yaml
+  usage_regex: '"total_tokens"\s*:\s*(\d+)'
+  cost_per_1k_tokens: 0.0006
+```
+
+Without a regex, usage is estimated at roughly four characters per token and
+every report says so. An approximate ceiling that fires beats an exact one that
+never does.
+
 Cheap tiers carry mechanical work; strong tiers carry judgment. Spending
 frontier reasoning on extraction is where loop budgets die.
 
@@ -298,22 +317,39 @@ skills:
   quarantine_dir: generated-skills
   min_marketplace_stars: 100
   require_human_promotion: true
+  explore: false                                 # on = try things you did not configure
+  explore_candidates: [table-formatter, chart-maker]
+  min_trials: 3
 ```
 
 Installed first, then the marketplace, then generate a new one. Anything
 acquired lands in quarantine — an auto-acquired sub-agent is a proposal, not a
 decision, and promotion into `~/.claude/skills/` stays a human act.
 
+**Exploration** is how the loop discovers what helps rather than only
+confirming what you told it. With `explore: true`, each iteration attaches one
+under-trialled candidate to a builder node, and the gate outcome that follows
+is recorded against that skill. After `min_trials`, what correlates with
+satisfied goals becomes a proposal:
+
+```bash
+loopsmith skills scores loop.yaml       # ranked by satisfaction rate
+loopsmith proposals loop.yaml <run-id>  # adopt / drop suggestions
+```
+
+It is off by default because exploration spends real money, and below
+`min_trials` a result is recorded and ignored — one lucky run is not evidence.
+
 ---
 
 # What the loop may change about itself
 
-| May change freely | Goes to `proposals/` for review |
+| Does on its own | Only proposes |
 |---|---|
-| Acquire or generate sub-agents (quarantined) | Goals |
-| Tune skill descriptions for triggering | Validations |
-| Reshape the graph after repeated node failure | Success scenarios |
-| Write scratchpad notes between iterations | Stop gates |
+| Acquire, install, or generate sub-agents (quarantined) | Goals |
+| Trial candidates and score them against gate outcomes | Validations |
+| Write scratchpad notes between iterations | Success scenarios |
+| | Which skills the config uses |
 
 The loop cannot move its own goalposts. A system that can rewrite the criteria
 it is judged against cannot certify that it met them.
@@ -330,3 +366,5 @@ it is judged against cannot certify that it met them.
 - [ ] `human_checkpoint` covers everything irreversible in your domain
 - [ ] `loopsmith plan` speedup looks like the work you expect
 - [ ] Permission grant reviewed and written once
+- [ ] A budget ceiling that can actually fire — set `usage_regex` or accept the estimate
+- [ ] For a long-lived loop: a non-manual trigger, or `watch` refuses to start

@@ -144,6 +144,61 @@ pub enum LedgerKind {
     RunFinished,
 }
 
+/// One observation of "did this skill help?".
+///
+/// This is the substrate of self-evolution. A loop cannot know which
+/// sub-agents earn their place by reasoning about it — it has to try them and
+/// watch the gate. Each trial pairs a skill with the gate outcome that
+/// followed, so the ranking is grounded in verdicts rather than in the
+/// model's opinion of its own tooling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillTrial {
+    pub run_id: String,
+    pub iteration: u32,
+    pub node_id: String,
+    pub skill: String,
+    /// installed | marketplace | generated
+    pub source: String,
+    /// Blocking pass rate for this node's goals after the node ran.
+    pub pass_rate: f64,
+    /// Did every goal this node advances end the iteration satisfied?
+    pub satisfied: bool,
+    #[serde(default)]
+    pub tokens: Option<u64>,
+    pub created_ms: u64,
+}
+
+/// A change the loop wants to make but may not apply itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Proposal {
+    pub run_id: String,
+    pub iteration: u32,
+    pub kind: ProposalKind,
+    /// What it concerns — a node id, a skill name, a goal name.
+    pub subject: String,
+    pub rationale: String,
+    /// Suggested config fragment, as YAML.
+    #[serde(default)]
+    pub patch: Option<String>,
+    pub created_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposalKind {
+    /// Keep a skill that correlates with satisfied goals.
+    AdoptSkill,
+    /// Drop a skill that does not.
+    DropSkill,
+    /// Try a skill found on the marketplace.
+    TrySkill,
+    /// Reshape the graph after repeated node failure.
+    ReshapeGraph,
+    /// Anything touching goals, validations, or success criteria. Always a
+    /// proposal, never an action.
+    ChangeCriteria,
+}
+
 /// Where to pick up after a crash or a scheduled pause.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Checkpoint {
@@ -175,8 +230,68 @@ pub trait Store: Send + Sync {
     fn set_scratchpad(&self, run_id: &str, key: &str, value: &str) -> Result<()>;
     fn scratchpad(&self, run_id: &str, key: &str) -> Result<Option<String>>;
 
+    fn put_skill_trial(&self, t: &SkillTrial) -> Result<u64>;
+    /// Trials across every run, so a skill's record survives one bad loop.
+    fn skill_trials(&self) -> Result<Vec<SkillTrial>>;
+
+    fn put_proposal(&self, p: &Proposal) -> Result<u64>;
+    fn proposals(&self, run_id: &str) -> Result<Vec<Proposal>>;
+
     fn runs(&self) -> Result<Vec<String>>;
     fn flush(&self) -> Result<()>;
+}
+
+/// How a skill has performed across every trial recorded for it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillScore {
+    pub skill: String,
+    pub trials: usize,
+    pub satisfied: usize,
+    pub mean_pass_rate: f64,
+    pub source: String,
+}
+
+impl SkillScore {
+    pub fn satisfaction_rate(&self) -> f64 {
+        if self.trials == 0 {
+            0.0
+        } else {
+            self.satisfied as f64 / self.trials as f64
+        }
+    }
+}
+
+/// Rank skills by observed outcome. A skill with too few trials is reported
+/// but should not be acted on — one lucky run is not evidence.
+pub fn score_skills(trials: &[SkillTrial]) -> Vec<SkillScore> {
+    let mut by: BTreeMap<&str, (usize, usize, f64, &str)> = BTreeMap::new();
+    for t in trials {
+        let e = by
+            .entry(t.skill.as_str())
+            .or_insert((0, 0, 0.0, t.source.as_str()));
+        e.0 += 1;
+        if t.satisfied {
+            e.1 += 1;
+        }
+        e.2 += t.pass_rate;
+    }
+    let mut out: Vec<SkillScore> = by
+        .into_iter()
+        .map(|(skill, (n, sat, sum, src))| SkillScore {
+            skill: skill.to_string(),
+            trials: n,
+            satisfied: sat,
+            mean_pass_rate: if n == 0 { 0.0 } else { sum / n as f64 },
+            source: src.to_string(),
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.satisfaction_rate()
+            .partial_cmp(&a.satisfaction_rate())
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.trials.cmp(&a.trials))
+    });
+    out
 }
 
 /// Open the shipped backend.

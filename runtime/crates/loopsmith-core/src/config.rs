@@ -254,6 +254,9 @@ fn default_no_progress() -> u32 {
 pub enum Trigger {
     /// Five-field cron expression.
     Cron { expr: String },
+    /// Fire every N seconds. Timezone-independent, which makes it the right
+    /// choice for cadence that does not need to land at a wall-clock time.
+    Interval { seconds: u64 },
     /// Fire when a path changes.
     FileChange { path: String },
     /// Fire when a named upstream goal becomes satisfied.
@@ -459,6 +462,14 @@ pub struct ProviderSpec {
     /// Send the prompt on stdin instead of substituting into args.
     #[serde(default)]
     pub prompt_on_stdin: bool,
+    /// Regex with one capture group pulling a token count out of the
+    /// provider's own output. Without it, usage is estimated from character
+    /// count, which is enough to make a budget ceiling real but is not exact.
+    #[serde(default)]
+    pub usage_regex: Option<String>,
+    /// Price per thousand tokens, for the cost ceiling.
+    #[serde(default)]
+    pub cost_per_1k_tokens: Option<f64>,
 }
 
 /// Provider families. Each variant accepts the spellings people actually
@@ -516,6 +527,22 @@ pub struct SkillPolicy {
     pub min_marketplace_stars: u64,
     #[serde(default = "yes")]
     pub require_human_promotion: bool,
+    /// Try a candidate sub-agent that is *not* in the config, so the loop can
+    /// discover that something helps rather than only confirming what it was
+    /// told. Off by default: exploration spends real money.
+    #[serde(default)]
+    pub explore: bool,
+    /// Candidates to try when exploring, in order. Each is trialled until it
+    /// has enough runs to judge.
+    #[serde(default)]
+    pub explore_candidates: Vec<String>,
+    /// Trials needed before a candidate can be proposed or dismissed.
+    #[serde(default = "default_min_trials")]
+    pub min_trials: usize,
+}
+
+fn default_min_trials() -> usize {
+    3
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -533,6 +560,9 @@ impl Default for SkillPolicy {
             quarantine_dir: default_quarantine(),
             min_marketplace_stars: default_min_stars(),
             require_human_promotion: true,
+            explore: false,
+            explore_candidates: vec![],
+            min_trials: default_min_trials(),
         }
     }
 }

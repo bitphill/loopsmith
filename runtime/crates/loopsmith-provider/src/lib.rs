@@ -62,6 +62,36 @@ pub struct InvokeResponse {
     pub duration_ms: u64,
     #[serde(default)]
     pub stderr_tail: Option<String>,
+    /// Tokens consumed. Exact when the provider reports them and a
+    /// `usage_regex` extracts them; otherwise estimated.
+    #[serde(default)]
+    pub tokens: Option<u64>,
+    /// True when `tokens` came from a character-count estimate rather than
+    /// from the provider. Recorded so a budget report can say which it is.
+    #[serde(default)]
+    pub tokens_estimated: bool,
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+}
+
+/// Rough token count when a provider reports nothing usable.
+///
+/// Four characters per token is the usual English approximation. It is not
+/// exact, and the caller is told so — but an approximate ceiling that fires is
+/// worth far more than an exact one that never does, which is what an
+/// unaccounted budget gate amounts to.
+pub fn estimate_tokens(prompt: &str, output: &str) -> u64 {
+    ((prompt.chars().count() + output.chars().count()) as u64).div_ceil(4)
+}
+
+/// Pull a token count out of provider output using its configured regex.
+pub fn parse_usage(spec: &ProviderSpec, text: &str) -> Option<u64> {
+    let pattern = spec.usage_regex.as_ref()?;
+    let re = regex::Regex::new(pattern).ok()?;
+    let caps = re.captures(text)?;
+    // Prefer the first capture group; fall back to the whole match.
+    let raw = caps.get(1).or_else(|| caps.get(0))?.as_str();
+    raw.trim().replace([',', '_'], "").parse::<u64>().ok()
 }
 
 /// Cheap, dependency-free digest for prompt provenance. Not cryptographic —
@@ -247,12 +277,29 @@ pub fn invoke(spec: &ProviderSpec, req: &InvokeRequest) -> Result<InvokeResponse
         });
     }
 
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+
+    // Providers report usage in wildly different places; look in both streams
+    // before falling back to an estimate.
+    let reported = parse_usage(spec, &stdout).or_else(|| parse_usage(spec, &stderr));
+    let (tokens, estimated) = match reported {
+        Some(t) => (Some(t), false),
+        None => (Some(estimate_tokens(&req.prompt, &stdout)), true),
+    };
+    let cost = match (tokens, spec.cost_per_1k_tokens) {
+        (Some(t), Some(rate)) => Some((t as f64 / 1000.0) * rate),
+        _ => None,
+    };
+
     Ok(InvokeResponse {
         provider_id: spec.id.clone(),
-        output: String::from_utf8_lossy(&out.stdout).to_string(),
+        output: stdout,
         exit_code: code,
         duration_ms: started.elapsed().as_millis() as u64,
         stderr_tail: stderr.lines().last().map(|s| s.to_string()),
+        tokens,
+        tokens_estimated: estimated,
+        cost_usd: cost,
     })
 }
 
@@ -308,6 +355,8 @@ pub fn starter_providers() -> Vec<ProviderSpec> {
             requires_env: vec![],
             timeout_seconds: Some(900),
             prompt_on_stdin: false,
+            usage_regex: None,
+            cost_per_1k_tokens: None,
         },
         ProviderSpec {
             id: "ollama".into(),
@@ -319,6 +368,8 @@ pub fn starter_providers() -> Vec<ProviderSpec> {
             requires_env: vec![],
             timeout_seconds: Some(600),
             prompt_on_stdin: true,
+            usage_regex: None,
+            cost_per_1k_tokens: None,
         },
         ProviderSpec {
             id: "grok".into(),
@@ -330,6 +381,8 @@ pub fn starter_providers() -> Vec<ProviderSpec> {
             requires_env: vec!["XAI_API_KEY".into()],
             timeout_seconds: Some(600),
             prompt_on_stdin: false,
+            usage_regex: None,
+            cost_per_1k_tokens: None,
         },
         ProviderSpec {
             id: "openai".into(),
@@ -352,6 +405,10 @@ pub fn starter_providers() -> Vec<ProviderSpec> {
             requires_env: vec!["OPENAI_API_KEY".into()],
             timeout_seconds: Some(300),
             prompt_on_stdin: true,
+            // The response body carries usage, so the cost ceiling here is
+            // measured rather than estimated.
+            usage_regex: Some(r#""total_tokens"\s*:\s*(\d+)"#.into()),
+            cost_per_1k_tokens: Some(0.0006),
         },
         ProviderSpec {
             id: "gemini".into(),
@@ -363,6 +420,8 @@ pub fn starter_providers() -> Vec<ProviderSpec> {
             requires_env: vec!["GEMINI_API_KEY".into()],
             timeout_seconds: Some(600),
             prompt_on_stdin: false,
+            usage_regex: None,
+            cost_per_1k_tokens: None,
         },
     ]
 }
@@ -382,6 +441,8 @@ mod tests {
             requires_env: vec![],
             timeout_seconds: Some(30),
             prompt_on_stdin: false,
+            usage_regex: None,
+            cost_per_1k_tokens: None,
         }
     }
 
@@ -563,6 +624,50 @@ validations:
         assert_eq!(dispatch(&cfg, &r, None).unwrap().0.output.trim(), "small");
         r.tier = Tier::Strong;
         assert_eq!(dispatch(&cfg, &r, None).unwrap().0.output.trim(), "big");
+    }
+
+    #[test]
+    fn usage_is_estimated_when_the_provider_reports_nothing() {
+        let s = spec("echoer", "echo", &["{prompt}"]);
+        let r = invoke(&s, &req()).unwrap();
+        assert!(r.tokens.unwrap() > 0);
+        assert!(r.tokens_estimated, "must be flagged as an estimate");
+    }
+
+    #[test]
+    fn a_usage_regex_extracts_the_real_count() {
+        let mut s = spec("reporter", "echo", &[r#"{"usage":{"total_tokens":1234}}"#]);
+        s.usage_regex = Some(r#""total_tokens"\s*:\s*(\d+)"#.into());
+        let r = invoke(&s, &req()).unwrap();
+        assert_eq!(r.tokens, Some(1234));
+        assert!(!r.tokens_estimated, "reported usage is not an estimate");
+    }
+
+    #[test]
+    fn cost_follows_from_tokens_and_rate() {
+        let mut s = spec("priced", "echo", &["hello"]);
+        s.usage_regex = Some(r"(\d+)".into());
+        s.cost_per_1k_tokens = Some(2.0);
+        let mut sp = s.clone();
+        sp.args = vec!["2000".into()];
+        let r = invoke(&sp, &req()).unwrap();
+        assert_eq!(r.tokens, Some(2000));
+        assert!((r.cost_usd.unwrap() - 4.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn no_rate_means_no_cost_rather_than_a_guessed_one() {
+        let s = spec("free", "echo", &["x"]);
+        let r = invoke(&s, &req()).unwrap();
+        assert!(r.cost_usd.is_none());
+    }
+
+    #[test]
+    fn a_malformed_usage_regex_falls_back_to_estimating() {
+        let mut s = spec("broken", "echo", &["x"]);
+        s.usage_regex = Some("([unclosed".into());
+        let r = invoke(&s, &req()).unwrap();
+        assert!(r.tokens_estimated);
     }
 
     #[test]

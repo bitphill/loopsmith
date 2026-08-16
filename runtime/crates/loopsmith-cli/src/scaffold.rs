@@ -177,6 +177,9 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             quarantine_dir: "generated-skills".into(),
             min_marketplace_stars: 100,
             require_human_promotion: true,
+            explore: false,
+            explore_candidates: vec![],
+            min_trials: 3,
         },
     }
 }

@@ -1,15 +1,15 @@
 [package]
-name = "loopsmith-provider"
+name = "loopsmith-skills"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Provider routing for loopsmith: Claude Code, Ollama, Grok, OpenAI, Gemini, Hermes, MCP, and any BYOK command"
+description = "Sub-agent acquisition for loopsmith: installed skills, claudemarketplaces.com, the skills CLI, quarantine, and outcome-ranked selection"
 
 [dependencies]
 loopsmith-core = { workspace = true }
+loopsmith-memory = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-regex = { workspace = true }

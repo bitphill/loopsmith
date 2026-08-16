@@ -6,6 +6,7 @@ members = [
     "crates/loopsmith-graph",
     "crates/loopsmith-gate",
     "crates/loopsmith-provider",
+    "crates/loopsmith-skills",
     "crates/loopsmith-mcp",
     "crates/loopsmith-cli",
 ]
@@ -24,6 +25,7 @@ loopsmith-memory = { path = "crates/loopsmith-memory" }
 loopsmith-graph = { path = "crates/loopsmith-graph" }
 loopsmith-gate = { path = "crates/loopsmith-gate" }
 loopsmith-provider = { path = "crates/loopsmith-provider" }
+loopsmith-skills = { path = "crates/loopsmith-skills" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
