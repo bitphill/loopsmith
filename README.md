@@ -363,4 +363,4 @@ cd runtime && cargo test --workspace
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).
