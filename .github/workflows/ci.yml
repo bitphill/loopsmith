@@ -65,6 +65,14 @@ jobs:
       # several places are laid out by hand where the default would be worse.
       # Adding the gate would mean a 143-site reformat that buries every real
       # change in noise, so clippy carries the quality bar instead.
+      # One version lives in runtime/Cargo.toml; eight other files repeat it, and
+      # the one that gets missed at release time is usually a tag-pinned URL,
+      # which fails silently as a broken image on a registry page.
+      - name: Versions are in step
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: ./tools/sync-version.sh --check
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 

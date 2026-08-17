@@ -360,12 +360,31 @@ pub fn install_root() -> Option<PathBuf> {
 
 /// The absolute path of the running binary, for the generated scripts. Falls
 /// back to the bare name so the scripts still work when it is on `PATH`.
+///
+/// **Deliberately not canonicalized when it is already absolute.** Package
+/// managers install behind a stable symlink into a versioned directory —
+/// Homebrew's `/usr/local/bin/loopsmith` points at
+/// `/usr/local/Cellar/loopsmith/0.1.2/bin/loopsmith`. Resolving the symlink pins
+/// the version number, so every loop created before an upgrade has a dead path in
+/// its launcher the moment that Cellar directory is replaced. The symlink is the
+/// durable answer and the one to write down.
+///
+/// A relative `current_exe` is still canonicalized: a launcher pins an absolute
+/// path because cron, launchd, and Task Scheduler do not inherit a shell's
+/// working directory any more than they inherit its `PATH`.
+///
+/// The fallback in the generated script covers the rest — if the pin ever goes
+/// stale, the launcher finds `loopsmith` on `PATH` and says so.
 fn binary_path() -> String {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.canonicalize().ok())
+    let Ok(exe) = std::env::current_exe() else {
+        return "loopsmith".into();
+    };
+    if exe.is_absolute() {
+        return exe.display().to_string();
+    }
+    exe.canonicalize()
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "loopsmith".into())
+        .unwrap_or_else(|_| "loopsmith".into())
 }
 
 /// The header every generated script carries.
