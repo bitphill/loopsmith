@@ -25,7 +25,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 REPO = "bitphill/loopsmith"
 _RELEASE_BASE = f"https://github.com/{REPO}/releases/download/v{__version__}"
@@ -115,12 +115,14 @@ def ensure_binary() -> Path:
     if destination.exists():
         return destination
 
-    # A `loopsmith` already on PATH beats downloading a second copy — someone who
-    # ran `cargo install loopsmith` should not silently get two binaries.
-    existing = shutil.which("loopsmith")
-    if existing and Path(existing).resolve() != destination.resolve():
-        return Path(existing)
-
+    # There is deliberately no "reuse a `loopsmith` already on PATH" shortcut
+    # here. pip installs *this* package's console script as `loopsmith` on PATH,
+    # so `shutil.which("loopsmith")` finds the very script that is running and
+    # `execv`ing it re-enters this function — an infinite exec loop that presents
+    # as the command hanging with no output. Distinguishing our own script from a
+    # cargo-installed binary means comparing against argv[0], the interpreter's
+    # script directory, and every symlink in between, to save one download that
+    # happens once per version. Not worth the failure mode.
     target = _target()
     asset = f"loopsmith-v{__version__}-{target}.{'zip' if windows else 'tar.gz'}"
     want = _expected_digest(asset)

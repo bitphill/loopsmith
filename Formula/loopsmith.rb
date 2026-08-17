@@ -11,12 +11,12 @@
 # submitted when that day comes.
 #
 # The `sha256` is the GitHub source tarball's, filled in at release time:
-#   curl -sL https://github.com/bitphill/loopsmith/archive/refs/tags/v0.1.1.tar.gz | shasum -a 256
+#   curl -sL https://github.com/bitphill/loopsmith/archive/refs/tags/v0.1.2.tar.gz | shasum -a 256
 class Loopsmith < Formula
   desc "Self-evolving agent loops behind a deterministic verification gate"
   homepage "https://github.com/bitphill/loopsmith"
-  url "https://github.com/bitphill/loopsmith/archive/refs/tags/v0.1.1.tar.gz"
-  sha256 "6850b0e5d07bed32b3613d4c7da50e0fc36542239a5ff5188b524494e9edda75"
+  url "https://github.com/bitphill/loopsmith/archive/refs/tags/v0.1.2.tar.gz"
+  sha256 "13630b0305f9cb98fcb02a7700fa283225bb340ce0e379c3d19dd19d7e64a8ee"
   license "MIT"
   head "https://github.com/bitphill/loopsmith.git", branch: "main"
 

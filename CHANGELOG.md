@@ -4,6 +4,28 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-08-17
+
+### Fixed
+
+- **The PyPI launcher exec-looped instead of running.** `ensure_binary()` had a
+  "reuse a `loopsmith` already on PATH" shortcut, and pip installs *this* package's
+  console script as `loopsmith` on PATH — so `shutil.which("loopsmith")` found the
+  very script that was running and `execv` re-entered it forever. The symptom was
+  the worst kind: no output, no error, no traceback, just a command that never
+  returns. The shortcut is gone, because telling our own console script apart from
+  a cargo-installed binary means comparing argv[0], the interpreter's script
+  directory, and the symlinks between — all to save one download that happens once
+  per version. `__main__` also refuses outright if the binary it resolved is the
+  launcher itself, since that failure mode has no useful symptom to debug.
+
+Only the PyPI wrapper was affected. `loopsmith-cli` 0.1.1 on PyPI is unusable;
+0.1.2 is the version to install. The npm wrapper resolves a fixed path beside
+itself and never had this bug.
+
+Everything else is byte-for-byte 0.1.1. The version is bumped across all four
+registries rather than only on PyPI, so one number means one thing everywhere.
+
 ## [0.1.1] — 2026-08-17
 
 The first release the CI matrix ever ran against, and it found something on its
@@ -114,5 +136,6 @@ times out at 120 seconds. `ollama run` pulls a missing model, a pull is
 indistinguishable from slow generation from outside the process, and the point of
 a cheap tier is to be abandoned quickly. Run `ollama pull <model>` first.
 
+[0.1.2]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.2
 [0.1.1]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.1
 [0.1.0]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.0

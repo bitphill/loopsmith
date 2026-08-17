@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from . import ResolveError, ensure_binary
 
@@ -19,6 +20,21 @@ def main() -> int:
         print(f"[loopsmith] could not fetch the binary: {e}", file=sys.stderr)
         print("[loopsmith] build from source instead:  cargo install loopsmith", file=sys.stderr)
         return 127
+
+    # Never exec ourselves. This is belt-and-braces against the one failure mode
+    # that has no useful symptom: an exec loop looks exactly like a hang, with no
+    # output, no error, and no traceback to read.
+    try:
+        if Path(exe).resolve() == Path(sys.argv[0]).resolve():
+            print(
+                f"[loopsmith] refusing to run {exe}: that is this launcher, not the "
+                "loopsmith binary.\n"
+                "[loopsmith] build from source instead:  cargo install loopsmith",
+                file=sys.stderr,
+            )
+            return 127
+    except OSError:
+        pass  # An unresolvable argv[0] is not a reason to refuse to run.
 
     argv = [str(exe), *sys.argv[1:]]
 
