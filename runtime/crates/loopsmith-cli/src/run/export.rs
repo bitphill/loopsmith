@@ -199,7 +199,7 @@ where loopsmith >nul 2>&1\r\n\
 if errorlevel 1 (\r\n\
   echo loopsmith is not on PATH 1>&2\r\n\
   echo This package is a config and its evidence; it needs the binary to run. 1>&2\r\n\
-  exit /b 127\r\n\
+  endlocal & exit /b 127\r\n\
 )\r\n\
 loopsmith run \"{config_file}\" %*\r\n\
 endlocal & exit /b %errorlevel%\r\n"

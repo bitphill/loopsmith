@@ -29,6 +29,15 @@ The release where Windows stopped being a badge and started being a platform.
   `Command::new("git")` was never affected: Windows' `CreateProcess` appends the
   extension itself. Only loopsmith's own lookups were broken.
 
+- **The generated `.cmd` launchers reported success when they had failed.**
+  `setlocal` saves the current errorlevel and the implicit `endlocal` at the end
+  of a batch file restores it, so a bare `exit /b 127` inside a `setlocal` scope
+  exits **0**. A loop whose pinned binary had moved printed "loopsmith is not at
+  … and not on PATH" and then exited successfully — the precise silent failure
+  the exit code exists to prevent, and one a scheduled job would never surface.
+  `resume.cmd`'s "no run id given" exit 2 had the same defect, as did the export
+  launcher. Every exit now goes through `endlocal & exit /b <code>`, and a test
+  fails on any bare `exit /b` in a generated batch file.
 - `loopsmith new` closed by telling every user to run `run.sh`, including on
   Windows where `cmd.exe` cannot execute it and `run.cmd` was sitting beside it.
   It now names the launcher the host can run, and prints `set` rather than

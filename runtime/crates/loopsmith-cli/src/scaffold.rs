@@ -450,8 +450,14 @@ exec "$LOOPSMITH" resume "{config_file}" "$1"
 /// there without being regenerated.
 ///
 /// `%~dp0` is the script's own directory with a trailing backslash, which is why
-/// it is not quoted with a separate separator. `endlocal & exit /b` propagates
-/// the child's exit code, which a bare `exit /b` inside `setlocal` does not.
+/// it is not quoted with a separate separator.
+///
+/// **Every exit goes through `endlocal &`.** `setlocal` saves the current
+/// errorlevel and the implicit `endlocal` at the end of a batch file restores it,
+/// so a bare `exit /b 127` inside a `setlocal` scope reports whatever the
+/// errorlevel was *before* — which is 0. A loop whose binary had moved exited 0
+/// and looked like a success, which is precisely the silent failure the exit code
+/// exists to prevent.
 fn cmd_header(binary: &str, purpose: &str) -> String {
     format!(
         r#"@echo off
@@ -460,6 +466,10 @@ rem
 rem Paths are absolute because Task Scheduler does not inherit an interactive
 rem shell's PATH. The POSIX `.sh` sibling of this file does the same job under
 rem Git Bash, WSL, macOS, and Linux.
+rem
+rem Every exit is `endlocal & exit /b <code>`: setlocal saves the errorlevel and
+rem the implicit endlocal restores it, so a bare `exit /b` reports 0 no matter
+rem what code it was given.
 setlocal
 cd /d "%~dp0"
 
@@ -470,7 +480,7 @@ if not exist "%LOOPSMITH%" (
     echo loopsmith is not at %LOOPSMITH% and not on PATH 1>&2
     echo This loop was created against a binary that has since moved. 1>&2
     echo Re-point it by editing this script, or put loopsmith on PATH. 1>&2
-    exit /b 127
+    endlocal & exit /b 127
   )
   for /f "delims=" %%i in ('where loopsmith') do set "LOOPSMITH=%%i"
 )
@@ -495,7 +505,7 @@ fn resume_cmd(binary: &str, config_file: &str) -> String {
   echo The run id is printed at the end of every run and names the file in logs\. 1>&2
   echo recent runs: 1>&2
   for /f "delims=" %%f in ('dir /b /o-d logs\*.log 2^>nul') do @echo   %%~nf 1>&2
-  exit /b 2
+  endlocal & exit /b 2
 )
 "%LOOPSMITH%" resume "{config_file}" "%~1"
 endlocal & exit /b %errorlevel%

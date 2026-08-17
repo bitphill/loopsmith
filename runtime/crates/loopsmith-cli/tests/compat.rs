@@ -280,6 +280,25 @@ fn the_generated_cmd_launchers_are_crlf_and_shaped_for_cmd_exe() {
             text.contains("endlocal & exit /b %errorlevel%"),
             "{name} must propagate the exit code: {text}"
         );
+
+        // And *every* exit, not just the last one. `setlocal` saves the current
+        // errorlevel and the implicit `endlocal` restores it, so a bare
+        // `exit /b 127` reports 0 — a loop whose binary had moved exited
+        // successfully, which is exactly the silent failure the code exists to
+        // prevent. Windows CI caught this; no POSIX host can.
+        for (n, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.starts_with("rem ") {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("exit /b") {
+                panic!(
+                    "{name}:{} exits without `endlocal &`, so its code becomes 0: \
+                     `exit /b{rest}`",
+                    n + 1
+                );
+            }
+        }
         assert!(
             text.contains("cd /d \"%~dp0\""),
             "{name} must run from its own directory: {text}"

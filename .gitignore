@@ -38,6 +38,7 @@ npm/*.tgz
 pypi/dist/
 pypi/build/
 pypi/src/*.egg-info/
+pypi/.venv-build/
 __pycache__/
 *.pyc
 
