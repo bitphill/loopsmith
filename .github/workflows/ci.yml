@@ -32,12 +32,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `rustup` is preinstalled on every GitHub-hosted runner, so this needs no
+      # third-party action. That is not stylistic: action archives come from
+      # codeload, codeload rate-limits, and six consecutive runs lost a leg to
+      # 429/502/503 while *downloading the action* — before a line of loopsmith
+      # was compiled. A matrix that cannot start proves nothing, and the whole
+      # point of this one is to be evidence.
       - name: Install the toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add clippy
+          rustc --version && cargo --version
 
+      # Nice to have, not load-bearing. `continue-on-error` because a cache miss
+      # costs a few minutes and a cache action that cannot be downloaded should
+      # not fail the run.
       - uses: Swatinem/rust-cache@v2
+        continue-on-error: true
         with:
           workspaces: runtime
 
@@ -136,6 +149,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup update stable --no-self-update && rustup default stable
       - run: cargo install cargo-audit --locked
       - run: cargo audit
+        working-directory: runtime

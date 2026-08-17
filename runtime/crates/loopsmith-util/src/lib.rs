@@ -33,13 +33,56 @@ pub mod platform;
 pub fn which(cmd: &str) -> Option<PathBuf> {
     let p = Path::new(cmd);
     if p.is_absolute() || cmd.contains(std::path::MAIN_SEPARATOR) || cmd.contains('/') {
-        return is_executable(p).then(|| p.to_path_buf());
+        return first_executable(p);
     }
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).find_map(|dir| {
-        let candidate = dir.join(cmd);
-        is_executable(&candidate).then_some(candidate)
-    })
+    std::env::split_paths(&path).find_map(|dir| first_executable(&dir.join(cmd)))
+}
+
+/// `base` if it is executable, else `base` with each `PATHEXT` suffix tried.
+///
+/// The suffix loop is what makes this work on Windows at all. There, `git` is a
+/// file called `git.exe`, so joining the bare name onto every `PATH` entry
+/// matches nothing and `which` returns `None` for every command that exists.
+/// Everything downstream then reports the truth it was given: `doctor` says no
+/// tool is installed, `Platform::detect` finds no scheduler, and worktree
+/// isolation degrades to the shared directory with "git not on PATH" — on a
+/// machine where git is very much on PATH.
+fn first_executable(base: &Path) -> Option<PathBuf> {
+    if is_executable(base) {
+        return Some(base.to_path_buf());
+    }
+    for ext in path_extensions() {
+        // `set_extension` would replace a real one: `foo.bar` must be allowed to
+        // become `foo.bar.exe`, since a command may legitimately contain a dot.
+        let mut name = base.as_os_str().to_os_string();
+        name.push(&ext);
+        let candidate = PathBuf::from(name);
+        if is_executable(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// The extensions that make a file directly runnable on this platform.
+///
+/// Empty on unix, where the executable bit is the whole answer. On Windows it is
+/// `PATHEXT`, honoured rather than hardcoded because it is how a machine says
+/// that `.ps1` or `.py` counts as a command; the fallback list is what Windows
+/// itself defaults to.
+fn path_extensions() -> Vec<std::ffi::OsString> {
+    if cfg!(not(windows)) {
+        return Vec::new();
+    }
+    let raw = std::env::var_os("PATHEXT")
+        .unwrap_or_else(|| std::ffi::OsString::from(".COM;.EXE;.BAT;.CMD"));
+    raw.to_string_lossy()
+        .split(';')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(std::ffi::OsString::from)
+        .collect()
 }
 
 /// Whether a path is a file the current process could execute.
@@ -124,6 +167,74 @@ mod tests {
         // every PATH entry and always returned None.
         let sh = which("sh").expect("sh on PATH");
         assert_eq!(which(&sh.to_string_lossy()).as_deref(), Some(sh.as_path()));
+    }
+
+    #[test]
+    fn a_command_is_found_under_a_platform_executable_suffix() {
+        // The Windows bug this pins: `git` there is a file called `git.exe`, so
+        // joining the bare name onto every PATH entry matched nothing and `which`
+        // returned None for every command on the machine. Downstream that read as
+        // "git not on PATH", "no scheduler installed", and a `doctor` report where
+        // nothing exists.
+        //
+        // Asserted through the absolute-path branch so it is meaningful on both
+        // platforms without mutating PATH, which races every other test thread.
+        let dir = std::env::temp_dir().join(format!("loopsmith-pathext-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        for ext in path_extensions() {
+            let mut name = std::ffi::OsString::from("tool");
+            name.push(&ext);
+            let real = dir.join(&name);
+            std::fs::write(&real, "x").unwrap();
+
+            // Asking for `tool` must find `tool.EXE`, and asking for the full
+            // name must still work.
+            let bare = dir.join("tool");
+            assert_eq!(
+                which(&bare.to_string_lossy()).as_deref(),
+                Some(real.as_path()),
+                "asking for {} should have found {}",
+                bare.display(),
+                real.display()
+            );
+            assert_eq!(
+                which(&real.to_string_lossy()).as_deref(),
+                Some(real.as_path())
+            );
+            std::fs::remove_file(&real).unwrap();
+        }
+
+        // On unix there are no suffixes, so the list is empty and an extensionless
+        // name is the only spelling — which is exactly the invariant to state.
+        #[cfg(unix)]
+        assert!(
+            path_extensions().is_empty(),
+            "unix has no PATHEXT; the executable bit is the whole answer"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_suffix_is_appended_rather_than_replacing_a_real_extension() {
+        // `set_extension` would turn `check.sh` into `check.exe`. A command may
+        // legitimately contain a dot, so the suffix has to be appended.
+        let dir = std::env::temp_dir().join(format!("loopsmith-dotted-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dotted = dir.join("check.sh");
+        std::fs::write(&dotted, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dotted, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(
+            which(&dotted.to_string_lossy()).as_deref(),
+            Some(dotted.as_path()),
+            "a dotted command name must resolve as itself"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
