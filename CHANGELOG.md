@@ -4,6 +4,45 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] — 2026-08-18
+
+Documentation only. No behaviour, no API, no config-model change.
+
+### Added
+
+- **`README-FOR-DUMMIES.md`** — a start-to-finish guide for the people loopsmith
+  is actually most useful to and who bounced off every existing page: marketers,
+  salespeople, researchers, analysts. It assumes no shell fluency and no
+  programming, and it stops at the point where a loop is running on a schedule.
+  Everything about how the tool works internally is deliberately absent.
+
+  It routes those readers down the **Markdown** path rather than the YAML one,
+  and by seeding from a shipped example rather than from the blank starter —
+  `loopsmith new --config-file <example>.md` writes `loop.md` *and* points
+  `run.sh` at it, so the reader never has a second config file to be confused by.
+  Scheduling is taught as `interval` seconds; cron is never mentioned, because a
+  five-field expression is a wall for this reader and the trigger that avoids it
+  already exists.
+
+  It names six sections — **B**, **C**, **D**, **F**, **G**, **H** — as the whole
+  editable surface, and reduces detectors to the two that need no programmer:
+  `file_exists` and `judge`. It also tells the reader to **delete every
+  `type: script` check**, which is the one edit standing between a copied example
+  and a config that validates: the examples reference detector scripts the
+  repository deliberately does not ship, and a non-programmer has no way to
+  discover that from the error.
+
+- A **TL;DR** section at the top of `README.md` and of the crates.io, npm, and
+  PyPI READMEs, stating the purpose in plain language and linking to the above.
+  On the registry pages that link is pinned to the release tag, for the same
+  reason the logo already was: a published README cannot be edited, and a
+  `main`-relative link in one will eventually point at something else.
+
+### Changed
+
+- `tools/sync-version.sh` now also rewrites the tag-pinned `README-FOR-DUMMIES.md`
+  link in every published README, so the release checklist stays one edit.
+
 ## [0.1.3] — 2026-08-17
 
 The release where Windows stopped being a badge and started being a platform.
@@ -203,6 +242,7 @@ times out at 120 seconds. `ollama run` pulls a missing model, a pull is
 indistinguishable from slow generation from outside the process, and the point of
 a cheap tier is to be abandoned quickly. Run `ollama pull <model>` first.
 
+[0.1.4]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.4
 [0.1.3]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.3
 [0.1.2]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.2
 [0.1.1]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.1

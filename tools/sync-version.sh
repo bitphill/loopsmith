@@ -85,6 +85,12 @@ for readme in npm/README.md pypi/README.md runtime/crates/*/README.md; do
   apply "$readme" \
     '(raw\.githubusercontent\.com/bitphill/loopsmith/v)[0-9]+\.[0-9]+\.[0-9]+(/assets)' \
     "\\1$VERSION\\2" 'tag-pinned logo'
+  # Same reasoning for the START-HERE link a registry page carries: relative
+  # paths do not resolve off GitHub, and `main` can move underneath a README
+  # that can never be edited again.
+  apply "$readme" \
+    '(github\.com/bitphill/loopsmith/blob/v)[0-9]+\.[0-9]+\.[0-9]+(/README-FOR-DUMMIES\.md)' \
+    "\\1$VERSION\\2" 'tag-pinned START-HERE link'
 done
 
 if [ "$CHECK" -eq 1 ]; then

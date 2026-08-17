@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.1.3/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.1.4/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
   <h1>loopsmith-memory</h1>
   <p><em>Shared embedded memory for loopsmith: episodes, goal state, ledger, checkpoints.</em></p>
 </div>
