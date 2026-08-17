@@ -12,6 +12,7 @@
 mod harness;
 
 use harness::{examples_dir, Fixture, LOOPSMITH};
+use loopsmith_memory::Store;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -290,6 +291,106 @@ fn watch_refuses_a_loop_with_no_trigger() {
         combined(&out)
     );
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `watch` as a resident process, bounded by `--max-runs`.
+///
+/// Only `--check` had ever run, which evaluates the triggers and exits. This
+/// takes the other path: prime, poll, fire, run the loop, count, stop.
+#[test]
+fn watch_runs_the_loop_when_a_trigger_fires_and_stops_at_max_runs() {
+    let f = Fixture::from_yaml(
+        &format!(
+            "{STDIN_YAML}\npre_execution:\n  - step: done by hand\n    done: true\n\
+             stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n\
+             schedules:\n  - type: interval\n    seconds: 4\n\
+             graph:\n  nodes:\n    - id: build\n      role: builder\n      \
+             instruction: produce the artifact the goal describes\n      goals: [g1]\n\
+             providers:\n  providers:\n    - id: p\n      kind: byok\n      \
+             command: echo\n      args: [\"ok\"]\n  cascade:\n    standard: [p]\n"
+        ),
+        "watch-run",
+    );
+
+    let out = f.run(&["watch", "loop.yaml", "--max-runs", "1"]);
+    let text = combined(&out);
+    assert!(out.status.success(), "{text}");
+    assert!(text.contains("reached --max-runs 1"), "{text}");
+    assert!(
+        text.contains("interval of 4s elapsed"),
+        "the watcher must say which trigger fired: {text}"
+    );
+
+    // A run really happened, and left the artifacts a run leaves.
+    let store = f.store();
+    let runs = store.runs().unwrap();
+    assert_eq!(runs.len(), 1, "exactly one run: {runs:?}");
+    assert!(
+        !store.ledger(&runs[0]).unwrap().is_empty(),
+        "the resident watcher's run must be on the ledger like any other"
+    );
+    assert!(f.dir.join("logs").is_dir(), "and must have written a log");
+    drop(store);
+    f.cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// schedule
+// ---------------------------------------------------------------------------
+
+/// `schedule --install` writes a launch agent. The destination is overridable
+/// so this can be proven without installing anything on the machine running the
+/// suite.
+#[test]
+#[cfg(target_os = "macos")]
+fn schedule_install_writes_a_launch_agent_where_it_is_told() {
+    let f = Fixture::example("account-watch-loop", "schedule-install");
+    let agents = scratch("launch-agents");
+
+    let out = f.run_with_env(
+        &["schedule", "loop.yaml", "--install"],
+        &[("LOOPSMITH_LAUNCH_AGENTS_DIR", agents.to_str().unwrap())],
+    );
+    let text = combined(&out);
+    assert!(out.status.success(), "{text}");
+
+    let plist = agents.join("com.loopsmith.account-watch-loop.plist");
+    assert!(plist.is_file(), "expected {}; got {text}", plist.display());
+    let body = std::fs::read_to_string(&plist).unwrap();
+    assert!(body.contains("<string>watch</string>"), "{body}");
+    assert!(body.contains("loop.yaml"), "{body}");
+    assert!(body.contains("<key>KeepAlive</key><true/>"), "{body}");
+
+    // Loading it stays the user's call: writing the file is not enabling it.
+    assert!(text.contains("launchctl load -w"), "{text}");
+
+    let _ = std::fs::remove_dir_all(agents);
+    f.cleanup();
+}
+
+/// Without `--install` it prints and touches nothing.
+#[test]
+fn schedule_without_install_only_prints() {
+    let f = Fixture::example("account-watch-loop", "schedule-print");
+    let agents = scratch("launch-agents-untouched");
+
+    let out = f.run_with_env(
+        &["schedule", "loop.yaml"],
+        &[("LOOPSMITH_LAUNCH_AGENTS_DIR", agents.to_str().unwrap())],
+    );
+    assert!(out.status.success(), "{}", combined(&out));
+    assert_eq!(
+        std::fs::read_dir(&agents).unwrap().count(),
+        0,
+        "printing must not write"
+    );
+    assert!(
+        combined(&out).contains("--install"),
+        "it should say how to write it: {}",
+        combined(&out)
+    );
+    let _ = std::fs::remove_dir_all(agents);
+    f.cleanup();
 }
 
 // ---------------------------------------------------------------------------

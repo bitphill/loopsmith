@@ -164,6 +164,45 @@ fails closed rather than passing by default.
 **Every goal needs at least one blocking validation**, or the config is
 rejected — a goal that cannot be checked can never be honestly finished.
 
+`regex_match` reads the files your `file_exists` detectors name, under either the
+full path or the file's stem. So `detector: { type: file_exists, path: out/notes.md }`
+makes `artifact: notes` and `artifact: out/notes.md` both work, and a regex
+naming anything else is rejected by `validate` rather than failing closed for the
+life of the loop.
+
+#### Writing a detector that runs on more than one machine
+
+A detector runs with **no shell**: `command` is argv[0] and `args` are literal,
+so `&&`, `|`, and `$(…)` are arguments rather than syntax. Write a real file with
+a real shebang.
+
+Three differences break detectors when a loop directory moves, and every new loop
+ships `scripts/compat.sh` to absorb them:
+
+```sh
+#!/bin/sh
+. ./scripts/compat.sh
+
+require jq                       # exit 2 when a tool is missing
+sed_i 's/draft/final/' out/x.md  # `sed -i` vs `sed -i ''`
+[ "$(stat_size out/x.md)" -gt 0 ] || exit 1
+```
+
+| Helper | Absorbs |
+|---|---|
+| `sed_i` | GNU `sed -i` takes no argument; BSD requires one |
+| `stat_size`, `stat_mtime` | `-c%s` on GNU, `-f%z` on BSD |
+| `readlink_f` | `readlink -f` is absent from BSD before macOS 12 |
+| `sha256` | `sha256sum` on Linux, `shasum -a 256` on macOS |
+| `require` | Names the missing command instead of failing obscurely |
+| `need_bash 4` | macOS ships bash 3.2, so `${x,,}`, arrays, and `mapfile` are absent |
+
+`require` and `need_bash` exit **2**, not 1. A detector's exit code is its
+verdict, and "this machine cannot run the check" is a different fact from "the
+check failed" — a gate that cannot tell them apart reports missing tooling as
+unfinished work. Run `loopsmith doctor <config>` to see what this machine is and
+which of your detectors it cannot run.
+
 ### E · `success`
 Fields: `target`, `name`, `mode`, `statement`, `threshold` (required for
 `percentage`, 0.0–1.0 of blocking validations that must pass).

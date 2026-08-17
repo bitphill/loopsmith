@@ -7,6 +7,7 @@ loop, driven through the real binary, against the configs users are handed.
 ```sh
 cargo test -p loopsmith-cli --test stress
 cargo test -p loopsmith-cli --test surface
+cargo test -p loopsmith-cli --test compat
 cargo test -p loopsmith-cli --test opt_in     # skips everything gated by default
 ```
 
@@ -15,6 +16,7 @@ cargo test -p loopsmith-cli --test opt_in     # skips everything gated by defaul
 | `harness/mod.rs` | The fixture builder — no tests of its own |
 | `stress.rs` | The iteration loop: phases, isolation, stop gates, proposals, resume, export |
 | `surface.rs` | Subcommands that were implemented and never executed |
+| `compat.rs` | What a generated loop assumes about the machine it lands on |
 | `opt_in.rs` | Anything that reaches the network or spends money |
 
 ## Why a fixture is needed at all
@@ -63,6 +65,7 @@ This was a plan. It is now a record. Every row below has run.
 | Isolation degrading outside a repo | `isolation_degrades_to_shared_outside_a_repository` | `refactor-loop` |
 | Isolation real inside a repo | `isolation_is_real_inside_a_repository` | `refactor-loop` |
 | Isolated output reaching the gate | `an_isolated_builders_output_reaches_the_gate` | hand-written |
+| One isolated node reading another's output | `an_isolated_node_can_read_what_its_isolated_upstream_produced` | hand-written |
 | `no_progress_iterations` | `a_run_with_no_moving_verdicts_halts_on_no_progress` | `research-loop` |
 | Randomness gate, seeded fallback | `a_stalled_run_is_perturbed_before_it_is_abandoned` | `blogger-loop` |
 | Randomness gate, agent path | `the_randomness_agent_chooses_when_a_cheap_provider_answers` | hand-written |
@@ -82,6 +85,9 @@ This was a plan. It is now a record. Every row below has run.
 | `convert --to-yaml` on YAML | `to_yaml_on_yaml_re_emits_rather_than_refusing` | — |
 | `skills install` (section J) | `skills_install_reports_on_every_declared_agent` | — |
 | `watch --check` | `watch_check_reports_the_triggers_and_exits` | `account-watch-loop` |
+| `watch` as a resident process | `watch_runs_the_loop_when_a_trigger_fires_and_stops_at_max_runs` | — |
+| `schedule --install` | `schedule_install_writes_a_launch_agent_where_it_is_told` | `account-watch-loop` |
+| `schedule` without `--install` | `schedule_without_install_only_prints` | `account-watch-loop` |
 | `watch` refusing a manual-only loop | `watch_refuses_a_loop_with_no_trigger` | — |
 | `plan`, `providers`, `permissions`, `gate` | `the_reporting_commands_all_work_against_a_shipped_example` | `refactor-loop` |
 | `status`, `ledger`, `proposals` on an unknown run | `the_run_reports_handle_an_unknown_run_id` | — |
@@ -91,20 +97,30 @@ This was a plan. It is now a record. Every row below has run.
 | Unsafe clone URL refused | `an_unsafe_repo_url_is_refused_before_git_is_reached` | — |
 | A real provider, once | `the_simplest_example_runs_against_a_real_provider` | opt-in |
 | A real model on the perturbation menu | `the_randomness_agent_keeps_to_the_menu_with_a_real_model` | opt-in |
+| `scripts/compat.sh` ships with a new loop | `a_new_loop_ships_the_compatibility_helpers` | — |
+| Every compat helper, under POSIX `sh` | `the_compatibility_helpers_work_under_posix_sh` | — |
+| Missing tooling exits 2, not 1 | `need_bash_exits_two_so_a_missing_tool_is_not_read_as_a_failed_check` | — |
+| A missing command is named | `require_names_the_command_that_is_missing` | — |
+| Generated scripts are POSIX | `the_generated_scripts_parse_under_posix_sh` | — |
+| `resume.sh` with no run id | `resume_without_a_run_id_explains_itself` | — |
+| A moved binary falls back to `PATH` | `a_generated_script_falls_back_to_path_when_the_pinned_binary_has_moved` | — |
+| The export script pins nothing | `the_export_script_is_posix_and_does_not_pin_a_binary` | — |
+| `doctor` reports the platform | `doctor_reports_the_platform_and_stays_advisory` | — |
+| `doctor` finds unrunnable detectors | `doctor_reports_detectors_the_machine_cannot_run` | `traffic-loop` |
+| `doctor` finds a non-executable detector | `doctor_reports_a_detector_that_is_not_executable` | `traffic-loop` |
 
 ### Not covered, and why
 
-- **`schedule --install`** writes into `~/Library/LaunchAgents`. That is
-  outward-facing and not something a test run should do to whatever machine it
-  lands on. Its generated plist and crontab line are unit-tested instead.
-- **`watch` as a resident process** is a sleep loop with no exit condition other
-  than `--max-runs`. `--check` covers the trigger evaluation; the sleep is not
-  worth a test that has to wait for it.
-- **An isolated node reading another isolated node's output.** A worktree
-  branches from `HEAD`, so it does not see uncommitted work published by an
-  earlier node in the same run. Downstream *unisolated* nodes do. Fixing this
-  means deciding what committing inside a worktree mid-run should mean, which is
-  a design question rather than a gap in coverage.
+- **Actually loading a launch agent.** `--install` writes the plist and stops;
+  `launchctl load -w` stays the user's call, so no test runs it. The write itself
+  is covered because `LOOPSMITH_LAUNCH_AGENTS_DIR` redirects the destination.
+- **A GNU userland.** Everything portability-related is asserted on whichever
+  machine the suite runs on, and this one is BSD. `compat.rs` exercises the
+  helpers rather than mocking the userland, so a GNU host proves the other half
+  by running the same tests.
+- **Windows.** The generated scripts are POSIX `sh` and the worktree, scheduler,
+  and detector paths all assume a Unix. The badge claims Windows; nothing here
+  tests it.
 
 ## Opt-in tests
 

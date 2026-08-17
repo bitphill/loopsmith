@@ -120,6 +120,40 @@ pub fn publish(
     out
 }
 
+/// Seed a worktree with what other nodes have already published.
+///
+/// A worktree branches from `HEAD`, so it starts out blind to everything the
+/// run has produced since — including the output of the node it depends on.
+/// Publishing solved that for the gate, which reads the loop root; it did not
+/// solve it for the next isolated node, which reads its own tree and would find
+/// its upstream's work missing.
+///
+/// A node is never handed a path it published itself. That is the one thing
+/// isolation must keep: a builder's in-progress work is not overwritten by the
+/// copy of it that reached the root last iteration.
+///
+/// Returns the paths seeded, for the ledger.
+pub fn seed(
+    root: &Path,
+    node_id: &str,
+    iso: &Isolation,
+    published: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let Isolation::Worktree { path, .. } = iso else {
+        return vec![];
+    };
+    let mut seeded = Vec::new();
+    for (rel, owner) in published {
+        if owner == node_id || is_reserved(rel) {
+            continue;
+        }
+        if copy_into(&root.join(rel), &path.join(rel)).is_ok() {
+            seeded.push(rel.clone());
+        }
+    }
+    seeded
+}
+
 fn copy_into(from: &Path, to: &Path) -> Result<(), String> {
     if !from.is_file() {
         // A directory or a path git listed and the node then removed. Neither

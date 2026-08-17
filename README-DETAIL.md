@@ -353,6 +353,28 @@ Sub-agents are sourced **installed → marketplace → generate**, with trust fl
 
 ---
 
+## The examples
+
+Thirteen worked loops in `config/examples/`, each as a `.yaml` and an equivalent
+`.md`. All ship with `pre_execution` unfinished, so `validate` refuses them until
+you have done the task by hand once — which is the point of them.
+
+| Loop | What it does |
+|---|---|
+| [`research-loop`](config/examples/research-loop.yaml) | Research a question against primary sources, every claim cited |
+| [`refactor-loop`](config/examples/refactor-loop.yaml) | Behaviour-preserving refactor where the test suite is the gate |
+| [`traffic-loop`](config/examples/traffic-loop.yaml) | Post where an audience already gathers, measured in referred sessions |
+| [`trend-radar-loop`](config/examples/trend-radar-loop.yaml) | Track a category across X, Instagram, and TikTok with dated evidence |
+| [`landing-page-loop`](config/examples/landing-page-loop.yaml) | A static landing page gated on Lighthouse, page weight, and working CTAs |
+| [`sales-leads-loop`](config/examples/sales-leads-loop.yaml) | Build a lead list from permitted sources, with lawful basis recorded per record |
+| [`marketing-automation-loop`](config/examples/marketing-automation-loop.yaml) | Turn product docs into scheduled posts, published behind a human checkpoint |
+| [`blogger-loop`](config/examples/blogger-loop.yaml) | Write on a trending topic, gated on style measurements and an independent read |
+| [`cold-outreach-loop`](config/examples/cold-outreach-loop.yaml) | Personalised first contact, with suppression and opt-out enforced by the gate |
+| [`x402-agent-loop`](config/examples/x402-agent-loop.yaml) | An agent that pays for things, supervised or autonomous, under a hard cap |
+| [`viral-game-loop`](config/examples/viral-game-loop.yaml) | A small Godot game gated on build health and time-to-first-play |
+| [`idea-radar-loop`](config/examples/idea-radar-loop.yaml) | Product ideas traced to dated public complaints, checked against what already sells |
+| [`account-watch-loop`](config/examples/account-watch-loop.yaml) | Watch accounts for pre-viral topics, and score yesterday's predictions |
+
 ## Repository layout
 
 ```

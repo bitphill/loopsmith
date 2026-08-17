@@ -397,7 +397,17 @@ pub fn default_label(loop_name: &str) -> String {
     )
 }
 
+/// Where a launchd agent is written.
+///
+/// `LOOPSMITH_LAUNCH_AGENTS_DIR` overrides it. That exists so `--install` can
+/// be exercised by a test without writing into the home directory of whatever
+/// machine the suite happens to run on — installing a launch agent is a
+/// persistent, user-visible change, and a test suite that makes one is a test
+/// suite nobody can run twice.
 pub fn launch_agents_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("LOOPSMITH_LAUNCH_AGENTS_DIR") {
+        return Some(PathBuf::from(dir));
+    }
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/LaunchAgents"))
 }
 

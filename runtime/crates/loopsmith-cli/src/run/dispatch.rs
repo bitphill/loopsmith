@@ -28,6 +28,9 @@ pub struct NodeOutcome {
     pub duration_ms: u64,
     pub skipped: Vec<String>,
     pub error: Option<String>,
+    /// Paths copied in from the loop root before the node ran, so it could see
+    /// what its upstream produced.
+    pub seeded: Vec<String>,
     /// Where the node actually ran. Carried out structurally rather than as
     /// prose because the caller has to publish an isolated node's work back
     /// into the loop root, and cannot do that from a description of it.
@@ -98,6 +101,11 @@ pub struct NodeContext<'a> {
     pub carried: &'a str,
     /// Active perturbation, when the loop has stalled and asked for variation.
     pub perturbation: Option<&'a Perturbation>,
+    /// Paths other nodes have published into the loop root this run, and who
+    /// published each. An isolated node is seeded with these before it runs,
+    /// because a worktree branches from `HEAD` and would otherwise be blind to
+    /// everything the run has produced since — including its own upstream.
+    pub published: &'a BTreeMap<String, String>,
 }
 
 /// Dispatch one node. Pure with respect to the store so it is safe to call
@@ -116,6 +124,7 @@ pub fn run_node(
             reason: "not marked isolated".into(),
         }
     };
+    let seeded = super::publish::seed(root, &node.id, &iso, ctx.published);
     let workdir = iso.workdir(root).to_path_buf();
 
     let constraints = loopsmith_core::ConstraintSet::merged(
@@ -154,6 +163,7 @@ pub fn run_node(
             duration_ms: resp.duration_ms,
             skipped,
             error: None,
+            seeded,
             isolation: iso,
         },
         Err(e) => NodeOutcome {
@@ -168,6 +178,7 @@ pub fn run_node(
             duration_ms: 0,
             skipped: vec![],
             error: Some(e.to_string()),
+            seeded,
             isolation: iso,
         },
     }

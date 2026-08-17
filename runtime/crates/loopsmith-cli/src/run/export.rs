@@ -157,12 +157,24 @@ fn evidence_md(
     s
 }
 
+/// The export is the artifact most likely to be handed to someone else, so its
+/// script assumes least: POSIX `sh`, no bash 4 syntax, and a `loopsmith` found
+/// on `PATH` rather than pinned to a path that only existed on the machine that
+/// produced the export.
 fn rerun_script(config_file: &str) -> String {
     format!(
         "#!/bin/sh\n\
 # Re-run the configuration that converged.\n\
-set -e\n\
+#\n\
+# POSIX sh on purpose: this package travels, and macOS ships bash 3.2.\n\
+set -eu\n\
 cd \"$(dirname \"$0\")\"\n\
+\n\
+if ! command -v loopsmith >/dev/null 2>&1; then\n\
+  echo \"loopsmith is not on PATH\" >&2\n\
+  echo \"This package is a config and its evidence; it needs the binary to run.\" >&2\n\
+  exit 127\n\
+fi\n\
 exec loopsmith run \"{config_file}\" \"$@\"\n"
     )
 }

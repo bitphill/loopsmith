@@ -448,6 +448,114 @@ fn an_isolated_builders_output_reaches_the_gate() {
     f.cleanup();
 }
 
+/// Two isolated nodes in a chain: the second must be able to read what the
+/// first produced.
+const ISOLATED_CHAIN: &str = r#"
+name: isolated-chain
+goals:
+  - name: g1
+    description: the downstream builder must be able to read its upstream's work
+pre_execution:
+  - step: done by hand
+    done: true
+validations:
+  - target: g1
+    name: chained
+    mode: objective
+    statement: The downstream node saw the upstream artifact and said so.
+    detector: { type: file_exists, path: out/downstream.txt, non_empty: true }
+  - target: overall
+    name: chained-overall
+    mode: objective
+    statement: The downstream node saw the upstream artifact and said so.
+    detector: { type: file_exists, path: out/downstream.txt, non_empty: true }
+graph:
+  nodes:
+    - id: upstream
+      role: builder
+      instruction: write the upstream artifact the goal describes
+      goals: [g1]
+      isolated: true
+      provider: up
+    - id: downstream
+      role: builder
+      instruction: read what upstream produced and write the downstream artifact
+      depends_on: [upstream]
+      goals: [g1]
+      isolated: true
+      provider: down
+providers:
+  providers:
+    - id: up
+      kind: byok
+      command: sh
+      args: ["-c", "mkdir -p out && echo upstream-was-here > out/upstream.txt"]
+    - id: down
+      kind: byok
+      command: sh
+      args: ["-c", "mkdir -p out && cat out/upstream.txt > out/downstream.txt"]
+  cascade:
+    standard: [up]
+"#;
+
+/// A worktree branches from `HEAD`, so an isolated node starts blind to
+/// everything the run has produced since — including the output of the node it
+/// depends on. Publishing fixed that for the gate, which reads the loop root.
+/// It did not fix it for the next isolated node, which reads its own tree.
+#[test]
+fn an_isolated_node_can_read_what_its_isolated_upstream_produced() {
+    let mut f = Fixture::from_yaml(ISOLATED_CHAIN, "iso-chain");
+    cap(&mut f.cfg, 2);
+    f.cfg.providers.providers[0].command = "sh".into();
+    f.cfg.providers.providers[0].args = vec![
+        "-c".into(),
+        "mkdir -p out && echo upstream-was-here > out/upstream.txt".into(),
+    ];
+    f.cfg.providers.providers[1].command = "sh".into();
+    f.cfg.providers.providers[1].args = vec![
+        "-c".into(),
+        "mkdir -p out && cat out/upstream.txt > out/downstream.txt".into(),
+    ];
+    f.write_config();
+    let f = f.git_init();
+
+    let run_id = "chain";
+    f.run_loop(run_id, &[]);
+
+    // Each node really did run in its own tree.
+    assert!(
+        f.dir.join("state/worktrees/upstream/out/upstream.txt").is_file(),
+        "upstream must have written into its own worktree"
+    );
+
+    let downstream = f.dir.join("state/worktrees/downstream/out/downstream.txt");
+    assert!(
+        downstream.is_file(),
+        "downstream produced nothing, so it could not see its upstream"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&downstream).unwrap().trim(),
+        "upstream-was-here",
+        "downstream must have read the upstream artifact, not an empty file"
+    );
+
+    let store = f.store();
+    assert!(
+        store
+            .ledger(run_id)
+            .unwrap()
+            .iter()
+            .any(|e| e.detail.contains("was seeded with")),
+        "the seeding must be on the record, not silent"
+    );
+    assert!(
+        store.goal_states(run_id).unwrap()["g1"].satisfied,
+        "and the gate must see the result"
+    );
+    drop(store);
+    f.cleanup();
+}
+
 // ---------------------------------------------------------------------------
 // Stop gates under a real loop
 // ---------------------------------------------------------------------------

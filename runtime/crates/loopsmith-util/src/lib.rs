@@ -14,8 +14,13 @@
 //! - [`testing::temp_dir`] existed six times in four shapes. Two of those
 //!   shapes omitted the atomic counter, which is the part that prevents the
 //!   sled lock collision described on that function.
+//! - [`platform`] answers what the host actually is — which bash, which
+//!   userland, which scheduler — because `cfg!(target_os = …)` answers none of
+//!   those and every one of them changes what a generated script may assume.
 
 use std::path::{Path, PathBuf};
+
+pub mod platform;
 
 /// Resolve a command the way a shell would: absolute paths (and anything
 /// containing a separator) are checked directly, bare names are resolved

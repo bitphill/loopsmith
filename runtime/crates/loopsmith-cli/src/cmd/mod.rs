@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 pub mod convert;
+pub mod doctor;
 pub mod gate;
 pub mod ledger;
 pub mod mcp;
@@ -155,6 +156,7 @@ pub fn dispatch(cli: Cli) -> Result<ExitCode, String> {
             workdir,
         } => gate::execute(&config, &target, &workdir),
         Command::Providers { config } => providers::execute(&config),
+        Command::Doctor { config } => doctor::execute(config.as_deref()),
         Command::Permissions { config, write } => permissions::execute(&config, write.as_deref()),
         Command::Watch {
             config,

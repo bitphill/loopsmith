@@ -110,6 +110,11 @@ pub enum Command {
     },
     /// Report which providers are usable right now.
     Providers { config: PathBuf },
+    /// Report what this machine is, and what that stops you doing.
+    Doctor {
+        /// Also check what this config needs that the machine may not have.
+        config: Option<PathBuf>,
+    },
     /// Print the consolidated permission grant this config needs.
     Permissions {
         config: PathBuf,

@@ -256,6 +256,10 @@ pub fn execute<S: Store>(
     // rather than only what is currently true.
     let mut previous_verdicts: Option<BTreeMap<String, TargetVerdict>> =
         restore_verdicts(&checkpoint);
+    // Every path any isolated node has published this run, and who published
+    // it. Carried across iterations so a worktree created later — or reused
+    // from an earlier one — can be seeded with what its upstream produced.
+    let mut published_paths: BTreeMap<String, String> = BTreeMap::new();
     let gates = &cfg.stop_gates;
     let width = plan.concurrency.max(1);
 
@@ -299,9 +303,11 @@ pub fn execute<S: Store>(
         let mut dispatch_log: Vec<(String, String, Role, bool)> = Vec::new();
         let mut outputs_this_iteration: Vec<(String, String)> = Vec::new();
         let mut node_skills: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
-        // Which node published each path this iteration, so two isolated
+        // Which node published each path *this iteration*, so two isolated
         // builders writing the same file is reported rather than resolved by
-        // whichever thread happened to finish last.
+        // whichever thread happened to finish last. Deliberately narrower than
+        // `published_paths`: a node rewriting its own output next iteration is
+        // the normal case and is not a collision.
         let mut claimed_paths: BTreeMap<String, String> = BTreeMap::new();
         let mut explore_now =
             evolve::next_candidate(cfg, &store.skill_trials().unwrap_or_default());
@@ -447,6 +453,12 @@ pub fn execute<S: Store>(
                     node_skills.insert(n.id.clone(), resolved);
                 }
 
+                // Snapshotted per chunk rather than borrowed: the map is
+                // written to as each outcome is published, and the threads are
+                // still reading it. Every node in one chunk therefore sees the
+                // same published set, which is also the honest answer — they
+                // ran at the same time.
+                let published_now = published_paths.clone();
                 let outcomes: Vec<NodeOutcome> = std::thread::scope(|s| {
                     let handles: Vec<_> = nodes
                         .iter()
@@ -458,6 +470,7 @@ pub fn execute<S: Store>(
                             // Borrowed out here: taking the reference inside the
                             // `move` closure would capture the Option itself.
                             let nudge = perturbation.as_ref();
+                            let published = &published_now;
                             s.spawn(move || {
                                 run_node(
                                     cfg,
@@ -470,6 +483,7 @@ pub fn execute<S: Store>(
                                         guideline: guideline.as_deref(),
                                         carried,
                                         perturbation: nudge,
+                                        published,
                                     },
                                 )
                             })
@@ -551,8 +565,24 @@ pub fn execute<S: Store>(
                     // not tread on it; now the wave has joined, what it
                     // produced is published into the loop root, because the
                     // gate collects evidence there and nowhere else.
+                    if !o.seeded.is_empty() {
+                        rec.entry(
+                            it,
+                            LedgerKind::NodeDispatched,
+                            format!(
+                                "`{}` was seeded with {} path(s) published by other nodes: {}",
+                                o.node_id,
+                                o.seeded.len(),
+                                o.seeded.join(", ")
+                            ),
+                            Some(o.node_id.clone()),
+                        );
+                    }
                     let published =
                         publish::publish(root, &o.node_id, &o.isolation, &mut claimed_paths);
+                    for path in &published.published {
+                        published_paths.insert(path.clone(), o.node_id.clone());
+                    }
                     if let Some(line) = published.describe(&o.node_id) {
                         rec.entry(
                             it,
