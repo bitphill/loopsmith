@@ -134,30 +134,79 @@ impl Fixture {
     /// repository ships none of them. A missing script becomes a detector
     /// error, which the gate converts to a failed check — correct, and useless
     /// for exercising anything past the first gate.
-    pub fn stub_scripts(self, mode: Stubs) -> Self {
+    /// A detector runs with **no shell** — `command` is argv[0] — so a stub has
+    /// to be something the operating system can execute on its own. On unix that
+    /// is a `#!` script with the executable bit. Windows has no shebang handling,
+    /// so the same file is unrunnable there and every stubbed detector fails to
+    /// spawn; the stub is written as a `.cmd` instead and the config's detector
+    /// command is repointed at it.
+    ///
+    /// Rewriting the command rather than skipping these tests keeps the iteration
+    /// loop covered on Windows, and the rewrite is honest: it is exactly what a
+    /// user has to do there, which is why `compat.sh` says so.
+    pub fn stub_scripts(mut self, mode: Stubs) -> Self {
         let scripts = self.dir.join("scripts");
         std::fs::create_dir_all(&scripts).expect("scripts/ is creatable");
 
-        let body = match mode {
-            Stubs::Pass => "#!/bin/sh\nexit ${STUB_EXIT:-0}\n".to_string(),
-            Stubs::Fail => "#!/bin/sh\nexit ${STUB_EXIT:-1}\n".to_string(),
+        let windows = cfg!(windows);
+        let body = match (windows, mode) {
+            (false, Stubs::Pass) => "#!/bin/sh\nexit ${STUB_EXIT:-0}\n".to_string(),
+            (false, Stubs::Fail) => "#!/bin/sh\nexit ${STUB_EXIT:-1}\n".to_string(),
             // The gate re-runs every detector each iteration, so a counter file
             // in the loop root is enough to make "fails, then starts passing"
             // reproducible without touching the environment mid-run.
-            Stubs::PassFrom(n) => format!(
+            (false, Stubs::PassFrom(n)) => format!(
                 "#!/bin/sh\nc=$(cat .stub-count 2>/dev/null || echo 0)\n\
                  c=$((c+1))\necho $c > .stub-count\n\
                  [ \"$c\" -ge {n} ] && exit 0\nexit 1\n"
             ),
+            // `if not defined` so an unset STUB_EXIT behaves like `${STUB_EXIT:-0}`.
+            (true, Stubs::Pass) => crlf(
+                "@echo off\r\nif not defined STUB_EXIT set \"STUB_EXIT=0\"\r\n\
+                 exit /b %STUB_EXIT%\r\n",
+            ),
+            (true, Stubs::Fail) => crlf(
+                "@echo off\r\nif not defined STUB_EXIT set \"STUB_EXIT=1\"\r\n\
+                 exit /b %STUB_EXIT%\r\n",
+            ),
+            (true, Stubs::PassFrom(n)) => crlf(&format!(
+                "@echo off\r\nsetlocal enabledelayedexpansion\r\n\
+                 set \"C=0\"\r\n\
+                 if exist .stub-count set /p C=<.stub-count\r\n\
+                 set /a C=!C!+1\r\n\
+                 echo !C!>.stub-count\r\n\
+                 if !C! GEQ {n} (set \"CODE=0\") else (set \"CODE=1\")\r\n\
+                 endlocal & exit /b %CODE%\r\n"
+            )),
         };
 
-        for name in self.script_detectors() {
-            let path = self.dir.join(&name);
+        // Collected before the loop: repointing a command while iterating over
+        // the set derived from those same commands would read half-rewritten.
+        let detectors: Vec<String> = self.script_detectors().into_iter().collect();
+        for name in &detectors {
+            let target = if windows {
+                // `scripts/check-x.sh` -> `scripts/check-x.cmd`
+                format!("{}.cmd", name.trim_end_matches(".sh"))
+            } else {
+                name.clone()
+            };
+            let path = self.dir.join(&target);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).expect("stub parent is creatable");
             }
             std::fs::write(&path, &body).expect("stub is writable");
             make_executable(&path);
+        }
+
+        if windows {
+            for v in &mut self.cfg.validations {
+                if let Detector::Script { command, .. } = &mut v.detector {
+                    if command.contains('/') && command.ends_with(".sh") {
+                        *command = format!("{}.cmd", command.trim_end_matches(".sh"));
+                    }
+                }
+            }
+            self.write_config();
         }
         self
     }
@@ -434,6 +483,12 @@ fn satisfying_value(op: loopsmith_core::CompareOp, want: f64) -> f64 {
 }
 
 #[cfg(unix)]
+/// `cmd.exe` needs CRLF in a batch file: with LF only, the trailing newline joins
+/// the last token on the line and `exit /b 0` becomes an unknown command.
+fn crlf(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\n', "\r\n")
+}
+
 fn make_executable(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let mut perms = std::fs::metadata(path).expect("stub exists").permissions();
