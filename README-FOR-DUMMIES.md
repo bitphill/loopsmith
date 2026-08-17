@@ -24,8 +24,8 @@ You do not need to code. You edit one text file.
 
 ## What people use it for
 
-Thirteen ready-made loops ship with the tool. Open one and read it — it's the
-fastest way to see what a loop looks like.
+Thirteen ready-made loops you can copy. Click one and read it — it's the fastest
+way to see what a loop actually looks like.
 
 | Loop | What it's for |
 |---|---|
@@ -56,6 +56,10 @@ Open Terminal (Mac: press `⌘ + Space`, type *Terminal*). Paste **one** of thes
 ```bash
 brew install bitphill/loopsmith/loopsmith     # Mac, easiest
 ```
+
+<sub>If Homebrew answers *"Refusing to load formula … from untrusted tap"*, run
+`brew trust bitphill/loopsmith` once and try again. It's Homebrew asking whether
+you meant to install something that isn't from its own catalogue.</sub>
 
 ```bash
 npm install -g @bitphill/loopsmith            # if you have Node
