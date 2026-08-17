@@ -621,8 +621,13 @@ validations:
 
     #[test]
     fn a_usage_regex_extracts_the_real_count() {
-        let mut s = spec("reporter", "echo", &[r#"{"usage":{"total_tokens":1234}}"#]);
-        s.usage_regex = Some(r#""total_tokens"\s*:\s*(\d+)"#.into());
+        // The payload deliberately carries no double quotes. What this asserts is
+        // that a regex pulls a reported count out of provider output; the JSON
+        // shape was incidental, and embedding quotes in an argument means the
+        // test also depends on how the platform escapes them — which Windows does
+        // differently, so it failed there for a reason unrelated to usage.
+        let mut s = spec("reporter", "echo", &["usage total_tokens=1234 end"]);
+        s.usage_regex = Some(r"total_tokens\s*=\s*(\d+)".into());
         let r = invoke(&s, &req()).unwrap();
         assert_eq!(r.tokens, Some(1234));
         assert!(!r.tokens_estimated, "reported usage is not an estimate");
