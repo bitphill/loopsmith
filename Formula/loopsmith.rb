@@ -15,7 +15,7 @@
 # downloads, `curl -sL` reports success while writing the error body, and hashing
 # that yields a checksum no install can ever match:
 #
-#   curl -sL .../v0.1.2.tar.gz -o t.tar.gz && gzip -t t.tar.gz && wc -c < t.tar.gz
+#   curl -sL .../v0.1.3.tar.gz -o t.tar.gz && gzip -t t.tar.gz && wc -c < t.tar.gz
 #   shasum -a 256 t.tar.gz        # only once the file is ~2 MB of valid gzip
 #
 # `gh api repos/.../tarball/<ref>` is not a substitute: it mangles binary output
@@ -24,7 +24,7 @@ class Loopsmith < Formula
   desc "Self-evolving agent loops behind a deterministic verification gate"
   homepage "https://github.com/bitphill/loopsmith"
   url "https://github.com/bitphill/loopsmith/archive/refs/tags/v0.1.3.tar.gz"
-  sha256 "eeafdff0629d8d0950bbe244ecbcd2e4ed3697e2f14fdce0153c6feb08387a33"
+  sha256 "5f162f2dff30bf86a4324a6480e15c1fbb6343db67d5a5185e247b3f589f4c17"
   license "MIT"
   head "https://github.com/bitphill/loopsmith.git", branch: "main"
 
