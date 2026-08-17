@@ -72,8 +72,11 @@ jobs:
         working-directory: .
         shell: bash
         run: |
-          bin="runtime/target/release/loopsmith"
-          [ "${RUNNER_OS}" = "Windows" ] && bin="runtime/target/release/loopsmith.exe"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            bin="runtime/target/release/loopsmith.exe"
+          else
+            bin="runtime/target/release/loopsmith"
+          fi
           bad=0
           for cfg in config/examples/*.yaml config/examples/*.md; do
             out=$("$bin" validate "$cfg" 2>&1 || true)
@@ -96,9 +99,13 @@ jobs:
         working-directory: .
         shell: bash
         run: |
-          bin="$PWD/runtime/target/release/loopsmith"
-          [ "${RUNNER_OS}" = "Windows" ] && bin="$PWD/runtime/target/release/loopsmith.exe"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            bin="$PWD/runtime/target/release/loopsmith.exe"
+          else
+            bin="$PWD/runtime/target/release/loopsmith"
+          fi
           scratch="${RUNNER_TEMP}/ci-loop"
+          rm -rf "$scratch"
           "$bin" new --path "$scratch" --purpose "prove the launchers work"
           cd "$scratch"
           for f in run.sh resume.sh run.cmd resume.cmd scripts/compat.sh; do
@@ -107,12 +114,19 @@ jobs:
           # `resume` with no run id is the cheapest launcher round trip: it must
           # explain itself and exit 2 rather than calling the binary with an
           # empty id.
+          #
+          # `|| code=$?`, not `; code=$?`: this shell runs with `set -e`, so a
+          # bare invocation that exits 2 kills the step before the exit code can
+          # be read — the assertion never runs and the expected behaviour looks
+          # like a failure.
+          code=0
           if [ "${RUNNER_OS}" = "Windows" ]; then
-            cmd //c resume.cmd; code=$?
+            cmd //c resume.cmd || code=$?
           else
-            ./resume.sh; code=$?
+            ./resume.sh || code=$?
           fi
           [ "$code" -eq 2 ] || { echo "::error::the resume launcher exited $code, expected 2"; exit 1; }
+          echo "both launchers present; resume exited 2 as designed"
 
   # Deliberately separate and non-blocking. An advisory audit that can fail the
   # merge queue on somebody else's CVE disclosure teaches people to ignore it.

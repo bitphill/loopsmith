@@ -8,7 +8,7 @@
     <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" /></a>
     <img alt="rust" src="https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white" />
     <img alt="platforms" src="https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A" />
-    <img alt="tests" src="https://img.shields.io/badge/tests-326%20passing-2A5A8A" />
+    <img alt="tests" src="https://img.shields.io/badge/tests-327%20passing-2A5A8A" />
   </p>
   <p>
     <a href="https://crates.io/crates/loopsmith"><img alt="crates.io" src="https://img.shields.io/crates/v/loopsmith?logo=rust&logoColor=white&label=crates.io&color=e6522c" /></a>
@@ -40,15 +40,30 @@ Pick whichever package manager you already have. All of them put a `loopsmith`
 on `PATH`.
 
 ```bash
-cargo install loopsmith                              # crates.io — builds from source
-npm install -g @bitphill/loopsmith                    # npm — downloads a prebuilt binary
-pip install loopsmith-cli                             # PyPI — downloads a prebuilt binary
-brew tap bitphill/loopsmith && brew install loopsmith  # Homebrew tap — builds from source
+# crates.io — builds from source
+cargo install loopsmith
+
+# npm — downloads a prebuilt binary
+npm install -g @bitphill/loopsmith
+
+# PyPI — downloads a prebuilt binary on first run
+pip install loopsmith-cli
+
+# Homebrew tap — builds from source
+brew tap bitphill/loopsmith
+brew trust bitphill/loopsmith
+brew install loopsmith
 ```
 
 The npm and PyPI names differ from the command because `loopsmith` was already
 registered on both by unrelated projects. crates.io and the binary are both
 plain `loopsmith`.
+
+Homebrew 6 refuses to load a formula from an untrusted third-party tap, which is
+why `brew trust` is in that line — it is a one-time acknowledgement that you have
+decided to run someone else's build instructions, and skipping it produces
+`Refusing to load formula … from untrusted tap`. After it, the bare name resolves
+and `brew install loopsmith` is enough.
 
 Or the universal installer, which detects the host and needs no package manager:
 

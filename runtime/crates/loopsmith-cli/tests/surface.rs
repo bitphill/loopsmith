@@ -384,11 +384,59 @@ fn schedule_without_install_only_prints() {
         0,
         "printing must not write"
     );
+
+    // What "how to make this permanent" looks like depends on which scheduler
+    // the host has, and asserting only the launchd wording made this test pass
+    // on macOS and fail on every Linux box — which is what the CI matrix was
+    // added to find. Whichever path ran, the output has to name the next step.
+    let text = combined(&out);
+    let names_the_next_step = text.contains("--install")            // launchd
+        || text.contains("crontab -e")                              // cron
+        || text.contains("schtasks /Create"); // Task Scheduler
     assert!(
-        combined(&out).contains("--install"),
-        "it should say how to write it: {}",
-        combined(&out)
+        names_the_next_step,
+        "the output must say how to make this permanent on this host: {text}"
     );
+    let _ = std::fs::remove_dir_all(agents);
+    f.cleanup();
+}
+
+/// `--install` where nothing can be installed must say so.
+///
+/// Only launchd has a per-job file loopsmith can add without touching entries it
+/// does not own. On the other two the flag used to be accepted and ignored, which
+/// leaves the user believing a schedule was registered when none was.
+#[test]
+fn install_says_so_when_there_is_nothing_it_can_write() {
+    let f = Fixture::example("account-watch-loop", "schedule-install-note");
+    let agents = scratch("launch-agents-note");
+
+    let out = f.run_with_env(
+        &["schedule", "loop.yaml", "--install"],
+        &[("LOOPSMITH_LAUNCH_AGENTS_DIR", agents.to_str().unwrap())],
+    );
+    assert!(out.status.success(), "{}", combined(&out));
+    let text = combined(&out);
+
+    if text.contains("launchctl load -w") {
+        // launchd: it really did write, and the loading stays the user's call.
+        assert_eq!(
+            std::fs::read_dir(&agents).unwrap().count(),
+            1,
+            "launchd --install should have written exactly one plist: {text}"
+        );
+    } else {
+        assert!(
+            text.contains("--install has nothing to write"),
+            "a no-op --install must explain itself rather than stay silent: {text}"
+        );
+        assert_eq!(
+            std::fs::read_dir(&agents).unwrap().count(),
+            0,
+            "nothing should have been written: {text}"
+        );
+    }
+
     let _ = std::fs::remove_dir_all(agents);
     f.cleanup();
 }

@@ -74,6 +74,12 @@ Two things look unfinished and are not:
 - **`--install` writes a scheduler definition and stops.** It does not run
   `launchctl load -w` or `schtasks /Create`. Registering a scheduled job is a
   persistent, user-visible change to someone's machine, so it stays their call.
+  On macOS it does write the plist, because a LaunchAgents directory holds one
+  file per job and adding loopsmith's cannot disturb anyone else's. On Linux and
+  Windows it writes nothing and says why: a crontab is a single per-user file with
+  no drop-in directory, and Task Scheduler keeps its jobs in a database reachable
+  only through `schtasks`. The flag used to be accepted and silently ignored
+  there, which left the user believing a schedule had been registered.
 - **Cron expressions are evaluated in UTC.** Deriving a correct local offset in
   a multithreaded process is unsound on Unix without care, and a scheduler that
   is quietly an hour off twice a year is worse than one that is honestly in UTC.

@@ -16,7 +16,7 @@ class Loopsmith < Formula
   desc "Self-evolving agent loops behind a deterministic verification gate"
   homepage "https://github.com/bitphill/loopsmith"
   url "https://github.com/bitphill/loopsmith/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "REPLACE_AT_RELEASE_TIME"
+  sha256 "6850b0e5d07bed32b3613d4c7da50e0fc36542239a5ff5188b524494e9edda75"
   license "MIT"
   head "https://github.com/bitphill/loopsmith.git", branch: "main"
 

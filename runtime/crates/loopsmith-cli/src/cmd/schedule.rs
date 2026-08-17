@@ -29,11 +29,11 @@ pub fn execute(config: &Path, install: bool) -> Result<ExitCode, String> {
     match platform.scheduler() {
         Some("launchctl") => launchd(&label, &exe, &abs, &logs, config, install),
         Some("schtasks") => {
-            schtasks(&label, &exe, &abs);
+            schtasks(&label, &exe, &abs, install);
             Ok(ExitCode::SUCCESS)
         }
         Some(_) => {
-            crontab(&cfg, &exe, &abs, &logs);
+            crontab(&cfg, &exe, &abs, &logs, install);
             Ok(ExitCode::SUCCESS)
         }
         None => Err(format!(
@@ -87,16 +87,28 @@ fn launchd(
 /// schedule is created by running a command — so this prints the command rather
 /// than writing anything. Creating a scheduled task is a persistent change to
 /// the user's machine, the same reason `launchctl load` is left to them.
-fn schtasks(label: &str, exe: &Path, abs: &Path) {
+fn schtasks(label: &str, exe: &Path, abs: &Path, install: bool) {
     println!("{}", crate::schedule::schtasks_command(label, exe, abs));
     println!();
     println!("# Run that in an elevated-or-not shell to register the task.");
     println!("# It keeps `loopsmith watch` alive; the watcher evaluates the triggers in");
     println!("# section G itself, so Task Scheduler only has to restart one process.");
     println!("# Remove it later with: schtasks /Delete /TN \"{label}\" /F");
+    if install {
+        nothing_to_install(
+            "Task Scheduler keeps its jobs in a database reached only through \
+             `schtasks` itself, so there is no file to write",
+        );
+    }
 }
 
-fn crontab(cfg: &loopsmith_core::LoopConfig, exe: &Path, abs: &Path, logs: &Path) {
+fn crontab(
+    cfg: &loopsmith_core::LoopConfig,
+    exe: &Path,
+    abs: &Path,
+    logs: &Path,
+    install: bool,
+) {
     let expr = cfg
         .schedules
         .iter()
@@ -109,4 +121,25 @@ fn crontab(cfg: &loopsmith_core::LoopConfig, exe: &Path, abs: &Path, logs: &Path
     println!("# add it with: crontab -e");
     println!("# cron is evaluated in UTC by loopsmith but in local time by cron itself;");
     println!("# for a cadence that does not care, prefer an `interval` trigger.");
+    if install {
+        nothing_to_install(
+            "a crontab is one file per user with no drop-in directory, so writing \
+             to it means rewriting entries this loop did not put there",
+        );
+    }
+}
+
+/// Say so when `--install` cannot do anything, rather than accepting the flag
+/// and ignoring it.
+///
+/// Only launchd has somewhere to write: a LaunchAgents directory where one plist
+/// is one job, so adding loopsmith's cannot disturb anybody else's. The other two
+/// have no such place, and a flag that is silently a no-op is worse than one that
+/// explains itself — the user is left believing something was installed.
+fn nothing_to_install(reason: &str) {
+    eprintln!();
+    eprintln!("note: --install has nothing to write on this machine.");
+    eprintln!("      {reason}.");
+    eprintln!("      Only launchd, on macOS, has a per-job file loopsmith can add to safely.");
+    eprintln!("      Run the command above yourself; that step stays yours either way.");
 }
