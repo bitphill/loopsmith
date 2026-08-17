@@ -51,19 +51,33 @@ pip install loopsmith-cli
 
 # Homebrew tap — builds from source
 brew tap bitphill/loopsmith
-brew trust bitphill/loopsmith
 brew install loopsmith
 ```
+
+Or in one line without tapping, using the fully qualified name:
+
+```bash
+brew install bitphill/loopsmith/loopsmith
+```
+
+Those are the only two forms Homebrew accepts. A two-component
+`brew install bitphill/loopsmith` is not a formula reference — Homebrew reads it
+as a core formula called `loopsmith` owned by nobody and answers `No available
+formula with the name "loopsmith"`.
 
 The npm and PyPI names differ from the command because `loopsmith` was already
 registered on both by unrelated projects. crates.io and the binary are both
 plain `loopsmith`.
 
-Homebrew 6 refuses to load a formula from an untrusted third-party tap, which is
-why `brew trust` is in that line — it is a one-time acknowledgement that you have
-decided to run someone else's build instructions, and skipping it produces
-`Refusing to load formula … from untrusted tap`. After it, the bare name resolves
-and `brew install loopsmith` is enough.
+Homebrew 6 added a trust gate on third-party taps, so either form stops with
+`Refusing to load formula … from untrusted tap` until you acknowledge it once:
+
+```bash
+brew trust bitphill/loopsmith
+```
+
+It is per tap, not per formula, and it is Homebrew asking whether you have decided
+to run someone else's build instructions. Older Homebrew does not need it.
 
 Or the universal installer, which detects the host and needs no package manager:
 

@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.75"
 license = "MIT"
@@ -28,14 +28,14 @@ categories = ["command-line-utilities", "development-tools"]
 # path-only dependency is rejected at publish time with "all dependencies must
 # have a version specified".
 [workspace.dependencies]
-loopsmith-util = { path = "crates/loopsmith-util", version = "0.1.0" }
-loopsmith-core = { path = "crates/loopsmith-core", version = "0.1.0" }
-loopsmith-memory = { path = "crates/loopsmith-memory", version = "0.1.0" }
-loopsmith-graph = { path = "crates/loopsmith-graph", version = "0.1.0" }
-loopsmith-gate = { path = "crates/loopsmith-gate", version = "0.1.0" }
-loopsmith-provider = { path = "crates/loopsmith-provider", version = "0.1.0" }
-loopsmith-skills = { path = "crates/loopsmith-skills", version = "0.1.0" }
-loopsmith-mcp = { path = "crates/loopsmith-mcp", version = "0.1.0" }
+loopsmith-util = { path = "crates/loopsmith-util", version = "0.1.1" }
+loopsmith-core = { path = "crates/loopsmith-core", version = "0.1.1" }
+loopsmith-memory = { path = "crates/loopsmith-memory", version = "0.1.1" }
+loopsmith-graph = { path = "crates/loopsmith-graph", version = "0.1.1" }
+loopsmith-gate = { path = "crates/loopsmith-gate", version = "0.1.1" }
+loopsmith-provider = { path = "crates/loopsmith-provider", version = "0.1.1" }
+loopsmith-skills = { path = "crates/loopsmith-skills", version = "0.1.1" }
+loopsmith-mcp = { path = "crates/loopsmith-mcp", version = "0.1.1" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -4,6 +4,29 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-08-17
+
+The first release the CI matrix ever ran against, and it found something on its
+first attempt — which is the entire argument for having added it.
+
+### Fixed
+
+- **`schedule --install` no longer lies on Linux and Windows.** The flag was
+  threaded to the launchd branch and dropped by the other two, so
+  `loopsmith schedule loop.yaml --install` on Linux did exactly what it did
+  without the flag, silently, leaving the user believing a schedule had been
+  registered. It now explains why there is nothing to write: only launchd has a
+  per-job file loopsmith can add without touching entries it does not own. A
+  crontab is one file per user with no drop-in directory, and Task Scheduler
+  keeps its jobs in a database reached only through `schtasks`. In both cases the
+  next step was always "run the command above yourself".
+- A test asserted the launchd wording on every host, so it had been passing by
+  describing macOS. It now asserts that whichever scheduler path ran names the
+  next step, and a new test covers the no-op `--install` from both sides.
+
+Everything else in 0.1.0 is unchanged. 0.1.0's binaries remain published; this is
+the version to install.
+
 ## [0.1.0] — 2026-08-17
 
 First release. The design in one line: `goal_satisfied` is written by a
@@ -91,4 +114,5 @@ times out at 120 seconds. `ollama run` pulls a missing model, a pull is
 indistinguishable from slow generation from outside the process, and the point of
 a cheap tier is to be abandoned quickly. Run `ollama pull <model>` first.
 
+[0.1.1]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.1
 [0.1.0]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.0
