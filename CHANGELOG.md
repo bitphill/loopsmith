@@ -4,6 +4,57 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] — 2026-08-17
+
+The release where Windows stopped being a badge and started being a platform.
+
+### Fixed
+
+- **`which()` found nothing at all on Windows.** It joined the bare command name
+  onto each `PATH` entry, and executables there are `git.exe` — so nothing ever
+  matched and it returned `None` for every command on the machine. Every caller
+  then faithfully reported the falsehood it was handed: `doctor` listed every tool
+  as absent, `Platform::detect` found no scheduler, and worktree isolation
+  degraded to the shared directory with "git not on PATH" on a runner where
+  `actions/checkout` had just used `C:\Program Files\Git\bin\git.exe`. The
+  `schtasks` support added in 0.1.0 was dead on arrival for the same reason,
+  because `which("schtasks")` could never succeed. Roughly a third of the Windows
+  claim was decoration.
+
+  Each `PATHEXT` suffix is now tried as well as the bare name, honouring the
+  variable rather than hardcoding a list — it is how a machine says `.ps1` counts
+  as a command. The suffix is *appended*, not set as the extension, so `check.sh`
+  can become `check.sh.exe` where `set_extension` would have produced `check.exe`.
+
+  `Command::new("git")` was never affected: Windows' `CreateProcess` appends the
+  extension itself. Only loopsmith's own lookups were broken.
+
+- `loopsmith new` closed by telling every user to run `run.sh`, including on
+  Windows where `cmd.exe` cannot execute it and `run.cmd` was sitting beside it.
+  It now names the launcher the host can run, and prints `set` rather than
+  `export` for the API-key line there.
+
+### Changed
+
+- **Every published package now carries a README that stands on its own.** The
+  crates.io, npm, and PyPI pages previously said little and pointed at the
+  repository; someone arriving from a registry had to leave to learn what the tool
+  was. Each now explains the design, shows a real config, lists the subcommands,
+  and covers install, providers, scheduling, and platform behaviour in the idiom
+  of that registry. The eight library crates had **no** README at all and rendered
+  as blank pages; each now explains its own role and where it sits.
+- CI no longer downloads a third-party toolchain or cache action. `rustup` is
+  preinstalled on GitHub-hosted runners, and eight consecutive runs lost a leg to
+  codeload 429/502/503 while fetching an action — before a line of loopsmith
+  compiled. `continue-on-error` could not save it either: actions are downloaded
+  during "Set up job", before the step that was allowed to fail ever runs. A cold
+  build takes about two minutes, so the cache was saving less than the flakiness
+  cost.
+- Two tests that invoked `./run.sh` and `./resume.sh` directly now pick the
+  launcher the host can execute. Gating them with `#[cfg(unix)]` would have made
+  the suite green while leaving the `.cmd` launchers unexercised on the only
+  platform that runs them.
+
 ## [0.1.2] — 2026-08-17
 
 ### Fixed
@@ -136,6 +187,7 @@ times out at 120 seconds. `ollama run` pulls a missing model, a pull is
 indistinguishable from slow generation from outside the process, and the point of
 a cheap tier is to be abandoned quickly. Run `ollama pull <model>` first.
 
+[0.1.3]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.3
 [0.1.2]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.2
 [0.1.1]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.1
 [0.1.0]: https://github.com/bitphill/loopsmith/releases/tag/v0.1.0

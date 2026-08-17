@@ -25,7 +25,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 REPO = "bitphill/loopsmith"
 _RELEASE_BASE = f"https://github.com/{REPO}/releases/download/v{__version__}"

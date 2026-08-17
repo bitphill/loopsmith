@@ -46,13 +46,13 @@ jobs:
           rustup component add clippy
           rustc --version && cargo --version
 
-      # Nice to have, not load-bearing. `continue-on-error` because a cache miss
-      # costs a few minutes and a cache action that cannot be downloaded should
-      # not fail the run.
-      - uses: Swatinem/rust-cache@v2
-        continue-on-error: true
-        with:
-          workspaces: runtime
+      # No cache action here either, and `continue-on-error` was not enough to
+      # save it: GitHub downloads every action a job references during "Set up
+      # job", before the first step runs, so a codeload 429 fetching the cache
+      # failed the whole job while the step that was allowed to fail never
+      # executed. A cold build of this workspace takes about two minutes. The
+      # cache was saving less than the flakiness cost, so `actions/checkout` is
+      # now the only action this workflow downloads.
 
       # What the host actually is, before anything is asserted about it. When a
       # leg fails, this is the first thing worth reading: it prints the bash

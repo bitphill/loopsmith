@@ -8,10 +8,11 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+readme = "README.md"
 # Only `src/` travels. The integration tests read `config/examples/` and
 # `config/loop.schema.json` from the repository root, which no crate tarball can
 # contain, so shipping them would hand a published crate tests that cannot pass.
-include = ["/src/**/*"]
+include = ["/src/**/*", "/README.md"]
 description = "Deterministic verification gate: the only component that may mark a loopsmith goal satisfied"
 
 [dependencies]
