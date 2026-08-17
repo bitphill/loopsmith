@@ -36,8 +36,15 @@ The release where Windows stopped being a badge and started being a platform.
   … and not on PATH" and then exited successfully — the precise silent failure
   the exit code exists to prevent, and one a scheduled job would never surface.
   `resume.cmd`'s "no run id given" exit 2 had the same defect, as did the export
-  launcher. Every exit now goes through `endlocal & exit /b <code>`, and a test
-  fails on any bare `exit /b` in a generated batch file.
+  launcher.
+
+  `endlocal & exit /b <code>` fixes it on a top-level line but **not** inside a
+  nested `if ( … )` block, which is where the broken one lived — so each launcher
+  now has exactly one `exit /b`, on its last line, reached by every path via
+  `goto`. They also enable delayed expansion and capture with `!ERRORLEVEL!`,
+  because a parenthesised block is parsed before it runs and `%ERRORLEVEL%` inside
+  one reads the value from *before* the command. A test asserts the single exit,
+  the label, and the absence of parse-time capture.
 - `loopsmith new` closed by telling every user to run `run.sh`, including on
   Windows where `cmd.exe` cannot execute it and `run.cmd` was sitting beside it.
   It now names the launcher the host can run, and prints `set` rather than

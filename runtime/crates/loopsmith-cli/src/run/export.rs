@@ -186,25 +186,36 @@ exec loopsmith run \"{config_file}\" \"$@\"\n"
 /// scaffolded loop does.
 ///
 /// CRLF, because `cmd.exe` needs it in a batch file.
+/// One `exit /b`, on the last line, reached by every path — the same shape the
+/// scaffolded launchers use, and for the same two reasons. `setlocal` saves the
+/// errorlevel and the implicit `endlocal` restores it, so an early `exit /b 127`
+/// reports 0; and `endlocal & exit /b` does not fix that inside a nested block.
 fn rerun_cmd(config_file: &str) -> String {
-    let text = format!(
+    format!(
         "@echo off\r\n\
 rem Re-run the configuration that converged.\r\n\
 rem\r\n\
 rem The POSIX `run.sh` beside this file does the same job on Unix.\r\n\
-setlocal\r\n\
+rem\r\n\
+rem One exit, on the last line: an early `exit /b` under `setlocal` reports 0\r\n\
+rem because the implicit `endlocal` restores the saved errorlevel.\r\n\
+setlocal enabledelayedexpansion\r\n\
 cd /d \"%~dp0\"\r\n\
+set \"CODE=0\"\r\n\
 \r\n\
 where loopsmith >nul 2>&1\r\n\
 if errorlevel 1 (\r\n\
   echo loopsmith is not on PATH 1>&2\r\n\
   echo This package is a config and its evidence; it needs the binary to run. 1>&2\r\n\
-  endlocal & exit /b 127\r\n\
+  set \"CODE=127\"\r\n\
+  goto :loopsmith_done\r\n\
 )\r\n\
 loopsmith run \"{config_file}\" %*\r\n\
-endlocal & exit /b %errorlevel%\r\n"
-    );
-    text
+set \"CODE=!ERRORLEVEL!\"\r\n\
+\r\n\
+:loopsmith_done\r\n\
+endlocal & exit /b %CODE%\r\n"
+    )
 }
 
 /// First sentence of a description, for the skill frontmatter.

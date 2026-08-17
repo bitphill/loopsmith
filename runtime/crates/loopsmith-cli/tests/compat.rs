@@ -274,31 +274,51 @@ fn the_generated_cmd_launchers_are_crlf_and_shaped_for_cmd_exe() {
             text.contains("where loopsmith"),
             "{name} must fall back to PATH: {text}"
         );
-        // `exit /b` inside `setlocal` swallows the child's status without the
-        // explicit `endlocal &`, so every launcher would report success.
+        // Exactly one exit, on the last line, reached by every path.
+        //
+        // Two separate cmd.exe traps live here and Windows CI walked into both.
+        // `setlocal` saves the errorlevel and the implicit `endlocal` restores
+        // it, so an early `exit /b 127` reports 0 — a loop whose binary had moved
+        // printed its diagnostic and then exited successfully. Writing
+        // `endlocal & exit /b 127` fixes that on a top-level line but *not*
+        // inside a nested `if ( … )` block, which is where the broken one was.
+        // A single exit point needs no reasoning about block parsing.
+        let code_lines: Vec<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.starts_with("rem "))
+            .collect();
+
+        let exits: Vec<&&str> = code_lines
+            .iter()
+            .filter(|l| l.contains("exit /b"))
+            .collect();
+        assert_eq!(
+            exits.len(),
+            1,
+            "{name} must have exactly one exit, got {exits:?}"
+        );
+        assert_eq!(
+            *exits[0], "endlocal & exit /b %CODE%",
+            "{name}'s single exit must carry the captured code: {text}"
+        );
         assert!(
-            text.contains("endlocal & exit /b %errorlevel%"),
-            "{name} must propagate the exit code: {text}"
+            code_lines.contains(&":loopsmith_done"),
+            "{name} needs the label its early paths jump to: {text}"
         );
 
-        // And *every* exit, not just the last one. `setlocal` saves the current
-        // errorlevel and the implicit `endlocal` restores it, so a bare
-        // `exit /b 127` reports 0 — a loop whose binary had moved exited
-        // successfully, which is exactly the silent failure the code exists to
-        // prevent. Windows CI caught this; no POSIX host can.
-        for (n, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.starts_with("rem ") {
-                continue;
-            }
-            if let Some(rest) = line.strip_prefix("exit /b") {
-                panic!(
-                    "{name}:{} exits without `endlocal &`, so its code becomes 0: \
-                     `exit /b{rest}`",
-                    n + 1
-                );
-            }
-        }
+        // Delayed expansion, because a parenthesised block is parsed before it
+        // runs: `%ERRORLEVEL%` inside one expands to the value from *before* the
+        // block, which is the same class of bug one level down.
+        assert!(
+            code_lines.contains(&"setlocal enabledelayedexpansion"),
+            "{name} must enable delayed expansion: {text}"
+        );
+        assert!(
+            !text.contains("set \"CODE=%ERRORLEVEL%\""),
+            "{name} captures the exit code with parse-time expansion, which reads \
+             the value from before the command ran; use !ERRORLEVEL!: {text}"
+        );
         assert!(
             text.contains("cd /d \"%~dp0\""),
             "{name} must run from its own directory: {text}"
