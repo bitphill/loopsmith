@@ -482,13 +482,13 @@ fn satisfying_value(op: loopsmith_core::CompareOp, want: f64) -> f64 {
     }
 }
 
-#[cfg(unix)]
 /// `cmd.exe` needs CRLF in a batch file: with LF only, the trailing newline joins
 /// the last token on the line and `exit /b 0` becomes an unknown command.
 fn crlf(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\n', "\r\n")
 }
 
+#[cfg(unix)]
 fn make_executable(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let mut perms = std::fs::metadata(path).expect("stub exists").permissions();
@@ -496,5 +496,6 @@ fn make_executable(path: &Path) {
     std::fs::set_permissions(path, perms).expect("stub is chmod-able");
 }
 
+/// No executable bit off unix; the extension is what makes a file runnable.
 #[cfg(not(unix))]
 fn make_executable(_path: &Path) {}
