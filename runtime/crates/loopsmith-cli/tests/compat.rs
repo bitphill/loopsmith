@@ -330,17 +330,46 @@ fn the_generated_scripts_keep_the_indentation_they_were_written_with() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// `resume.sh` with no argument must explain itself and exit 2 rather than
-/// invoking the binary with an empty run id.
+/// The launcher this host can actually execute, as a runnable `Command`.
+///
+/// Windows cannot run a `#!` script and no POSIX shell will run a `.cmd`, which is
+/// exactly why both are generated. A test that hardcodes `./run.sh` therefore
+/// tests nothing on Windows — and gating it out with `#[cfg(unix)]` would leave
+/// the `.cmd` launcher unexercised on the only platform that runs it. Picking the
+/// right one keeps a single test meaningful on both.
+fn launcher(dir: &std::path::Path, stem: &str) -> Command {
+    if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.arg("/c").arg(format!("{stem}.cmd")).current_dir(dir);
+        c
+    } else {
+        let mut c = Command::new(format!("./{stem}.sh"));
+        c.current_dir(dir);
+        c
+    }
+}
+
+/// The name of the launcher this host runs, for messages and for rewriting.
+fn launcher_file(stem: &str) -> String {
+    format!("{stem}.{}", if cfg!(windows) { "cmd" } else { "sh" })
+}
+
+/// `resume` with no argument must explain itself and exit 2 rather than invoking
+/// the binary with an empty run id.
 #[test]
 fn resume_without_a_run_id_explains_itself() {
     let dir = new_loop("compat-resume");
-    let out = Command::new("./resume.sh")
-        .current_dir(&dir)
+    let out = launcher(&dir, "resume")
         .output()
-        .expect("the script runs");
+        .expect("the launcher runs");
     assert_eq!(out.status.code(), Some(2), "{}", combined(&out));
-    assert!(combined(&out).contains("usage: ./resume.sh"), "{}", combined(&out));
+    // Each dialect spells its own usage line; both must name the argument.
+    assert!(
+        combined(&out).contains("usage: ./resume.sh") || combined(&out).contains("usage: resume.cmd"),
+        "{}",
+        combined(&out)
+    );
+    assert!(combined(&out).contains("run-id"), "{}", combined(&out));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -350,21 +379,34 @@ fn resume_without_a_run_id_explains_itself() {
 #[test]
 fn a_generated_script_falls_back_to_path_when_the_pinned_binary_has_moved() {
     let dir = new_loop("compat-moved");
-    let script = std::fs::read_to_string(dir.join("run.sh")).unwrap();
+    let file = launcher_file("run");
+    let script = std::fs::read_to_string(dir.join(&file)).unwrap();
     assert!(
         script.contains(LOOPSMITH),
-        "run.sh should pin the absolute binary: {script}"
+        "{file} should pin the absolute binary: {script}"
     );
 
     // Repoint it at somewhere that does not exist, and give it no PATH either.
-    let rewritten = script.replace(LOOPSMITH, "/nonexistent/loopsmith");
-    std::fs::write(dir.join("run.sh"), &rewritten).unwrap();
+    // The bogus path is spelled for this platform: on Windows an absolute path
+    // starts with a drive letter, and `if not exist` on a malformed one is not
+    // the same check.
+    let missing = if cfg!(windows) {
+        r"C:\nonexistent\loopsmith.exe"
+    } else {
+        "/nonexistent/loopsmith"
+    };
+    let empty_path = if cfg!(windows) {
+        r"C:\nonexistent"
+    } else {
+        "/nonexistent"
+    };
+    let rewritten = script.replace(LOOPSMITH, missing);
+    std::fs::write(dir.join(&file), &rewritten).unwrap();
 
-    let out = Command::new("./run.sh")
-        .current_dir(&dir)
-        .env("PATH", "/nonexistent")
+    let out = launcher(&dir, "run")
+        .env("PATH", empty_path)
         .output()
-        .expect("the script runs");
+        .expect("the launcher runs");
     assert_eq!(
         out.status.code(),
         Some(127),
@@ -380,12 +422,11 @@ fn a_generated_script_falls_back_to_path_when_the_pinned_binary_has_moved() {
 
     // With the real binary on PATH, the fallback finds it.
     let bin_dir = Path::new(LOOPSMITH).parent().unwrap();
-    let found = Command::new("./run.sh")
+    let found = launcher(&dir, "run")
         .args(["--dry-run"])
-        .current_dir(&dir)
         .env("PATH", bin_dir)
         .output()
-        .expect("the script runs");
+        .expect("the launcher runs");
     assert_ne!(
         found.status.code(),
         Some(127),
