@@ -393,6 +393,29 @@ fn launcher_file(stem: &str) -> String {
     format!("{stem}.{}", if cfg!(windows) { "cmd" } else { "sh" })
 }
 
+/// A `PATH` containing only `dir`, plus whatever the platform needs to function.
+///
+/// On unix that is just `dir`: the `.sh` launcher looks a command up with
+/// `command -v`, a shell builtin that needs nothing on `PATH` to work.
+///
+/// On Windows the equivalent is `where.exe`, which lives in `System32` — so a
+/// `PATH` of only `dir` removes the launcher's ability to search at all, and the
+/// test stops measuring the fallback and starts measuring whether `where` exists.
+/// `cmd.exe` itself is in the same directory. A machine without `System32` on
+/// `PATH` is broken in a way no launcher should try to survive.
+fn with_system_path(dir: impl AsRef<Path>) -> std::ffi::OsString {
+    let dir = dir.as_ref().as_os_str().to_os_string();
+    if !cfg!(windows) {
+        return dir;
+    }
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let mut path = dir;
+    path.push(";");
+    path.push(&root);
+    path.push(r"\System32");
+    path
+}
+
 /// `resume` with no argument must explain itself and exit 2 rather than invoking
 /// the binary with an empty run id.
 #[test]
@@ -434,11 +457,7 @@ fn a_generated_script_falls_back_to_path_when_the_pinned_binary_has_moved() {
     } else {
         "/nonexistent/loopsmith"
     };
-    let empty_path = if cfg!(windows) {
-        r"C:\nonexistent"
-    } else {
-        "/nonexistent"
-    };
+    let empty_path = with_system_path("nonexistent");
     let rewritten = script.replace(LOOPSMITH, missing);
     std::fs::write(dir.join(&file), &rewritten).unwrap();
 
@@ -463,7 +482,7 @@ fn a_generated_script_falls_back_to_path_when_the_pinned_binary_has_moved() {
     let bin_dir = Path::new(LOOPSMITH).parent().unwrap();
     let found = launcher(&dir, "run")
         .args(["--dry-run"])
-        .env("PATH", bin_dir)
+        .env("PATH", with_system_path(bin_dir))
         .output()
         .expect("the launcher runs");
     assert_ne!(
