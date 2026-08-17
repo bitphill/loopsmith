@@ -10,13 +10,21 @@
 # it than this one has yet. Nothing below is tap-specific, so the same file can be
 # submitted when that day comes.
 #
-# The `sha256` is the GitHub source tarball's, filled in at release time:
-#   curl -sL https://github.com/bitphill/loopsmith/archive/refs/tags/v0.1.2.tar.gz | shasum -a 256
+# The `sha256` is the GitHub source tarball's, filled in at release time. Check the
+# size before trusting the digest — codeload rate-limits unauthenticated archive
+# downloads, `curl -sL` reports success while writing the error body, and hashing
+# that yields a checksum no install can ever match:
+#
+#   curl -sL .../v0.1.2.tar.gz -o t.tar.gz && gzip -t t.tar.gz && wc -c < t.tar.gz
+#   shasum -a 256 t.tar.gz        # only once the file is ~2 MB of valid gzip
+#
+# `gh api repos/.../tarball/<ref>` is not a substitute: it mangles binary output
+# and returns a 199-byte fragment for every ref.
 class Loopsmith < Formula
   desc "Self-evolving agent loops behind a deterministic verification gate"
   homepage "https://github.com/bitphill/loopsmith"
   url "https://github.com/bitphill/loopsmith/archive/refs/tags/v0.1.2.tar.gz"
-  sha256 "13630b0305f9cb98fcb02a7700fa283225bb340ce0e379c3d19dd19d7e64a8ee"
+  sha256 "eeafdff0629d8d0950bbe244ecbcd2e4ed3697e2f14fdce0153c6feb08387a33"
   license "MIT"
   head "https://github.com/bitphill/loopsmith.git", branch: "main"
 

@@ -522,15 +522,21 @@ fn doctor_reports_detectors_the_machine_cannot_run() {
 
 /// A detector that exists but is not executable is the other half of the same
 /// mistake, and reads as a detector error rather than as a permissions problem.
+///
+/// Unix only, and not merely because `set_permissions` needs `PermissionsExt`:
+/// there is no executable bit to clear off unix, so `loopsmith_util::is_executable`
+/// degrades to a file check and `doctor` is *right* not to report anything. Gating
+/// the whole test says that, where a `#[cfg]` around just the chmod would have
+/// left a test that asserts the wrong thing on Windows.
+#[cfg(unix)]
 #[test]
 fn doctor_reports_a_detector_that_is_not_executable() {
+    use std::os::unix::fs::PermissionsExt;
+
     let f = Fixture::example("traffic-loop", "doctor-chmod").stub_scripts(harness::Stubs::Pass);
     let stub = f.dir.join("scripts/check-venues.sh");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o644)).unwrap();
-    }
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o644)).unwrap();
+
     let text = combined(&f.run(&["doctor", "loop.yaml"]));
     assert!(
         text.contains("not executable") && text.contains("chmod +x"),
