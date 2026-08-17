@@ -238,21 +238,55 @@ mod tests {
     }
 
     #[test]
-    fn a_non_executable_file_is_not_a_command() {
+    fn a_file_that_is_not_runnable_is_not_a_command() {
         // Asserted through `is_executable` and the absolute-path branch of
         // `which` rather than by swapping PATH: `set_var` races every other
         // test thread that reads the environment, which is the same class of
         // parallel-test collision the temp-dir counter exists to prevent.
+        //
+        // "Not runnable" means different things on the two platforms, and the
+        // assertion has to mean the platform's own rule rather than unix's. Off
+        // unix there is no executable bit — `is_executable` says so and degrades
+        // to a file check — so asserting that a plain file is not executable is
+        // asserting unix semantics on a system that has none.
         let dir = std::env::temp_dir().join(format!("loopsmith-which-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let bait = dir.join("loopsmith-not-really-a-binary");
         std::fs::write(&bait, "not executable").unwrap();
 
-        assert!(!is_executable(&bait), "a plain file is not executable");
-        assert!(
-            which(&bait.to_string_lossy()).is_none(),
-            "a non-executable file is not a command"
-        );
+        #[cfg(unix)]
+        {
+            // The bit is the whole answer here.
+            assert!(!is_executable(&bait), "a plain file is not executable");
+            assert!(
+                which(&bait.to_string_lossy()).is_none(),
+                "a non-executable file is not a command"
+            );
+        }
+
+        #[cfg(not(unix))]
+        {
+            // Windows decides by extension, so the equivalent claim is that a
+            // name carrying none of `PATHEXT` does not resolve as a command.
+            let plain = dir.join("loopsmith-no-extension-here");
+            std::fs::write(&plain, "not runnable").unwrap();
+            assert!(
+                path_extensions().iter().all(|ext| {
+                    let mut n = plain.as_os_str().to_os_string();
+                    n.push(ext);
+                    !PathBuf::from(n).exists()
+                }),
+                "the fixture must not accidentally carry an executable suffix"
+            );
+            // `which` still finds the file itself — `is_executable` is a file
+            // check here — but nothing gets invented by appending a suffix.
+            let resolved = which(&plain.to_string_lossy());
+            assert_eq!(
+                resolved.as_deref(),
+                Some(plain.as_path()),
+                "an exact path resolves to itself"
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }
