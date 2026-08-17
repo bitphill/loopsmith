@@ -1024,13 +1024,45 @@ providers:
         let _ = std::fs::remove_dir_all(d);
     }
 
+    /// A provider command that reliably takes a beat, on this platform.
+    ///
+    /// `sleep` is not a Windows command, so the original spelling measured
+    /// nothing there — the spawn failed instantly, the run took a different path,
+    /// and the wall-clock assertion tripped for a reason that had nothing to do
+    /// with concurrency. `ping -n` is the delay every Windows box has.
+    ///
+    /// Returns the YAML fragment, the per-node delay, and the ceiling below which
+    /// the wave must finish. The ceiling differs because the two delays do: what
+    /// matters is that serial execution would take three times the delay and the
+    /// ceiling sits well under that.
+    fn sleeper_provider() -> (&'static str, std::time::Duration) {
+        if cfg!(windows) {
+            // `-n 2` is one second of gap between two pings. Serial: ~3s.
+            (
+                "    - id: sleeper\n      kind: byok\n      command: ping\n      \
+                 args: [\"-n\", \"2\", \"127.0.0.1\"]\n",
+                std::time::Duration::from_millis(2200),
+            )
+        } else {
+            // Serial: ~1.5s.
+            (
+                "    - id: sleeper\n      kind: byok\n      command: sleep\n      \
+                 args: [\"0.5\"]\n",
+                std::time::Duration::from_millis(1200),
+            )
+        }
+    }
+
     #[test]
     fn independent_nodes_in_a_wave_run_concurrently() {
         let (s, d) = store("parallel");
-        // Three sleepers in one wave. Run serially that is ~1.5s; with the
-        // chosen concurrency it should be well under that.
+        let (sleeper, ceiling) = sleeper_provider();
+        // Three sleepers in one wave. Run serially that is three delays; with the
+        // chosen concurrency it should finish in roughly one.
         let c = loopsmith_core::parse_str(
-            r#"
+            &format!(
+                "{}{sleeper}{}",
+                r#"
 name: t
 goals:
   - name: g1
@@ -1068,13 +1100,11 @@ graph:
     max_parallel: 3
 providers:
   providers:
-    - id: sleeper
-      kind: byok
-      command: sleep
-      args: ["0.5"]
-  cascade:
-    standard: [sleeper]
 "#,
+                r#"  cascade:
+    standard: [sleeper]
+"#
+            ),
             "test",
         )
         .unwrap();
@@ -1083,8 +1113,9 @@ providers:
         let elapsed = t0.elapsed();
         assert!(out.stop.is_success());
         assert!(
-            elapsed < std::time::Duration::from_millis(1200),
-            "three 0.5s nodes took {elapsed:?}; they did not run in parallel"
+            elapsed < ceiling,
+            "three sleepers took {elapsed:?}, over the {ceiling:?} ceiling; \
+             they did not run in parallel"
         );
         let _ = std::fs::remove_dir_all(d);
     }
