@@ -2,8 +2,21 @@
   <img src="assets/loopsmith-logo-512.png" alt="loopsmith logo" width="200" />
   <h1>loopsmith</h1>
   <p><em>Self-evolving agent loops. The gate is code, so "done" cannot be argued.</em></p>
-  <p><img alt="rust" src="https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white" /> <img alt="tests" src="https://img.shields.io/badge/tests-315%20passing-2A5A8A" /> <img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" /> <img alt="platforms" src="https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A" /></p>
-  <p><a href="#five-minutes">Five minutes</a> · <a href="#examples">Examples</a> · <a href="#scheduling">Scheduling</a> · <a href="#portability">Portability</a> · <a href="README-DETAIL.md">Full reference</a></p>
+  <p>
+    <a href="https://github.com/bitphill/loopsmith/releases"><img alt="release" src="https://img.shields.io/github/v/release/bitphill/loopsmith?include_prereleases&color=C1272D" /></a>
+    <a href="https://github.com/bitphill/loopsmith/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/bitphill/loopsmith?color=2A5A8A" /></a>
+    <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" /></a>
+    <img alt="rust" src="https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white" />
+    <img alt="platforms" src="https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A" />
+    <img alt="tests" src="https://img.shields.io/badge/tests-326%20passing-2A5A8A" />
+  </p>
+  <p>
+    <a href="https://crates.io/crates/loopsmith"><img alt="crates.io" src="https://img.shields.io/crates/v/loopsmith?logo=rust&logoColor=white&label=crates.io&color=e6522c" /></a>
+    <a href="https://www.npmjs.com/package/@bitphill/loopsmith"><img alt="npm" src="https://img.shields.io/npm/v/%40bitphill%2Floopsmith?logo=npm&logoColor=white&label=npm&color=cb3837" /></a>
+    <a href="https://pypi.org/project/loopsmith-cli/"><img alt="PyPI" src="https://img.shields.io/pypi/v/loopsmith-cli?logo=python&logoColor=white&label=PyPI&color=3775a9" /></a>
+    <a href="https://github.com/bitphill/homebrew-loopsmith"><img alt="Homebrew" src="https://img.shields.io/badge/Homebrew-tap-FBB040?logo=homebrew&logoColor=white" /></a>
+  </p>
+  <p><a href="#install">Install</a> · <a href="#five-minutes">Five minutes</a> · <a href="#examples">Examples</a> · <a href="#scheduling">Scheduling</a> · <a href="#portability">Portability</a> · <a href="README-DETAIL.md">Full reference</a></p>
 </div>
 
 ---
@@ -21,11 +34,54 @@ back. A system that can only promote is a burndown chart with extra steps.
 
 ---
 
+## Install
+
+Pick whichever package manager you already have. All of them put a `loopsmith`
+on `PATH`.
+
+```bash
+cargo install loopsmith                              # crates.io — builds from source
+npm install -g @bitphill/loopsmith                    # npm — downloads a prebuilt binary
+pip install loopsmith-cli                             # PyPI — downloads a prebuilt binary
+brew tap bitphill/loopsmith && brew install loopsmith  # Homebrew tap — builds from source
+```
+
+The npm and PyPI names differ from the command because `loopsmith` was already
+registered on both by unrelated projects. crates.io and the binary are both
+plain `loopsmith`.
+
+Or the universal installer, which detects the host and needs no package manager:
+
+```bash
+./install.sh      # Linux, macOS, BSD — calls installers/deps.sh
+install.bat       # Windows — calls installers/deps.ps1
+```
+
+It installs `rustup` and `cargo` if they are missing, ensures `git`, builds in
+release mode, puts the binary in `~/.loopsmith/bin/loopsmith`, and symlinks
+`/usr/local/bin` if it can write there. Re-runnable, idempotent, logs to
+`~/.loopsmith/install.log`.
+
+### Packages
+
+| Registry | Package | Ships |
+|---|---|---|
+| [crates.io](https://crates.io/crates/loopsmith) | `loopsmith` | source |
+| [npm](https://www.npmjs.com/package/@bitphill/loopsmith) | `@bitphill/loopsmith` | prebuilt binary |
+| [PyPI](https://pypi.org/project/loopsmith-cli/) | `loopsmith-cli` | prebuilt binary |
+| [Homebrew](https://github.com/bitphill/homebrew-loopsmith) | `bitphill/loopsmith/loopsmith` | source |
+
+The eight libraries behind the binary — `loopsmith-util`, `-core`, `-memory`,
+`-graph`, `-gate`, `-provider`, `-skills`, `-mcp` — are published on crates.io
+too. They compile automatically as dependencies and need no separate install.
+
+---
+
 ## Five minutes
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"     # rustup writes to ~/.profile, which zsh never reads
-cd runtime && cargo build --release && cp target/release/loopsmith /usr/local/bin/
+cargo install loopsmith                  # or: cd runtime && cargo build --release
 
 # --path must be outside this repository: a loop edits files and writes state,
 # so it does not get pointed at the tool that runs it.
@@ -33,11 +89,13 @@ loopsmith new --path ~/loops/nightly-refactor --purpose "keep the module simple"
 
 cd ~/loops/nightly-refactor
 $EDITOR loop.yaml            # your goals, and how each one is checked
-loopsmith validate loop.yaml && loopsmith plan loop.yaml && ./run.sh
+loopsmith validate loop.yaml && loopsmith plan loop.yaml && ./run.sh   # run.cmd on Windows
 ```
 
 `new` writes the config, the directories, an MCP definition, a permission grant,
-`scripts/compat.sh`, and `run.sh` / `resume.sh` with absolute paths filled in.
+`scripts/compat.sh`, and `run.sh` / `resume.sh` / `run.cmd` / `resume.cmd` with
+absolute paths filled in. Both script flavours are written on every platform, so
+the directory still starts after it moves to a different kind of machine.
 
 `validate` **fails on purpose** until every `pre_execution` step says
 `done: true`:
@@ -126,8 +184,24 @@ userland, which scheduler, which detectors it cannot run.
 
 Every new loop ships `scripts/compat.sh`: source it in a detector and use `sed_i`,
 `stat_size`, `readlink_f`, `sha256`, `require`, and `need_bash` rather than
-branching by hand. Everything loopsmith generates is POSIX `sh`, because macOS
-still ships bash 3.2.
+branching by hand. Every `.sh` loopsmith generates is POSIX, because macOS still
+ships bash 3.2.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Launchers a new loop gets | `run.sh`, `resume.sh` (**and** the `.cmd` pair) | same | `run.cmd`, `resume.cmd` (**and** the `.sh` pair, under Git Bash or WSL) |
+| Scheduler `schedule` hands the loop to | `crontab`, else `systemctl` | `launchctl`, else `crontab` | `schtasks`, else `crontab` |
+| Home directory | `HOME` | `HOME` | `HOME`, else `USERPROFILE`, else `HOMEDRIVE`+`HOMEPATH` |
+| `compat.sh` helpers | native | native | under Git Bash, WSL, or MSYS |
+
+Nothing is decided at build time. The userland is probed by asking `sed` for a
+version — Homebrew's coreutils puts GNU tools ahead of BSD ones on a Mac, so the
+operating system does not imply the answer — and the scheduler is whichever
+candidate is actually on `PATH`, not whichever one the OS is famous for.
+
+CI runs the full suite on `ubuntu-latest`, `macos-latest`, and `windows-latest`,
+so the three-platform claim above is something that gets checked rather than
+something written down.
 
 ---
 

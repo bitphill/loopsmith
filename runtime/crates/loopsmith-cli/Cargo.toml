@@ -1,11 +1,24 @@
 [package]
-name = "loopsmith-cli"
+# The package is `loopsmith`, not `loopsmith-cli`, so `cargo install loopsmith`
+# matches the command it installs. The directory keeps its old name; a package
+# name and a directory name are unrelated to cargo.
+name = "loopsmith"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "loopsmith CLI: plan, run, resume, and gate self-evolving agent loops"
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+description = "loopsmith: plan, run, resume, and gate self-evolving agent loops behind a deterministic verification gate"
+# `templates/` holds the four files `include_str!` compiles in. `config/` and
+# `assets/` live above the crate root and cannot travel in the tarball.
+# Leading slashes anchor these to the package root. Unanchored `README.md`
+# matches `tests/README.md` too, which is a note to whoever adds a test and has
+# no business in a published tarball.
+include = ["/src/**/*", "/templates/**/*", "/README.md"]
 
 [[bin]]
 name = "loopsmith"
@@ -19,7 +32,7 @@ loopsmith-graph = { workspace = true }
 loopsmith-gate = { workspace = true }
 loopsmith-provider = { workspace = true }
 loopsmith-skills = { workspace = true }
-loopsmith-mcp = { path = "../loopsmith-mcp" }
+loopsmith-mcp = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

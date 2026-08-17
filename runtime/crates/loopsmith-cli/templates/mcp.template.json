@@ -27,7 +27,7 @@
     },
     "cargo_dev": {
       "command": "cargo",
-      "args": ["run", "--release", "-p", "loopsmith-cli", "--", "mcp", "--state", "./state"]
+      "args": ["run", "--release", "-p", "loopsmith", "--", "mcp", "--state", "./state"]
     }
   }
 }

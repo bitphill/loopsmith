@@ -5,10 +5,10 @@ what those cannot: whether the pieces work **together**, under a real iteration
 loop, driven through the real binary, against the configs users are handed.
 
 ```sh
-cargo test -p loopsmith-cli --test stress
-cargo test -p loopsmith-cli --test surface
-cargo test -p loopsmith-cli --test compat
-cargo test -p loopsmith-cli --test opt_in     # skips everything gated by default
+cargo test -p loopsmith --test stress
+cargo test -p loopsmith --test surface
+cargo test -p loopsmith --test compat
+cargo test -p loopsmith --test opt_in     # skips everything gated by default
 ```
 
 | File | Covers |
@@ -108,25 +108,57 @@ This was a plan. It is now a record. Every row below has run.
 | `doctor` reports the platform | `doctor_reports_the_platform_and_stays_advisory` | — |
 | `doctor` finds unrunnable detectors | `doctor_reports_detectors_the_machine_cannot_run` | `traffic-loop` |
 | `doctor` finds a non-executable detector | `doctor_reports_a_detector_that_is_not_executable` | `traffic-loop` |
+| `.cmd` launchers travel with every loop | `the_generated_cmd_launchers_are_crlf_and_shaped_for_cmd_exe` | — |
+| Generated scripts keep their layout | `the_generated_scripts_keep_the_indentation_they_were_written_with` | — |
+
+### Traps that used to be prose and are now tests
+
+Each of these was a sentence someone had to remember. A remembered rule is one
+refactor away from being gone, so each is now something that fails.
+
+| Trap | Pinned by |
+|---|---|
+| A `\` continuation in a non-raw `format!` eats the next line's indentation | `the_generated_scripts_keep_the_indentation_they_were_written_with` |
+| `cmd.exe` needs CRLF; LF-only makes the last token on a line unparseable | `the_generated_cmd_launchers_are_crlf_and_shaped_for_cmd_exe` |
+| A bashism check that reads comments flags its own explanation | `strip_comments`, extended to `rem ` for the `.cmd` dialect |
+| The userland is probed with `sed --version`, never inferred from the OS | `the_userland_is_probed_and_never_inferred_from_the_operating_system` (`platform.rs`) |
+| Windows fell into the catch-all arm and was offered `crontab` | `every_os_has_a_scheduler_worth_probing_and_windows_gets_the_native_one` |
+| `HOME` is unset on Windows | `the_home_directory_is_found_by_this_platforms_variable` |
+| `require` / `need_bash` exit 2, not 1 | `need_bash_exits_two_so_a_missing_tool_is_not_read_as_a_failed_check` |
+| A new `ProposalKind` must decide its own staleness | `every_proposal_kind_has_a_decided_lifetime` (`loopsmith-memory`) |
+| Proposals written before `expires_ms` existed must still load | `a_proposal_written_before_the_field_existed_still_deserialises` |
+
+Two traps are test-authoring rules rather than behaviours, so they live here
+rather than in an assertion:
+
+- **The sled store cannot be opened while the binary under test is running**, and
+  the handle must be dropped before its directory is removed. A store opened
+  around a `Command` call reports a lock error that reads like a backend bug.
+- **Give every fixture a distinct tag.** Temp directories are named from it and
+  the suite runs threaded, so two concurrent tests sharing a tag collide on the
+  sled lock — the same error, from the same cause, with nothing pointing at the
+  tag.
 
 ### Not covered, and why
 
 - **Actually loading a launch agent.** `--install` writes the plist and stops;
   `launchctl load -w` stays the user's call, so no test runs it. The write itself
-  is covered because `LOOPSMITH_LAUNCH_AGENTS_DIR` redirects the destination.
-- **A GNU userland.** Everything portability-related is asserted on whichever
-  machine the suite runs on, and this one is BSD. `compat.rs` exercises the
-  helpers rather than mocking the userland, so a GNU host proves the other half
-  by running the same tests.
-- **Windows.** The generated scripts are POSIX `sh` and the worktree, scheduler,
-  and detector paths all assume a Unix. The badge claims Windows; nothing here
-  tests it.
+  is covered because `LOOPSMITH_LAUNCH_AGENTS_DIR` redirects the destination. The
+  same reasoning applies to `schtasks /Create` on Windows: `schedule` prints the
+  command rather than running it.
+- **Executing a `.cmd` launcher.** No POSIX host can run one, so this suite
+  checks its shape — CRLF, the pinned binary, the `where` fallback, the
+  `endlocal &` exit-code propagation — and the `windows-latest` CI leg runs it.
+- **A GNU userland, locally.** Everything portability-related is asserted on
+  whichever machine the suite runs on, and this one is BSD. `compat.rs` exercises
+  the helpers rather than mocking the userland, so the `ubuntu-latest` CI leg
+  proves the other half by running the same tests.
 
 ## Opt-in tests
 
 ```sh
-LOOPSMITH_STRESS_NETWORK=1  cargo test -p loopsmith-cli --test opt_in
-LOOPSMITH_STRESS_PROVIDER=1 cargo test -p loopsmith-cli --test opt_in -- --nocapture
+LOOPSMITH_STRESS_NETWORK=1  cargo test -p loopsmith --test opt_in
+LOOPSMITH_STRESS_PROVIDER=1 cargo test -p loopsmith --test opt_in -- --nocapture
 ```
 
 Without the variable each gated test prints why it is skipping and returns, so

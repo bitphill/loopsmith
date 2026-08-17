@@ -79,11 +79,13 @@ pub struct ResolvedSkill {
 /// Directories searched for an already-installed skill, nearest first.
 pub fn skill_search_paths(project_root: &Path) -> Vec<PathBuf> {
     let mut v = vec![
-        project_root.join(".claude/skills"),
+        project_root.join(".claude").join("skills"),
         project_root.join("generated-skills"),
     ];
-    if let Some(home) = std::env::var_os("HOME") {
-        v.push(PathBuf::from(home).join(".claude/skills"));
+    // Not `HOME` directly: Windows does not set it outside a POSIX emulation
+    // layer, and the user-level skills directory would silently vanish there.
+    if let Some(home) = loopsmith_util::platform::home_dir() {
+        v.push(home.join(".claude").join("skills"));
     }
     v
 }

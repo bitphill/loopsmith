@@ -260,6 +260,14 @@ providers:
 
 Supported kinds: `claude_code`, `ollama`, `grok_cli`, `grok_build`, `hermes`, `openai`, `gemini`, `byok`, `mcp`. Common aliases (`claude`, `grok`, `open_ai`, `google_gemini`, `custom`) are accepted, because a config that rejects `openai` in favour of `open_ai` wastes your afternoon.
 
+**Pull an `ollama` model before the first run.** `ollama run <model>` downloads the model when it is not present, and from outside the process a 4.7 GB download is indistinguishable from a slow generation. One real run spent its entire timeout pulling `llama3` and produced nothing. The starter `ollama` provider therefore has `timeout_seconds: 120` — short enough that the cascade abandons it and moves to the next provider rather than waiting out a download:
+
+```bash
+ollama pull llama3
+```
+
+Raise the timeout only if you have pulled the model and generation itself is genuinely slow. The point of a cheap tier is to be abandoned quickly.
+
 **Secrets never enter the process.** `requires_env` names keys that must be present; values are never read, substituted into arguments, or written to the ledger. Let the command expand them itself, as `curl` does above.
 
 ```bash
@@ -349,7 +357,7 @@ The loop cannot move its own goalposts, and cannot silently adopt a tool. A syst
 
 **One lucky run is not evidence.** Below `min_trials`, a candidate is recorded and ignored.
 
-Sub-agents are sourced **installed → marketplace → generate**, with trust floors in [`config/marketplaces.json`](config/marketplaces.json). Names matching credential-shaped patterns are never auto-installed regardless of star count — popularity is not trust. Everything acquired lands in `generated-skills/` until a human promotes it, because an acquired sub-agent runs with whatever your permission grant allowed.
+Sub-agents are sourced **installed → marketplace → generate**, with trust floors in [`runtime/crates/loopsmith-cli/templates/marketplaces.json`](runtime/crates/loopsmith-cli/templates/marketplaces.json). Names matching credential-shaped patterns are never auto-installed regardless of star count — popularity is not trust. Everything acquired lands in `generated-skills/` until a human promotes it, because an acquired sub-agent runs with whatever your permission grant allowed.
 
 ---
 

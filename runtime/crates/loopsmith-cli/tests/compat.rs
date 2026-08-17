@@ -215,15 +215,119 @@ fn the_generated_scripts_parse_under_posix_sh() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// Everything from the first `#` on each line, dropped.
+/// Everything from the first comment marker on each line, dropped.
 ///
-/// Crude, and sufficient here: none of the generated scripts puts a `#` inside
-/// a quoted string, and the alternative is a shell lexer in a test.
+/// Crude, and sufficient here: none of the generated scripts puts a `#` inside a
+/// quoted string, and the alternative is a shell lexer in a test.
+///
+/// The `rem ` case is the same trap in the other dialect. These files document
+/// the constructs they must not use, so a check that reads prose flags its own
+/// explanation — `rem POSIX sh, so no [[ … ]]` is a comment, not a bashism.
 fn strip_comments(text: &str) -> String {
     text.lines()
         .map(|l| l.split_once('#').map_or(l, |(before, _)| before))
+        .map(|l| {
+            let trimmed = l.trim_start();
+            if trimmed.len() >= 4 && trimmed[..4].eq_ignore_ascii_case("rem ") {
+                ""
+            } else {
+                l
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// A `.cmd` launcher travels beside every `.sh` one, on every host, and
+/// `cmd.exe` requires CRLF in a batch file. With LF only, the trailing newline
+/// becomes part of the last token on the line, so `exit /b 2` turns into an
+/// unknown command with no useful message attached.
+///
+/// This machine cannot execute a `.cmd`, so what is checkable here is its shape.
+/// The CI matrix runs the Windows leg that actually invokes it.
+#[test]
+fn the_generated_cmd_launchers_are_crlf_and_shaped_for_cmd_exe() {
+    let dir = new_loop("compat-cmd");
+    for name in ["run.cmd", "resume.cmd"] {
+        let raw = std::fs::read(dir.join(name)).expect("the cmd launcher travels too");
+        let text = String::from_utf8(raw).expect("utf-8");
+
+        assert!(
+            text.starts_with("@echo off\r\n"),
+            "{name} must start with `@echo off` and CRLF: {:?}",
+            &text[..text.len().min(20)]
+        );
+        let lone_lf = text
+            .as_bytes()
+            .windows(2)
+            .filter(|w| w[1] == b'\n' && w[0] != b'\r')
+            .count();
+        assert_eq!(lone_lf, 0, "{name} has {lone_lf} LF-only line ending(s)");
+
+        // Absolute, because Task Scheduler does not inherit an interactive
+        // shell's PATH, and a `where` fallback for when the binary has moved.
+        assert!(
+            text.contains("set \"LOOPSMITH="),
+            "{name} must pin the binary: {text}"
+        );
+        assert!(
+            text.contains("where loopsmith"),
+            "{name} must fall back to PATH: {text}"
+        );
+        // `exit /b` inside `setlocal` swallows the child's status without the
+        // explicit `endlocal &`, so every launcher would report success.
+        assert!(
+            text.contains("endlocal & exit /b %errorlevel%"),
+            "{name} must propagate the exit code: {text}"
+        );
+        assert!(
+            text.contains("cd /d \"%~dp0\""),
+            "{name} must run from its own directory: {text}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The `format!`-with-`\`-line-continuation trap, pinned.
+///
+/// A `\` continuation inside a non-raw `format!` eats the leading whitespace of
+/// the next line, and the generated `run.sh` reached disk flat and unindented
+/// because of it. Nothing about that fails a build or a parse, so the only way
+/// it stays fixed is a test that reads the layout back.
+#[test]
+fn the_generated_scripts_keep_the_indentation_they_were_written_with() {
+    let dir = new_loop("compat-layout");
+
+    let run = std::fs::read_to_string(dir.join("run.sh")).unwrap();
+    // The `if [ ! -x … ]` block in the header nests two levels deep. Flattened
+    // output still parses and still runs; it just becomes unreadable, which is
+    // exactly why this needs asserting rather than eyeballing.
+    assert!(
+        run.contains("\n  if command -v loopsmith"),
+        "the header lost its 2-space nesting:\n{run}"
+    );
+    assert!(
+        run.contains("\n    LOOPSMITH=$(command -v loopsmith)"),
+        "the header lost its 4-space nesting:\n{run}"
+    );
+    assert!(
+        run.contains("\n  else\n"),
+        "the `else` should sit at the outer block's indent:\n{run}"
+    );
+
+    let resume = std::fs::read_to_string(dir.join("resume.sh")).unwrap();
+    assert!(
+        resume.contains("\n  echo \"usage: ./resume.sh <run-id>\" >&2"),
+        "resume.sh lost the indentation of its usage block:\n{resume}"
+    );
+
+    let cmd = std::fs::read_to_string(dir.join("resume.cmd")).unwrap();
+    assert!(
+        cmd.contains("\r\n  echo usage: resume.cmd"),
+        "resume.cmd lost the indentation of its usage block:\n{cmd}"
+    );
+
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// `resume.sh` with no argument must explain itself and exit 2 rather than

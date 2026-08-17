@@ -336,6 +336,18 @@ prompt". Adding one is a config edit, never a rebuild.
 
 Placeholders: `{prompt}` `{system}` `{model}` `{tier}` `{node}`.
 
+**If you use `ollama`, pull the model first.**
+
+```bash
+ollama pull llama3
+```
+
+`ollama run <model>` downloads a missing model, and from outside the process
+that is indistinguishable from a slow generation. The starter `ollama` provider
+sits at `timeout_seconds: 120` so a cascade abandons it and tries the next
+provider rather than spending its whole budget on a download — which is exactly
+what one observed run did before this was lowered.
+
 **Secrets never enter the process.** `requires_env` names keys that must exist;
 values are never read, substituted, or logged. Let the command expand them
 itself, as `curl` does above.
@@ -389,7 +401,7 @@ Order: **installed → marketplace → generate**.
 2. **Marketplace** — `claudemarketplaces.com/api/marketplaces` (a flat JSON
    array of ~2,600 plugin-marketplace repos with `repo`, `slug`, `description`,
    `categories`, `pluginKeywords`, `stars`, `pluginCount`), plus `npx skills`
-   for single skills. Trust floors in `config/marketplaces.json`: minimum stars
+   for single skills. Trust floors in `runtime/crates/loopsmith-cli/templates/marketplaces.json`: minimum stars
    and installs, with an owner allowlist that bypasses them.
 3. **Generate** — author a new skill from the requirement.
 

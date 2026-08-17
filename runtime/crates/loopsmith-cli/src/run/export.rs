@@ -45,6 +45,7 @@ pub fn export_success(
     }
 
     std::fs::write(dir.join("run.sh"), rerun_script(config_file))?;
+    std::fs::write(dir.join("run.cmd"), rerun_cmd(config_file))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -179,6 +180,33 @@ exec loopsmith run \"{config_file}\" \"$@\"\n"
     )
 }
 
+/// The `cmd.exe` counterpart. An export is the artifact most likely to be handed
+/// to someone else, and "someone else" is the case where the receiving machine
+/// is least predictable — so it travels with both launchers, the same as a
+/// scaffolded loop does.
+///
+/// CRLF, because `cmd.exe` needs it in a batch file.
+fn rerun_cmd(config_file: &str) -> String {
+    let text = format!(
+        "@echo off\r\n\
+rem Re-run the configuration that converged.\r\n\
+rem\r\n\
+rem The POSIX `run.sh` beside this file does the same job on Unix.\r\n\
+setlocal\r\n\
+cd /d \"%~dp0\"\r\n\
+\r\n\
+where loopsmith >nul 2>&1\r\n\
+if errorlevel 1 (\r\n\
+  echo loopsmith is not on PATH 1>&2\r\n\
+  echo This package is a config and its evidence; it needs the binary to run. 1>&2\r\n\
+  exit /b 127\r\n\
+)\r\n\
+loopsmith run \"{config_file}\" %*\r\n\
+endlocal & exit /b %errorlevel%\r\n"
+    );
+    text
+}
+
 /// First sentence of a description, for the skill frontmatter.
 fn first_sentence(text: &str) -> String {
     let t = text.trim();
@@ -283,9 +311,27 @@ validations:
 
         // The name is sanitised: `demo/loop` must not escape into a subdirectory.
         assert!(dir.ends_with("demo-loop-success"), "got {}", dir.display());
-        for f in ["SKILL.md", "EVIDENCE.md", "loop.yaml", "run.sh", "out/result.md"] {
+        // `run.cmd` alongside `run.sh`: an export is the artifact most likely to
+        // be handed to someone else, which is exactly when you cannot predict
+        // what kind of machine will open it.
+        for f in [
+            "SKILL.md",
+            "EVIDENCE.md",
+            "loop.yaml",
+            "run.sh",
+            "run.cmd",
+            "out/result.md",
+        ] {
             assert!(dir.join(f).is_file(), "{f} missing from the export");
         }
+
+        let cmd = std::fs::read_to_string(dir.join("run.cmd")).unwrap();
+        assert!(cmd.starts_with("@echo off\r\n"), "run.cmd must be CRLF: {cmd:?}");
+        assert!(
+            !cmd.contains("set \"LOOPSMITH="),
+            "the export pins nothing, on either platform: {cmd}"
+        );
+        assert!(cmd.contains("where loopsmith"), "{cmd}");
 
         let skill = std::fs::read_to_string(dir.join("SKILL.md")).unwrap();
         assert!(skill.starts_with("---\nname: demo-loop-success"), "got: {skill}");

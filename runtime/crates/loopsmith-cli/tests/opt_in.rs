@@ -5,8 +5,8 @@
 //! model, and never costs anything. Run them deliberately:
 //!
 //! ```sh
-//! LOOPSMITH_STRESS_NETWORK=1  cargo test -p loopsmith-cli --test opt_in
-//! LOOPSMITH_STRESS_PROVIDER=1 cargo test -p loopsmith-cli --test opt_in -- --nocapture
+//! LOOPSMITH_STRESS_NETWORK=1  cargo test -p loopsmith --test opt_in
+//! LOOPSMITH_STRESS_PROVIDER=1 cargo test -p loopsmith --test opt_in -- --nocapture
 //! ```
 //!
 //! `LOOPSMITH_STRESS_PROVIDER` invokes whatever model the config names. Keep it

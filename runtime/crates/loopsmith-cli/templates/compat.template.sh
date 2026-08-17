@@ -22,6 +22,11 @@
 # And the one that breaks them before they start: macOS ships bash 3.2.57,
 # because 4.0 changed licence. Associative arrays, ${x,,}, mapfile, &>>, and **
 # all arrived in 4.0. Write to POSIX sh unless `need_bash 4` says otherwise.
+#
+# On Windows this file runs under Git Bash, WSL, or MSYS and everything below
+# behaves as it does on Linux. Nothing here runs under cmd.exe or PowerShell; a
+# detector meant for those is a `.cmd` or `.ps1` naming its own interpreter,
+# because loopsmith runs a detector with no shell — `command` is argv[0].
 
 # ── what is this machine ────────────────────────────────────────────────────
 

@@ -1,0 +1,127 @@
+name: ci
+
+# The point of this matrix is that the README's three-platform claim becomes
+# something that gets checked. Before it existed, everything portability-related
+# was asserted on whichever machine the suite happened to run on — one macOS host
+# with a BSD userland and bash 3.2 — so "works on Linux" and "works on Windows"
+# were claims with no evidence behind them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+defaults:
+  run:
+    working-directory: runtime
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Every leg runs. A Windows failure must not hide whether Linux passed:
+      # the two legs exist to answer different questions.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: runtime
+
+      # What the host actually is, before anything is asserted about it. When a
+      # leg fails, this is the first thing worth reading: it prints the bash
+      # version, the userland, and the installed scheduler that the failure is
+      # probably about.
+      - name: What is this machine
+        run: cargo run --bin loopsmith -- doctor
+
+      # No `cargo fmt --check` here on purpose. The tree is not rustfmt-clean and
+      # several places are laid out by hand where the default would be worse.
+      # Adding the gate would mean a 143-site reformat that buries every real
+      # change in noise, so clippy carries the quality bar instead.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Release build
+        run: cargo build --release
+
+      # The shipped examples must refuse, and refuse for exactly one reason: the
+      # deliberate `pre_execution` gate. A second error, or any warning at all,
+      # means a config change broke something — it is the cheapest regression
+      # signal in the project.
+      # Counted from validate's own summary line, not by grepping for `error` at
+      # the start of a line: the findings are indented, so an anchored pattern
+      # matches nothing and the check passes for the wrong reason.
+      - name: Every example refuses for exactly one reason
+        working-directory: .
+        shell: bash
+        run: |
+          bin="runtime/target/release/loopsmith"
+          [ "${RUNNER_OS}" = "Windows" ] && bin="runtime/target/release/loopsmith.exe"
+          bad=0
+          for cfg in config/examples/*.yaml config/examples/*.md; do
+            out=$("$bin" validate "$cfg" 2>&1 || true)
+            summary=$(printf '%s\n' "$out" | grep -E '[0-9]+ error\(s\), [0-9]+ warning\(s\)' | tail -1)
+            errors=$(printf '%s' "$summary" | sed -E 's/^([0-9]+) error.*/\1/')
+            warnings=$(printf '%s' "$summary" | sed -E 's/.*, ([0-9]+) warning.*/\1/')
+            if [ "$errors" != "1" ] || [ "$warnings" != "0" ]; then
+              echo "::error file=$cfg::got '$summary'; expected exactly 1 error and 0 warnings"
+              printf '%s\n' "$out"
+              bad=$((bad+1))
+            fi
+          done
+          echo "26 examples checked, $bad off-spec"
+          [ "$bad" -eq 0 ]
+
+      # A generated loop has to be startable on the host that generated it. On
+      # Windows that means the `.cmd` launcher, which no POSIX host can execute —
+      # this leg is the only place it actually runs.
+      - name: A new loop's launchers run on this host
+        working-directory: .
+        shell: bash
+        run: |
+          bin="$PWD/runtime/target/release/loopsmith"
+          [ "${RUNNER_OS}" = "Windows" ] && bin="$PWD/runtime/target/release/loopsmith.exe"
+          scratch="${RUNNER_TEMP}/ci-loop"
+          "$bin" new --path "$scratch" --purpose "prove the launchers work"
+          cd "$scratch"
+          for f in run.sh resume.sh run.cmd resume.cmd scripts/compat.sh; do
+            test -f "$f" || { echo "::error::$f was not generated"; exit 1; }
+          done
+          # `resume` with no run id is the cheapest launcher round trip: it must
+          # explain itself and exit 2 rather than calling the binary with an
+          # empty id.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            cmd //c resume.cmd; code=$?
+          else
+            ./resume.sh; code=$?
+          fi
+          [ "$code" -eq 2 ] || { echo "::error::the resume launcher exited $code, expected 2"; exit 1; }
+
+  # Deliberately separate and non-blocking. An advisory audit that can fail the
+  # merge queue on somebody else's CVE disclosure teaches people to ignore it.
+  audit:
+    name: cargo audit (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit

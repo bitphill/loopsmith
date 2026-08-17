@@ -343,7 +343,15 @@ pub fn starter_providers() -> Vec<ProviderSpec> {
             args: vec!["run".into(), "{model}".into()],
             model: Some("llama3".into()),
             requires_env: vec![],
-            timeout_seconds: Some(600),
+            // 120s, not 600s. `ollama run <model>` pulls the model when it is
+            // not present, and a 4.7 GB pull is indistinguishable from a slow
+            // generation from out here — one observed run spent its entire
+            // 600-second budget downloading and produced nothing. The point of
+            // a cheap tier is to be abandoned quickly, so this is set to fall
+            // through to the next provider in the cascade rather than to
+            // accommodate a download. Pull the model first:
+            //   ollama pull llama3
+            timeout_seconds: Some(120),
             prompt_on_stdin: true,
             usage_regex: None,
             cost_per_1k_tokens: None,

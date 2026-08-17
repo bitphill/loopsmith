@@ -177,6 +177,55 @@ pub struct Proposal {
     #[serde(default)]
     pub patch: Option<String>,
     pub created_ms: u64,
+    /// When this proposal stops being worth reading, or `None` for never.
+    ///
+    /// A proposal is evidence about a moment: "this skill correlated with
+    /// satisfied goals across the last three iterations" is a claim about a
+    /// graph and a config that have both since been edited by hand. Nothing
+    /// expires a proposal automatically and nothing deletes one — the record of
+    /// what the loop wanted is worth keeping — but a reviewer needs to be told
+    /// which suggestions are answering a question nobody is asking any more.
+    ///
+    /// `#[serde(default)]` so proposals already written to a sled store by an
+    /// earlier build still deserialise.
+    #[serde(default)]
+    pub expires_ms: Option<u64>,
+}
+
+impl Proposal {
+    /// How long a proposal stays current, by kind.
+    ///
+    /// The two that name a specific skill go stale fastest: a marketplace
+    /// suggestion is about a listing that may be gone, and an adopt/drop
+    /// recommendation is about a skill set the reviewer has probably already
+    /// changed. A criteria change never expires, because it is a question about
+    /// the goal rather than an observation about a run.
+    pub fn default_lifetime_ms(kind: ProposalKind) -> Option<u64> {
+        const DAY: u64 = 24 * 60 * 60 * 1000;
+        match kind {
+            ProposalKind::TrySkill => Some(7 * DAY),
+            ProposalKind::AdoptSkill | ProposalKind::DropSkill => Some(30 * DAY),
+            ProposalKind::ReshapeGraph => Some(30 * DAY),
+            // Goals, validations, and success criteria. Always a proposal,
+            // never an action, and never quietly aged out of the list.
+            ProposalKind::ChangeCriteria => None,
+        }
+    }
+
+    /// Stamp the default expiry for this proposal's kind, leaving one that was
+    /// set explicitly alone.
+    pub fn with_default_expiry(mut self) -> Self {
+        if self.expires_ms.is_none() {
+            self.expires_ms = Self::default_lifetime_ms(self.kind)
+                .and_then(|life| self.created_ms.checked_add(life));
+        }
+        self
+    }
+
+    /// Whether this proposal was already stale at `now_ms`.
+    pub fn is_expired(&self, now_ms: u64) -> bool {
+        self.expires_ms.is_some_and(|e| now_ms >= e)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -406,5 +455,82 @@ pub(crate) fn sample_episode(run: &str, node: &str) -> Episode {
         duration_ms: Some(5),
         error: None,
         created_ms: now_ms(),
+    }
+}
+
+#[cfg(test)]
+mod proposal_tests {
+    use super::*;
+
+    fn proposal(kind: ProposalKind, created_ms: u64) -> Proposal {
+        Proposal {
+            run_id: "r1".into(),
+            iteration: 1,
+            kind,
+            subject: "s".into(),
+            rationale: "because".into(),
+            patch: None,
+            created_ms,
+            expires_ms: None,
+        }
+    }
+
+    #[test]
+    fn every_proposal_kind_has_a_decided_lifetime() {
+        // The point of the exhaustive match in `default_lifetime_ms` is that a
+        // new kind cannot be added without deciding this. The test states which
+        // way each one was decided so a change to one is visible in a diff.
+        const DAY: u64 = 24 * 60 * 60 * 1000;
+        for (kind, want) in [
+            (ProposalKind::TrySkill, Some(7 * DAY)),
+            (ProposalKind::AdoptSkill, Some(30 * DAY)),
+            (ProposalKind::DropSkill, Some(30 * DAY)),
+            (ProposalKind::ReshapeGraph, Some(30 * DAY)),
+            // A question about the goal, not an observation about a run.
+            (ProposalKind::ChangeCriteria, None),
+        ] {
+            assert_eq!(
+                Proposal::default_lifetime_ms(kind),
+                want,
+                "{kind:?} lifetime changed"
+            );
+        }
+    }
+
+    #[test]
+    fn the_default_expiry_is_stamped_from_the_kind_and_never_overwritten() {
+        let p = proposal(ProposalKind::TrySkill, 1_000).with_default_expiry();
+        assert_eq!(p.expires_ms, Some(1_000 + 7 * 24 * 60 * 60 * 1000));
+
+        // A criteria change is never aged out.
+        let c = proposal(ProposalKind::ChangeCriteria, 1_000).with_default_expiry();
+        assert_eq!(c.expires_ms, None);
+        assert!(!c.is_expired(u64::MAX), "criteria changes never expire");
+
+        // An explicit expiry survives the stamping.
+        let mut explicit = proposal(ProposalKind::TrySkill, 1_000);
+        explicit.expires_ms = Some(42);
+        assert_eq!(explicit.with_default_expiry().expires_ms, Some(42));
+    }
+
+    #[test]
+    fn expiry_is_reported_and_the_boundary_counts_as_expired() {
+        let p = proposal(ProposalKind::AdoptSkill, 0).with_default_expiry();
+        let at = p.expires_ms.unwrap();
+        assert!(!p.is_expired(at - 1));
+        assert!(p.is_expired(at), "the expiry instant is already stale");
+        assert!(p.is_expired(at + 1));
+    }
+
+    #[test]
+    fn a_proposal_written_before_the_field_existed_still_deserialises() {
+        // Proposals live in a sled store that outlives the binary that wrote
+        // them. Without `#[serde(default)]` this JSON fails to parse and
+        // `loopsmith proposals` reports a backend error on a healthy store.
+        let old = r#"{"run_id":"r1","iteration":2,"kind":"adopt_skill",
+            "subject":"s","rationale":"why","patch":null,"created_ms":5}"#;
+        let p: Proposal = serde_json::from_str(old).expect("old records still read");
+        assert_eq!(p.expires_ms, None);
+        assert!(!p.is_expired(u64::MAX));
     }
 }

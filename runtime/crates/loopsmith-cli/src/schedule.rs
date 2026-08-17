@@ -408,7 +408,32 @@ pub fn launch_agents_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("LOOPSMITH_LAUNCH_AGENTS_DIR") {
         return Some(PathBuf::from(dir));
     }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/LaunchAgents"))
+    loopsmith_util::platform::home_dir().map(|h| h.join("Library").join("LaunchAgents"))
+}
+
+/// A `schtasks` invocation that keeps `loopsmith watch` alive on Windows.
+///
+/// Task Scheduler is the only scheduler that ships with Windows, and it has no
+/// crontab-shaped text file to append to — the schedule *is* a command. So this
+/// returns the command to run rather than a line to paste, which is also why
+/// `schedule` prints it instead of writing it: creating a scheduled task is a
+/// persistent change to the user's machine, the same reason `launchctl load` is
+/// left to them.
+///
+/// `/SC MINUTE /MO 1` with `watch` rather than `run`: the watcher owns trigger
+/// evaluation, so Task Scheduler only has to keep one process alive. `/RL
+/// LIMITED` because a loop has no business running elevated, and `/F` so
+/// re-running the command updates the task instead of failing on a name clash.
+pub fn schtasks_command(label: &str, exe: &Path, config: &Path) -> String {
+    // The whole `/TR` value is one argument to schtasks and is quoted as such;
+    // the paths inside it are quoted again with `\"` because either may contain
+    // a space — `C:\Program Files\` is the common case.
+    format!(
+        "schtasks /Create /F /RL LIMITED /TN \"{label}\" /SC MINUTE /MO 1 \
+         /TR \"\\\"{}\\\" watch \\\"{}\\\"\"",
+        exe.display(),
+        config.display()
+    )
 }
 
 #[cfg(test)]
@@ -650,5 +675,51 @@ mod tests {
     #[test]
     fn labels_are_safe_for_launchd() {
         assert_eq!(default_label("my loop/v2"), "com.loopsmith.my-loop-v2");
+    }
+
+    /// The `schtasks` quoting is the part worth pinning. `/TR` takes the whole
+    /// command as one argument, so the paths inside it need a second level of
+    /// quoting — and `C:\Program Files\…` is the common case that finds out
+    /// whether it is there.
+    #[test]
+    fn the_schtasks_command_quotes_a_path_containing_a_space() {
+        let cmd = schtasks_command(
+            "com.loopsmith.demo",
+            Path::new(r"C:\Program Files\loopsmith\loopsmith.exe"),
+            Path::new(r"C:\Users\me\my loops\demo\loop.yaml"),
+        );
+
+        // The task name is one plainly quoted argument.
+        assert!(cmd.contains(r#"/TN "com.loopsmith.demo""#), "{cmd}");
+        // Inside /TR, both paths carry escaped quotes of their own.
+        assert!(
+            cmd.contains(r#"/TR "\"C:\Program Files\loopsmith\loopsmith.exe\" watch \"C:\Users\me\my loops\demo\loop.yaml\"""#),
+            "{cmd}"
+        );
+        // `watch`, not `run`: the watcher evaluates the triggers, so Task
+        // Scheduler only has to keep one process alive.
+        assert!(cmd.contains(" watch "), "{cmd}");
+        // `/F` so re-running updates the task instead of failing on a name
+        // clash, and `/RL LIMITED` because a loop has no business elevated.
+        assert!(cmd.contains(" /F "), "{cmd}");
+        assert!(cmd.contains("/RL LIMITED"), "{cmd}");
+        // One line. A multi-line string cannot be pasted into a shell as-is,
+        // and pasting it is the entire delivery mechanism.
+        assert_eq!(cmd.lines().count(), 1, "{cmd}");
+    }
+
+    #[test]
+    fn the_launch_agents_directory_is_overridable_for_tests() {
+        // Not asserted against `HOME` directly: the point of the override is
+        // that a suite can exercise `--install` without writing a launch agent
+        // into the home directory of whatever machine it runs on.
+        match std::env::var_os("LOOPSMITH_LAUNCH_AGENTS_DIR") {
+            Some(dir) => assert_eq!(launch_agents_dir(), Some(PathBuf::from(dir))),
+            None => {
+                let d = launch_agents_dir().expect("some home variable is set");
+                assert!(d.ends_with("Library/LaunchAgents"), "{}", d.display());
+                assert!(d.is_absolute(), "{}", d.display());
+            }
+        }
     }
 }

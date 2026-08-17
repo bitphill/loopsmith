@@ -24,6 +24,23 @@ generated-skills/
 proposals/*
 !proposals/.gitkeep
 
+# ── Packaging build output ────────────────────────────────────────
+# `npm/bin/loopsmith-bin` and `npm/bin/loopsmith.exe` are downloaded by the
+# postinstall script; the .js launcher beside them is source. A root
+# package.json is not: this is a Rust repository, and one keeps appearing here
+# because some tool assumes otherwise.
+/package.json
+/package-lock.json
+node_modules/
+npm/bin/loopsmith-bin
+npm/bin/loopsmith.exe
+npm/*.tgz
+pypi/dist/
+pypi/build/
+pypi/src/*.egg-info/
+__pycache__/
+*.pyc
+
 # ── Source documents ──────────────────────────────────────────────
 # The reading corpus is large, mostly PDF duplicates of the markdown,
 # and not ours to redistribute. The distillation lives in

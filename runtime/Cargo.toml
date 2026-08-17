@@ -18,16 +18,24 @@ edition = "2021"
 rust-version = "1.75"
 license = "MIT"
 repository = "https://github.com/bitphill/loopsmith"
+homepage = "https://github.com/bitphill/loopsmith"
 authors = ["bitphill"]
+keywords = ["agent", "loop", "llm", "orchestration", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
+# Each of these carries a `version` as well as a `path`. The path is what a
+# workspace build uses; the version is what crates.io requires, and a
+# path-only dependency is rejected at publish time with "all dependencies must
+# have a version specified".
 [workspace.dependencies]
-loopsmith-util = { path = "crates/loopsmith-util" }
-loopsmith-core = { path = "crates/loopsmith-core" }
-loopsmith-memory = { path = "crates/loopsmith-memory" }
-loopsmith-graph = { path = "crates/loopsmith-graph" }
-loopsmith-gate = { path = "crates/loopsmith-gate" }
-loopsmith-provider = { path = "crates/loopsmith-provider" }
-loopsmith-skills = { path = "crates/loopsmith-skills" }
+loopsmith-util = { path = "crates/loopsmith-util", version = "0.1.0" }
+loopsmith-core = { path = "crates/loopsmith-core", version = "0.1.0" }
+loopsmith-memory = { path = "crates/loopsmith-memory", version = "0.1.0" }
+loopsmith-graph = { path = "crates/loopsmith-graph", version = "0.1.0" }
+loopsmith-gate = { path = "crates/loopsmith-gate", version = "0.1.0" }
+loopsmith-provider = { path = "crates/loopsmith-provider", version = "0.1.0" }
+loopsmith-skills = { path = "crates/loopsmith-skills", version = "0.1.0" }
+loopsmith-mcp = { path = "crates/loopsmith-mcp", version = "0.1.0" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

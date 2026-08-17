@@ -28,6 +28,10 @@ pub fn execute(config: &Path, install: bool) -> Result<ExitCode, String> {
     let platform = Platform::detect();
     match platform.scheduler() {
         Some("launchctl") => launchd(&label, &exe, &abs, &logs, config, install),
+        Some("schtasks") => {
+            schtasks(&label, &exe, &abs);
+            Ok(ExitCode::SUCCESS)
+        }
         Some(_) => {
             crontab(&cfg, &exe, &abs, &logs);
             Ok(ExitCode::SUCCESS)
@@ -42,11 +46,12 @@ pub fn execute(config: &Path, install: bool) -> Result<ExitCode, String> {
     }
 }
 
+/// The candidates that *were* looked for, so the error names the right tool.
+///
+/// Reusing the same list the probe used, rather than restating it: the version
+/// that restated it told a Windows user to install `crontab`.
 fn preferred_names(p: &Platform) -> Vec<&'static str> {
-    match p.os {
-        loopsmith_util::platform::Os::MacOs => vec!["launchctl", "crontab"],
-        _ => vec!["crontab", "systemctl"],
-    }
+    loopsmith_util::platform::preferred_schedulers(p.os).to_vec()
 }
 
 fn launchd(
@@ -76,6 +81,19 @@ fn launchd(
     // stays their call.
     println!("\nEnable it with:\n  launchctl load -w {}", dest.display());
     Ok(ExitCode::SUCCESS)
+}
+
+/// Windows Task Scheduler has no crontab-shaped file to append to — the
+/// schedule is created by running a command — so this prints the command rather
+/// than writing anything. Creating a scheduled task is a persistent change to
+/// the user's machine, the same reason `launchctl load` is left to them.
+fn schtasks(label: &str, exe: &Path, abs: &Path) {
+    println!("{}", crate::schedule::schtasks_command(label, exe, abs));
+    println!();
+    println!("# Run that in an elevated-or-not shell to register the task.");
+    println!("# It keeps `loopsmith watch` alive; the watcher evaluates the triggers in");
+    println!("# section G itself, so Task Scheduler only has to restart one process.");
+    println!("# Remove it later with: schtasks /Delete /TN \"{label}\" /F");
 }
 
 fn crontab(cfg: &loopsmith_core::LoopConfig, exe: &Path, abs: &Path, logs: &Path) {

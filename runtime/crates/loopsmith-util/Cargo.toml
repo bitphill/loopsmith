@@ -5,6 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+# Only `src/` travels. The integration tests read `config/examples/` and
+# `config/loop.schema.json` from the repository root, which no crate tarball can
+# contain, so shipping them would hand a published crate tests that cannot pass.
+include = ["/src/**/*"]
 description = "Dependency-free primitives shared across loopsmith crates: PATH lookup, wall-clock, and test scaffolding"
 
 [features]

@@ -221,10 +221,15 @@ generated-skills/
 // directory. That is what makes a new loop self-contained and makes it
 // impossible for `loopsmith new` to depend on — or touch — the loopsmith
 // checkout it was launched from.
-const MCP_TEMPLATE: &str = include_str!("../../../../config/mcp.template.json");
-const PERMISSIONS_TEMPLATE: &str = include_str!("../../../../config/permissions.template.json");
-const COMPAT_TEMPLATE: &str = include_str!("../../../../config/compat.template.sh");
-const MARKETPLACES: &str = include_str!("../../../../config/marketplaces.json");
+//
+// They live inside this crate rather than in the repository's `config/`, and
+// that is a packaging constraint rather than a preference: a published crate
+// tarball holds only its own directory, so an `include_str!` reaching above the
+// crate root compiles here and fails `cargo package --verify`.
+const MCP_TEMPLATE: &str = include_str!("../templates/mcp.template.json");
+const PERMISSIONS_TEMPLATE: &str = include_str!("../templates/permissions.template.json");
+const COMPAT_TEMPLATE: &str = include_str!("../templates/compat.template.sh");
+const MARKETPLACES: &str = include_str!("../templates/marketplaces.json");
 
 fn readme(name: &str, purpose: &str, config_file: &str) -> String {
     format!(
@@ -233,12 +238,15 @@ A loopsmith loop.\n\n\
 **Purpose:** {purpose}\n\n\
 ## Run it\n\n\
 ```bash\n\
-./run.sh\n\
+./run.sh          # macOS, Linux, BSD, Git Bash, WSL\n\
+run.cmd           # Windows cmd.exe or PowerShell\n\
 ```\n\n\
 That is `loopsmith run {config_file}` with this directory's absolute paths \
 already filled in. If the loop stops before it is done, `./resume.sh <run-id>` \
-picks up from the last checkpoint — the run id is printed at the end of every \
-run and appears in `logs/`.\n\n\
+(or `resume.cmd <run-id>`) picks up from the last checkpoint — the run id is \
+printed at the end of every run and appears in `logs/`.\n\n\
+Both launchers are written on every platform, so this directory keeps working \
+after it moves to a different kind of machine.\n\n\
 The long way, when you want to see each step:\n\n\
 ```bash\n\
 loopsmith validate {config_file}   # the A-J model must be complete\n\
@@ -265,7 +273,8 @@ message.\n\n\
 | Path | What it is |\n\
 |---|---|\n\
 | `{config_file}` | The A-J config: goals, validations, success, stop gates, schedules, constraints, phases, default skills |\n\
-| `run.sh` / `resume.sh` | This loop's exact commands, with absolute paths |\n\
+| `run.sh` / `resume.sh` | This loop's exact commands, with absolute paths (POSIX `sh`) |\n\
+| `run.cmd` / `resume.cmd` | The same two commands for `cmd.exe` |\n\
 | `scripts/compat.sh` | Source this in a detector: `sed_i`, `stat_size`, `readlink_f`, `sha256`, `require`, `need_bash` |\n\
 | `.mcp.json` | MCP server definition, so an agent can read this loop's memory |\n\
 | `.claude/settings.local.json` | Permission grant this config needs |\n\
@@ -296,7 +305,7 @@ pub fn guard_path(path: &Path) -> Result<(), String> {
             target.display()
         ));
     }
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+    if let Some(home) = loopsmith_util::platform::home_dir() {
         if target == absolutize(&home) {
             return Err("--path is your home directory; give the loop a subdirectory".into());
         }
@@ -431,6 +440,81 @@ exec "$LOOPSMITH" resume "{config_file}" "$1"
     )
 }
 
+/// The header every generated `.cmd` launcher carries.
+///
+/// `cmd.exe` is not a POSIX shell and none of the `.sh` scripts run under it, so
+/// Windows needs its own launcher rather than a shebang tweak. Both flavours are
+/// written on every platform, unconditionally: the premise of the whole
+/// portability design is that a loop directory outlives the machine that made
+/// it, and a loop created on a Mac then copied to a Windows box has to start
+/// there without being regenerated.
+///
+/// `%~dp0` is the script's own directory with a trailing backslash, which is why
+/// it is not quoted with a separate separator. `endlocal & exit /b` propagates
+/// the child's exit code, which a bare `exit /b` inside `setlocal` does not.
+fn cmd_header(binary: &str, purpose: &str) -> String {
+    format!(
+        r#"@echo off
+rem {purpose}
+rem
+rem Paths are absolute because Task Scheduler does not inherit an interactive
+rem shell's PATH. The POSIX `.sh` sibling of this file does the same job under
+rem Git Bash, WSL, macOS, and Linux.
+setlocal
+cd /d "%~dp0"
+
+set "LOOPSMITH={binary}"
+if not exist "%LOOPSMITH%" (
+  where loopsmith >nul 2>&1
+  if errorlevel 1 (
+    echo loopsmith is not at %LOOPSMITH% and not on PATH 1>&2
+    echo This loop was created against a binary that has since moved. 1>&2
+    echo Re-point it by editing this script, or put loopsmith on PATH. 1>&2
+    exit /b 127
+  )
+  for /f "delims=" %%i in ('where loopsmith') do set "LOOPSMITH=%%i"
+)
+"#
+    )
+}
+
+fn run_cmd(binary: &str, config_file: &str) -> String {
+    format!(
+        "{}\"%LOOPSMITH%\" run \"{config_file}\" %*\r\nendlocal & exit /b %errorlevel%\r\n",
+        cmd_header(
+            binary,
+            "Generated by `loopsmith new`. One supervised pass of the loop."
+        )
+    )
+}
+
+fn resume_cmd(binary: &str, config_file: &str) -> String {
+    format!(
+        r#"{}if "%~1"=="" (
+  echo usage: resume.cmd ^<run-id^> 1>&2
+  echo The run id is printed at the end of every run and names the file in logs\. 1>&2
+  echo recent runs: 1>&2
+  for /f "delims=" %%f in ('dir /b /o-d logs\*.log 2^>nul') do @echo   %%~nf 1>&2
+  exit /b 2
+)
+"%LOOPSMITH%" resume "{config_file}" "%~1"
+endlocal & exit /b %errorlevel%
+"#,
+        cmd_header(
+            binary,
+            "Generated by `loopsmith new`. Usage: resume.cmd <run-id>"
+        )
+    )
+}
+
+/// `cmd.exe` requires CRLF line endings in a batch file. With LF only, older
+/// `cmd.exe` reads the trailing `\n` as part of the last token on the line,
+/// which turns `exit /b 2` into an unknown command and a label into a
+/// not-found error — a failure mode with no useful message attached.
+fn crlf(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\n', "\r\n")
+}
+
 pub fn scaffold(args: &NewLoopArgs) -> std::io::Result<Scaffold> {
     guard_path(&args.path)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
@@ -450,13 +534,17 @@ pub fn scaffold(args: &NewLoopArgs) -> std::io::Result<Scaffold> {
     }
 
     let mut written = Vec::new();
+    // Joined component by component rather than written as one `.claude/skills`
+    // literal: a forward slash inside a `join` is a path on Unix and a filename
+    // component that merely happens to work on Windows, and the two stop
+    // agreeing the moment one of these names is passed anywhere but `create_dir_all`.
     for sub in [
-        "state",
-        "logs",
-        "out",
-        "proposals",
-        "generated-skills",
-        ".claude/skills",
+        Path::new("state").to_path_buf(),
+        Path::new("logs").to_path_buf(),
+        Path::new("out").to_path_buf(),
+        Path::new("proposals").to_path_buf(),
+        Path::new("generated-skills").to_path_buf(),
+        Path::new(".claude").join("skills"),
     ] {
         std::fs::create_dir_all(root.join(sub))?;
     }
@@ -526,6 +614,22 @@ pub fn scaffold(args: &NewLoopArgs) -> std::io::Result<Scaffold> {
     write_script(
         root.join("resume.sh"),
         &resume_script(&binary, config_file),
+        &mut written,
+    )?;
+    // Both flavours, on every host. A loop directory outlives the machine that
+    // made it — that is the whole reason `compat.sh` probes on arrival instead
+    // of being written out with this machine's answers baked in — so a loop
+    // scaffolded on a Mac has to be startable on Windows without regenerating
+    // it. `cmd.exe` cannot run a `#!` script and no POSIX shell will run a
+    // `.cmd`, so the pair is the only arrangement that survives the copy.
+    write_file(
+        root.join("run.cmd"),
+        &crlf(&run_cmd(&binary, config_file)),
+        &mut written,
+    )?;
+    write_file(
+        root.join("resume.cmd"),
+        &crlf(&resume_cmd(&binary, config_file)),
         &mut written,
     )?;
     // Detector scripts are the part of a loop most likely to be written on one
@@ -693,6 +797,11 @@ mod tests {
             ".claude/settings.local.json",
             "run.sh",
             "resume.sh",
+            // Both flavours, on every host — a loop directory outlives the
+            // machine that made it, so the Windows launchers travel from a Mac.
+            "run.cmd",
+            "resume.cmd",
+            "scripts/compat.sh",
             "README.md",
             ".gitignore",
         ] {

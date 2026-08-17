@@ -184,7 +184,12 @@ impl<S: Store> Desk<'_, S> {
             rationale,
             patch,
             created_ms: now_ms(),
-        };
+            expires_ms: None,
+        }
+        // The expiry is derived from the kind rather than passed in by each
+        // caller, so a new proposal kind cannot be added without deciding how
+        // long its evidence stays true.
+        .with_default_expiry();
         if self.rec.store.put_proposal(&p).is_err() {
             return 0;
         }

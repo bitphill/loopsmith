@@ -20,6 +20,7 @@
 //! behalf, and nothing is cached across processes — a probe costs one `--version`
 //! call and a run is not a hot loop.
 
+use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +55,39 @@ impl Os {
             Os::Other => "other",
         }
     }
+
+    /// Whether this host runs `.cmd` batch files rather than `#!` scripts.
+    pub fn is_windows(self) -> bool {
+        self == Os::Windows
+    }
+}
+
+/// The user's home directory, by whichever variable this operating system uses.
+///
+/// `HOME` is not set on Windows outside of a POSIX emulation layer, so code that
+/// reads it directly silently loses the home directory there — and the failure
+/// surfaces as "cannot locate LaunchAgents" or as a loop happily scaffolding
+/// itself into a relative path. `USERPROFILE` is tried first on Windows and
+/// `HOME` second, because Git Bash and MSYS set `HOME` and it is the more
+/// specific answer when both exist.
+pub fn home_dir() -> Option<PathBuf> {
+    if Os::detect() == Os::Windows {
+        if let Some(h) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+            return Some(PathBuf::from(h));
+        }
+        if let Some(p) = std::env::var_os("USERPROFILE").filter(|p| !p.is_empty()) {
+            return Some(PathBuf::from(p));
+        }
+        // Last resort on a bare cmd.exe: HOMEDRIVE + HOMEPATH.
+        let drive = std::env::var_os("HOMEDRIVE")?;
+        let path = std::env::var_os("HOMEPATH")?;
+        let mut s = drive;
+        s.push(path);
+        return Some(PathBuf::from(s));
+    }
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Which flavour of the core utilities is on `PATH`.
@@ -214,13 +248,23 @@ impl Platform {
     }
 }
 
-fn preferred_schedulers(os: Os) -> &'static [&'static str] {
+/// The schedulers worth looking for on this operating system, best first.
+///
+/// This is the *candidate* list, not the answer. `Platform::detect` filters it
+/// by what is actually on `PATH`, because the operating system a binary was
+/// built for says nothing about what the machine running it has installed.
+pub fn preferred_schedulers(os: Os) -> &'static [&'static str] {
     match os {
         // launchd is the one that survives a reboot without the user enabling
         // anything else, so it goes first where it exists.
         Os::MacOs => &["launchctl", "crontab"],
         Os::Linux | Os::FreeBsd => &["crontab", "systemctl"],
-        _ => &["crontab"],
+        // Task Scheduler is the only one of the four that ships with Windows.
+        // `crontab` is still worth probing after it: a machine with Cygwin or
+        // WSL interop on PATH has a real cron, and preferring the native tool
+        // while still finding the other one is the same rule as everywhere else.
+        Os::Windows => &["schtasks", "crontab"],
+        Os::Other => &["crontab"],
     }
 }
 
@@ -291,6 +335,57 @@ mod tests {
         if let Some(s) = p.scheduler() {
             assert!(p.schedulers.contains(&s));
         }
+    }
+
+    #[test]
+    fn every_os_has_a_scheduler_worth_probing_and_windows_gets_the_native_one() {
+        for os in [Os::MacOs, Os::Linux, Os::FreeBsd, Os::Windows, Os::Other] {
+            assert!(
+                !preferred_schedulers(os).is_empty(),
+                "{} has no scheduler candidates",
+                os.as_str()
+            );
+        }
+        // The bug this pins: Windows fell into the catch-all arm and was offered
+        // `crontab`, which it does not have, so `schedule` reported "no
+        // scheduler" on a machine with a perfectly good Task Scheduler.
+        assert_eq!(preferred_schedulers(Os::Windows).first(), Some(&"schtasks"));
+        assert_eq!(preferred_schedulers(Os::MacOs).first(), Some(&"launchctl"));
+    }
+
+    #[test]
+    fn the_userland_is_probed_and_never_inferred_from_the_operating_system() {
+        // Homebrew's coreutils puts GNU tools ahead of BSD ones on a Mac, so
+        // `Os::MacOs` does not imply a BSD userland and `Os::Linux` does not
+        // imply a GNU one. The only honest answer comes from asking `sed`.
+        let probed = Userland::detect();
+        let by_probe = match Command::new("sed").arg("--version").output() {
+            Ok(out) if out.status.success() => {
+                let t = String::from_utf8_lossy(&out.stdout).to_lowercase();
+                if t.contains("gnu") || t.contains("busybox") {
+                    Userland::Gnu
+                } else {
+                    Userland::Unknown
+                }
+            }
+            Ok(_) => Userland::Bsd,
+            Err(_) => Userland::Unknown,
+        };
+        assert_eq!(probed, by_probe, "detect() must agree with the raw probe");
+    }
+
+    #[test]
+    fn the_home_directory_is_found_by_this_platforms_variable() {
+        // Whatever this runs on, one of the variables is set, and the answer is
+        // absolute. A relative home directory is how a loop ends up scaffolded
+        // into whatever the working directory happened to be.
+        let home = home_dir().expect("some home variable is set on any real host");
+        assert!(
+            home.is_absolute(),
+            "{} is not absolute",
+            home.display()
+        );
+        assert!(!home.as_os_str().is_empty());
     }
 
     #[test]

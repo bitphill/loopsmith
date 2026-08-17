@@ -1,0 +1,44 @@
+{
+  "name": "@bitphill/loopsmith",
+  "version": "0.1.0",
+  "description": "Self-evolving agent loops behind a deterministic verification gate. Installs the prebuilt Rust binary as `loopsmith`.",
+  "license": "MIT",
+  "homepage": "https://github.com/bitphill/loopsmith#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bitphill/loopsmith.git"
+  },
+  "bugs": "https://github.com/bitphill/loopsmith/issues",
+  "keywords": [
+    "agent",
+    "loop",
+    "llm",
+    "orchestration",
+    "cli",
+    "rust",
+    "verification"
+  ],
+  "bin": {
+    "loopsmith": "bin/loopsmith.js"
+  },
+  "files": [
+    "bin/loopsmith.js",
+    "scripts/install.js",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

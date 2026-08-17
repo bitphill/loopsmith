@@ -1,0 +1,141 @@
+name: release
+
+# Builds the six prebuilt targets and publishes them with a SHA256SUMS manifest.
+#
+# The manifest is not decoration: the npm postinstall and the PyPI first-run
+# launcher both refuse to execute a download that does not match it. Distributing
+# a binary without a checksum to compare against is a supply-chain hole with a
+# progress bar.
+#
+# This machine's maintainer builds on an Intel Mac with no docker and no `cross`,
+# so five of these six targets can only be produced here.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build and release
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            # musl needs its own linker, and the error without it names a missing
+            # `cc` rather than a missing target.
+            packages: musl-tools
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            packages: gcc-aarch64-linux-gnu
+            linker: aarch64-linux-gnu-gcc
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cross-compilation packages
+        if: matrix.packages != ''
+        run: sudo apt-get update -qq && sudo apt-get install -y ${{ matrix.packages }}
+
+      - name: Point cargo at the cross linker
+        if: matrix.linker != ''
+        run: |
+          triple=$(echo '${{ matrix.target }}' | tr 'a-z-' 'A-Z_')
+          echo "CARGO_TARGET_${triple}_LINKER=${{ matrix.linker }}" >> "$GITHUB_ENV"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: runtime
+          key: ${{ matrix.target }}
+
+      - name: Build
+        working-directory: runtime
+        run: cargo build --release --locked --bin loopsmith --target ${{ matrix.target }}
+
+      # One archive per target, named for the version and the triple, because both
+      # downloaders construct the filename from exactly those two facts.
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [ -n "${{ github.event.inputs.tag }}" ] && version="${{ github.event.inputs.tag }}" && version="${version#v}"
+          name="loopsmith-v${version}-${{ matrix.target }}.tar.gz"
+          mkdir -p dist
+          tar czf "dist/$name" -C "runtime/target/${{ matrix.target }}/release" loopsmith
+          echo "ASSET=$name" >> "$GITHUB_ENV"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [ -n "${{ github.event.inputs.tag }}" ] && version="${{ github.event.inputs.tag }}" && version="${version#v}"
+          name="loopsmith-v${version}-${{ matrix.target }}.zip"
+          mkdir -p dist
+          # tar.exe ships with Windows and writes zips, so no extra dependency.
+          tar acf "dist/$name" -C "runtime/target/${{ matrix.target }}/release" loopsmith.exe
+          echo "ASSET=$name" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/${{ env.ASSET }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+
+      - name: Collect the archives and checksum them
+        run: |
+          mkdir -p dist
+          find staging -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} dist/ \;
+          cd dist
+          # Bare filenames, no leading path: both downloaders match a line by its
+          # trailing asset name, and a `./` prefix would silently never match.
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          notes=$(awk "/^## \[${tag#v}\]/{f=1;next} /^## \[/{f=0} f" CHANGELOG.md)
+          [ -z "$notes" ] && notes="See CHANGELOG.md."
+          gh release create "$tag" dist/* \
+            --title "loopsmith $tag" \
+            --notes "$notes" \
+            --verify-tag

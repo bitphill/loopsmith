@@ -395,6 +395,7 @@ mod tests {
             rationale: "it correlates with satisfied goals".into(),
             patch: Some("skills: [x]".into()),
             created_ms: now_ms(),
+            expires_ms: None,
         };
         s.put_proposal(&mk("r1", "a")).unwrap();
         s.put_proposal(&mk("r1", "b")).unwrap();
