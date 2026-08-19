@@ -38,6 +38,9 @@ file, you can run a loop.
 A plain-English guide: one install line, thirteen ready-made loops to copy, the
 six settings you actually edit, and how to leave it running on a schedule.
 
+There is also a generated [code wiki](https://bitphill.github.io/loopsmith/wiki/#overview) mapping the crates,
+the execution engine, the gate, and the provider layer.
+
 ## What it is
 
 You describe a purpose in a config — goals, how each is checked, what counts as

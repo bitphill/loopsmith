@@ -16,7 +16,7 @@
     <a href="https://pypi.org/project/loopsmith-cli/"><img alt="PyPI" src="https://img.shields.io/pypi/v/loopsmith-cli?logo=python&logoColor=white&label=PyPI&color=3775a9" /></a>
     <a href="https://github.com/bitphill/homebrew-loopsmith"><img alt="Homebrew" src="https://img.shields.io/badge/Homebrew-tap-FBB040?logo=homebrew&logoColor=white" /></a>
   </p>
-  <p><a href="#install">Install</a> · <a href="#five-minutes">Five minutes</a> · <a href="#examples">Examples</a> · <a href="#scheduling">Scheduling</a> · <a href="#portability">Portability</a> · <a href="README-DETAIL.md">Full reference</a></p>
+  <p><a href="#install">Install</a> · <a href="#five-minutes">Five minutes</a> · <a href="#examples">Examples</a> · <a href="#scheduling">Scheduling</a> · <a href="#portability">Portability</a> · <a href="README-DETAIL.md">Full reference</a> · <a href="https://bitphill.github.io/loopsmith/wiki/#overview">Code wiki</a></p>
 </div>
 
 ---
@@ -181,7 +181,8 @@ default skills. Write YAML or Markdown; they are the same model, and
 `loopsmith convert` translates either way.
 
 [Section reference](HOW-TO-USE.md) · [Template](LOOP-TEMPLATE.md) ·
-[Schema](config/loop.schema.json) · [Architecture and reasoning](README-DETAIL.md)
+[Schema](config/loop.schema.json) · [Architecture and reasoning](README-DETAIL.md) ·
+[Code wiki](https://bitphill.github.io/loopsmith/wiki/#overview)
 
 ---
 

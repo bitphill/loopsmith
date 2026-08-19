@@ -388,6 +388,8 @@ Optional. None of it is needed to run a loop.
 - [HOW-TO-USE.md](HOW-TO-USE.md) — every section explained, one by one
 - [LOOP-TEMPLATE.md](LOOP-TEMPLATE.md) — a blank loop with notes in every slot
 - [README-DETAIL.md](README-DETAIL.md) — how it's built, and why
+- [Code wiki](https://bitphill.github.io/loopsmith/wiki/#overview) — an auto-generated tour of the code, for the
+  developer you hand this to
 - [CHANGELOG.md](CHANGELOG.md) — what changed in each release
 - [loops-engineering-cheat-sheet.md](loops-engineering-cheat-sheet.md) — the thinking behind loops
 - [config/loop.schema.json](config/loop.schema.json) — every setting that exists
