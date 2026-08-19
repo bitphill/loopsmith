@@ -3,6 +3,7 @@
   <h1>loopsmith</h1>
   <h2>Detailed reference</h2>
   <p><em>The long version. Start at <a href="README.md">README.md</a> if you have not run a loop yet.</em></p>
+  <p><a href="https://gistcdn.githack.com/bitphill/d72dd7ba530399000f6ee956fc8e9909/raw/index.html#overview">Browse the generated code wiki</a> — a page-per-subsystem tour of the crates, the execution engine, the gate, and the provider layer.</p>
   <p>
     <img alt="rust" src="https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white" />
     <img alt="tests" src="https://img.shields.io/badge/tests-240%20passing-2A5A8A" />
