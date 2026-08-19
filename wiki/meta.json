@@ -1,0 +1,454 @@
+{
+  "fromCommit": "da63430218c4690977c5e392e6b004494b0e06b5",
+  "generatedAt": "2026-08-19T09:49:13.701Z",
+  "model": "claude-opus-5",
+  "lang": "",
+  "moduleFiles": {
+    "Project Documentation": [
+      "README.md",
+      "README-DETAIL.md",
+      "README-FOR-DUMMIES.md",
+      "HOW-TO-USE.md",
+      "LOOP-TEMPLATE.md",
+      "loops-engineering-cheat-sheet.md",
+      "AGENTS.md",
+      "CLAUDE.md"
+    ],
+    "Loop Configuration Schema": [
+      "config/loop.schema.json",
+      "runtime/crates/loopsmith-core/Cargo.toml",
+      "runtime/crates/loopsmith-core/README.md",
+      "runtime/crates/loopsmith-core/src/lib.rs",
+      "runtime/crates/loopsmith-core/src/validate.rs",
+      "runtime/crates/loopsmith-core/src/config/mod.rs",
+      "runtime/crates/loopsmith-core/src/config/constraints.rs",
+      "runtime/crates/loopsmith-core/src/config/context.rs",
+      "runtime/crates/loopsmith-core/src/config/default_skills.rs",
+      "runtime/crates/loopsmith-core/src/config/gates.rs",
+      "runtime/crates/loopsmith-core/src/config/goals.rs",
+      "runtime/crates/loopsmith-core/src/config/graph.rs",
+      "runtime/crates/loopsmith-core/src/config/guidelines.rs",
+      "runtime/crates/loopsmith-core/src/config/info.rs",
+      "runtime/crates/loopsmith-core/src/config/providers.rs",
+      "runtime/crates/loopsmith-core/src/config/skills.rs",
+      "runtime/crates/loopsmith-core/src/config/success.rs",
+      "runtime/crates/loopsmith-core/src/config/triggers.rs",
+      "runtime/crates/loopsmith-core/src/config/validation.rs",
+      "runtime/crates/loopsmith-core/src/config/work.rs"
+    ],
+    "Markdown/YAML Config Interchange": [
+      "runtime/crates/loopsmith-core/src/md/mod.rs",
+      "runtime/crates/loopsmith-core/src/md/parse.rs",
+      "runtime/crates/loopsmith-core/src/md/render.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/convert.rs"
+    ],
+    "Example Loops": [
+      "config/examples/account-watch-loop.md",
+      "config/examples/account-watch-loop.yaml",
+      "config/examples/blogger-loop.md",
+      "config/examples/blogger-loop.yaml",
+      "config/examples/cold-outreach-loop.md",
+      "config/examples/cold-outreach-loop.yaml",
+      "config/examples/idea-radar-loop.md",
+      "config/examples/idea-radar-loop.yaml",
+      "config/examples/landing-page-loop.md",
+      "config/examples/landing-page-loop.yaml",
+      "config/examples/marketing-automation-loop.md",
+      "config/examples/marketing-automation-loop.yaml",
+      "config/examples/refactor-loop.md",
+      "config/examples/refactor-loop.yaml",
+      "config/examples/research-loop.md",
+      "config/examples/research-loop.yaml",
+      "config/examples/sales-leads-loop.md",
+      "config/examples/sales-leads-loop.yaml",
+      "config/examples/traffic-loop.md",
+      "config/examples/traffic-loop.yaml",
+      "config/examples/trend-radar-loop.md",
+      "config/examples/trend-radar-loop.yaml",
+      "config/examples/viral-game-loop.md",
+      "config/examples/viral-game-loop.yaml",
+      "config/examples/x402-agent-loop.md",
+      "config/examples/x402-agent-loop.yaml"
+    ],
+    "CLI Command Surface": [
+      "runtime/crates/loopsmith-cli/Cargo.toml",
+      "runtime/crates/loopsmith-cli/README.md",
+      "runtime/crates/loopsmith-cli/src/main.rs",
+      "runtime/crates/loopsmith-cli/src/cli.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/mod.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/doctor.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/ledger.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/new.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/plan.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/proposals.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/providers.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/prune.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/resume.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/run.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/skills.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/status.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/validate.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/watch.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/gate.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/mcp.rs",
+      "runtime/crates/loopsmith-cli/src/logging.rs",
+      "runtime/crates/loopsmith-cli/src/scaffold.rs"
+    ],
+    "Loop Execution Engine": [
+      "runtime/crates/loopsmith-cli/src/run/mod.rs",
+      "runtime/crates/loopsmith-cli/src/run/dispatch.rs",
+      "runtime/crates/loopsmith-cli/src/run/phases.rs",
+      "runtime/crates/loopsmith-cli/src/run/prompts.rs",
+      "runtime/crates/loopsmith-cli/src/run/stop.rs",
+      "runtime/crates/loopsmith-cli/src/run/summary.rs",
+      "runtime/crates/loopsmith-cli/src/run/export.rs",
+      "runtime/crates/loopsmith-cli/src/run/publish.rs",
+      "runtime/crates/loopsmith-cli/src/judgment.rs",
+      "runtime/crates/loopsmith-cli/src/worktree.rs"
+    ],
+    "Evolution & Perturbation": [
+      "runtime/crates/loopsmith-cli/src/run/evolve.rs",
+      "runtime/crates/loopsmith-cli/src/run/perturb.rs"
+    ],
+    "Gating & Success Criteria": [
+      "runtime/crates/loopsmith-gate/Cargo.toml",
+      "runtime/crates/loopsmith-gate/README.md",
+      "runtime/crates/loopsmith-gate/src/lib.rs"
+    ],
+    "Execution Graph & Concurrency Planning": [
+      "runtime/crates/loopsmith-graph/Cargo.toml",
+      "runtime/crates/loopsmith-graph/README.md",
+      "runtime/crates/loopsmith-graph/src/lib.rs"
+    ],
+    "Provider Integration": [
+      "runtime/crates/loopsmith-provider/Cargo.toml",
+      "runtime/crates/loopsmith-provider/README.md",
+      "runtime/crates/loopsmith-provider/src/lib.rs"
+    ],
+    "Skills System": [
+      "runtime/crates/loopsmith-skills/Cargo.toml",
+      "runtime/crates/loopsmith-skills/README.md",
+      "runtime/crates/loopsmith-skills/src/lib.rs",
+      "runtime/crates/loopsmith-skills/src/marketplace.rs",
+      "runtime/crates/loopsmith-cli/templates/marketplaces.json",
+      "skills/loopsmith/SKILL.md",
+      "skills/loopsmith-reference/SKILL.md"
+    ],
+    "Memory & Episode Store": [
+      "runtime/crates/loopsmith-memory/Cargo.toml",
+      "runtime/crates/loopsmith-memory/README.md",
+      "runtime/crates/loopsmith-memory/src/lib.rs",
+      "runtime/crates/loopsmith-memory/src/sled_store.rs"
+    ],
+    "MCP Server": [
+      "runtime/crates/loopsmith-mcp/Cargo.toml",
+      "runtime/crates/loopsmith-mcp/README.md",
+      "runtime/crates/loopsmith-mcp/src/lib.rs",
+      "runtime/crates/loopsmith-cli/templates/mcp.template.json"
+    ],
+    "Permissions & Sandboxing": [
+      "runtime/crates/loopsmith-cli/src/permissions.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/permissions.rs",
+      "runtime/crates/loopsmith-cli/templates/permissions.template.json",
+      "runtime/crates/loopsmith-cli/templates/compat.template.sh"
+    ],
+    "Scheduling & Triggers": [
+      "runtime/crates/loopsmith-cli/src/schedule.rs",
+      "runtime/crates/loopsmith-cli/src/cmd/schedule.rs"
+    ],
+    "Platform Utilities": [
+      "runtime/crates/loopsmith-util/Cargo.toml",
+      "runtime/crates/loopsmith-util/README.md",
+      "runtime/crates/loopsmith-util/src/lib.rs",
+      "runtime/crates/loopsmith-util/src/platform.rs",
+      "runtime/Cargo.toml"
+    ],
+    "Distribution & Installers": [
+      "install.sh",
+      "install.bat",
+      "installers/deps.sh",
+      "installers/deps.ps1",
+      "installers/install.ps1",
+      "Formula/loopsmith.rb",
+      "npm/README.md",
+      "npm/package.json",
+      "npm/scripts/install.js",
+      "pypi/README.md",
+      "pypi/build.sh",
+      "pypi/pyproject.toml",
+      "pypi/src/loopsmith_cli/__init__.py",
+      "pypi/src/loopsmith_cli/__main__.py",
+      "tools/sync-version.sh"
+    ],
+    "Other": [
+      "runtime/crates/loopsmith-cli/tests/README.md",
+      "runtime/crates/loopsmith-cli/tests/compat.rs",
+      "runtime/crates/loopsmith-cli/tests/harness/mod.rs",
+      "runtime/crates/loopsmith-cli/tests/opt_in.rs",
+      "runtime/crates/loopsmith-cli/tests/stress.rs",
+      "runtime/crates/loopsmith-cli/tests/surface.rs",
+      "runtime/crates/loopsmith-core/tests/md_roundtrip.rs",
+      "runtime/crates/loopsmith-core/tests/schema_drift.rs"
+    ]
+  },
+  "moduleTree": [
+    {
+      "name": "Project Documentation",
+      "slug": "project-documentation",
+      "files": [
+        "README.md",
+        "README-DETAIL.md",
+        "README-FOR-DUMMIES.md",
+        "HOW-TO-USE.md",
+        "LOOP-TEMPLATE.md",
+        "loops-engineering-cheat-sheet.md",
+        "AGENTS.md",
+        "CLAUDE.md"
+      ]
+    },
+    {
+      "name": "Loop Configuration Schema",
+      "slug": "loop-configuration-schema",
+      "files": [
+        "config/loop.schema.json",
+        "runtime/crates/loopsmith-core/Cargo.toml",
+        "runtime/crates/loopsmith-core/README.md",
+        "runtime/crates/loopsmith-core/src/lib.rs",
+        "runtime/crates/loopsmith-core/src/validate.rs",
+        "runtime/crates/loopsmith-core/src/config/mod.rs",
+        "runtime/crates/loopsmith-core/src/config/constraints.rs",
+        "runtime/crates/loopsmith-core/src/config/context.rs",
+        "runtime/crates/loopsmith-core/src/config/default_skills.rs",
+        "runtime/crates/loopsmith-core/src/config/gates.rs",
+        "runtime/crates/loopsmith-core/src/config/goals.rs",
+        "runtime/crates/loopsmith-core/src/config/graph.rs",
+        "runtime/crates/loopsmith-core/src/config/guidelines.rs",
+        "runtime/crates/loopsmith-core/src/config/info.rs",
+        "runtime/crates/loopsmith-core/src/config/providers.rs",
+        "runtime/crates/loopsmith-core/src/config/skills.rs",
+        "runtime/crates/loopsmith-core/src/config/success.rs",
+        "runtime/crates/loopsmith-core/src/config/triggers.rs",
+        "runtime/crates/loopsmith-core/src/config/validation.rs",
+        "runtime/crates/loopsmith-core/src/config/work.rs"
+      ]
+    },
+    {
+      "name": "Markdown/YAML Config Interchange",
+      "slug": "markdown-yaml-config-interchange",
+      "files": [
+        "runtime/crates/loopsmith-core/src/md/mod.rs",
+        "runtime/crates/loopsmith-core/src/md/parse.rs",
+        "runtime/crates/loopsmith-core/src/md/render.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/convert.rs"
+      ]
+    },
+    {
+      "name": "Example Loops",
+      "slug": "example-loops",
+      "files": [
+        "config/examples/account-watch-loop.md",
+        "config/examples/account-watch-loop.yaml",
+        "config/examples/blogger-loop.md",
+        "config/examples/blogger-loop.yaml",
+        "config/examples/cold-outreach-loop.md",
+        "config/examples/cold-outreach-loop.yaml",
+        "config/examples/idea-radar-loop.md",
+        "config/examples/idea-radar-loop.yaml",
+        "config/examples/landing-page-loop.md",
+        "config/examples/landing-page-loop.yaml",
+        "config/examples/marketing-automation-loop.md",
+        "config/examples/marketing-automation-loop.yaml",
+        "config/examples/refactor-loop.md",
+        "config/examples/refactor-loop.yaml",
+        "config/examples/research-loop.md",
+        "config/examples/research-loop.yaml",
+        "config/examples/sales-leads-loop.md",
+        "config/examples/sales-leads-loop.yaml",
+        "config/examples/traffic-loop.md",
+        "config/examples/traffic-loop.yaml",
+        "config/examples/trend-radar-loop.md",
+        "config/examples/trend-radar-loop.yaml",
+        "config/examples/viral-game-loop.md",
+        "config/examples/viral-game-loop.yaml",
+        "config/examples/x402-agent-loop.md",
+        "config/examples/x402-agent-loop.yaml"
+      ]
+    },
+    {
+      "name": "CLI Command Surface",
+      "slug": "cli-command-surface",
+      "files": [
+        "runtime/crates/loopsmith-cli/Cargo.toml",
+        "runtime/crates/loopsmith-cli/README.md",
+        "runtime/crates/loopsmith-cli/src/main.rs",
+        "runtime/crates/loopsmith-cli/src/cli.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/mod.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/doctor.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/ledger.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/new.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/plan.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/proposals.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/providers.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/prune.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/resume.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/run.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/skills.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/status.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/validate.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/watch.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/gate.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/mcp.rs",
+        "runtime/crates/loopsmith-cli/src/logging.rs",
+        "runtime/crates/loopsmith-cli/src/scaffold.rs"
+      ]
+    },
+    {
+      "name": "Loop Execution Engine",
+      "slug": "loop-execution-engine",
+      "files": [
+        "runtime/crates/loopsmith-cli/src/run/mod.rs",
+        "runtime/crates/loopsmith-cli/src/run/dispatch.rs",
+        "runtime/crates/loopsmith-cli/src/run/phases.rs",
+        "runtime/crates/loopsmith-cli/src/run/prompts.rs",
+        "runtime/crates/loopsmith-cli/src/run/stop.rs",
+        "runtime/crates/loopsmith-cli/src/run/summary.rs",
+        "runtime/crates/loopsmith-cli/src/run/export.rs",
+        "runtime/crates/loopsmith-cli/src/run/publish.rs",
+        "runtime/crates/loopsmith-cli/src/judgment.rs",
+        "runtime/crates/loopsmith-cli/src/worktree.rs"
+      ]
+    },
+    {
+      "name": "Evolution & Perturbation",
+      "slug": "evolution-perturbation",
+      "files": [
+        "runtime/crates/loopsmith-cli/src/run/evolve.rs",
+        "runtime/crates/loopsmith-cli/src/run/perturb.rs"
+      ]
+    },
+    {
+      "name": "Gating & Success Criteria",
+      "slug": "gating-success-criteria",
+      "files": [
+        "runtime/crates/loopsmith-gate/Cargo.toml",
+        "runtime/crates/loopsmith-gate/README.md",
+        "runtime/crates/loopsmith-gate/src/lib.rs"
+      ]
+    },
+    {
+      "name": "Execution Graph & Concurrency Planning",
+      "slug": "execution-graph-concurrency-planning",
+      "files": [
+        "runtime/crates/loopsmith-graph/Cargo.toml",
+        "runtime/crates/loopsmith-graph/README.md",
+        "runtime/crates/loopsmith-graph/src/lib.rs"
+      ]
+    },
+    {
+      "name": "Provider Integration",
+      "slug": "provider-integration",
+      "files": [
+        "runtime/crates/loopsmith-provider/Cargo.toml",
+        "runtime/crates/loopsmith-provider/README.md",
+        "runtime/crates/loopsmith-provider/src/lib.rs"
+      ]
+    },
+    {
+      "name": "Skills System",
+      "slug": "skills-system",
+      "files": [
+        "runtime/crates/loopsmith-skills/Cargo.toml",
+        "runtime/crates/loopsmith-skills/README.md",
+        "runtime/crates/loopsmith-skills/src/lib.rs",
+        "runtime/crates/loopsmith-skills/src/marketplace.rs",
+        "runtime/crates/loopsmith-cli/templates/marketplaces.json",
+        "skills/loopsmith/SKILL.md",
+        "skills/loopsmith-reference/SKILL.md"
+      ]
+    },
+    {
+      "name": "Memory & Episode Store",
+      "slug": "memory-episode-store",
+      "files": [
+        "runtime/crates/loopsmith-memory/Cargo.toml",
+        "runtime/crates/loopsmith-memory/README.md",
+        "runtime/crates/loopsmith-memory/src/lib.rs",
+        "runtime/crates/loopsmith-memory/src/sled_store.rs"
+      ]
+    },
+    {
+      "name": "MCP Server",
+      "slug": "mcp-server",
+      "files": [
+        "runtime/crates/loopsmith-mcp/Cargo.toml",
+        "runtime/crates/loopsmith-mcp/README.md",
+        "runtime/crates/loopsmith-mcp/src/lib.rs",
+        "runtime/crates/loopsmith-cli/templates/mcp.template.json"
+      ]
+    },
+    {
+      "name": "Permissions & Sandboxing",
+      "slug": "permissions-sandboxing",
+      "files": [
+        "runtime/crates/loopsmith-cli/src/permissions.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/permissions.rs",
+        "runtime/crates/loopsmith-cli/templates/permissions.template.json",
+        "runtime/crates/loopsmith-cli/templates/compat.template.sh"
+      ]
+    },
+    {
+      "name": "Scheduling & Triggers",
+      "slug": "scheduling-triggers",
+      "files": [
+        "runtime/crates/loopsmith-cli/src/schedule.rs",
+        "runtime/crates/loopsmith-cli/src/cmd/schedule.rs"
+      ]
+    },
+    {
+      "name": "Platform Utilities",
+      "slug": "platform-utilities",
+      "files": [
+        "runtime/crates/loopsmith-util/Cargo.toml",
+        "runtime/crates/loopsmith-util/README.md",
+        "runtime/crates/loopsmith-util/src/lib.rs",
+        "runtime/crates/loopsmith-util/src/platform.rs",
+        "runtime/Cargo.toml"
+      ]
+    },
+    {
+      "name": "Distribution & Installers",
+      "slug": "distribution-installers",
+      "files": [
+        "install.sh",
+        "install.bat",
+        "installers/deps.sh",
+        "installers/deps.ps1",
+        "installers/install.ps1",
+        "Formula/loopsmith.rb",
+        "npm/README.md",
+        "npm/package.json",
+        "npm/scripts/install.js",
+        "pypi/README.md",
+        "pypi/build.sh",
+        "pypi/pyproject.toml",
+        "pypi/src/loopsmith_cli/__init__.py",
+        "pypi/src/loopsmith_cli/__main__.py",
+        "tools/sync-version.sh"
+      ]
+    },
+    {
+      "name": "Other",
+      "slug": "other",
+      "files": [
+        "runtime/crates/loopsmith-cli/tests/README.md",
+        "runtime/crates/loopsmith-cli/tests/compat.rs",
+        "runtime/crates/loopsmith-cli/tests/harness/mod.rs",
+        "runtime/crates/loopsmith-cli/tests/opt_in.rs",
+        "runtime/crates/loopsmith-cli/tests/stress.rs",
+        "runtime/crates/loopsmith-cli/tests/surface.rs",
+        "runtime/crates/loopsmith-core/tests/md_roundtrip.rs",
+        "runtime/crates/loopsmith-core/tests/schema_drift.rs"
+      ]
+    }
+  ]
+}
