@@ -97,6 +97,17 @@ fn open_browser(url: &str) -> bool {
         .is_ok()
 }
 
+/// The port that was asked for, when it is not the one that was got.
+///
+/// Only that. The earlier spelling also fired whenever the bound port differed
+/// from 3000, so `--port 3210` on a completely free 3210 announced that 3210
+/// was busy — which is worse than saying nothing, because it sends someone
+/// looking for a conflict that does not exist.
+fn stepped_past(asked: Option<u16>, bound: u16) -> Option<u16> {
+    let asked = asked.unwrap_or(DEFAULT_PORT);
+    (asked != bound).then_some(asked)
+}
+
 pub fn serve(port: Option<u16>, no_open: bool) -> Result<(), String> {
     let (listener, addr) = bind(port.unwrap_or(DEFAULT_PORT))?;
     let url = format!("http://{}:{}", addr.ip(), addr.port());
@@ -116,8 +127,8 @@ pub fn serve(port: Option<u16>, no_open: bool) -> Result<(), String> {
 
     println!("loopsmith web {}", env!("CARGO_PKG_VERSION"));
     println!("  {url}");
-    if port.is_some_and(|p| p != addr.port()) || addr.port() != DEFAULT_PORT {
-        println!("  (port {} was busy)", port.unwrap_or(DEFAULT_PORT));
+    if let Some(busy) = stepped_past(port, addr.port()) {
+        println!("  (port {busy} was busy)");
     }
     println!("  bound to localhost only, and refuses any request not addressed to it");
     println!("\nPress Ctrl-C to stop.");
@@ -155,6 +166,18 @@ mod tests {
         assert_ne!(next_addr.port(), busy, "stepped past the busy port");
         assert!(next_addr.port() > busy, "steps up, never down");
         drop(held);
+    }
+
+    #[test]
+    fn a_port_is_only_called_busy_when_it_actually_was() {
+        // The default, taken as asked.
+        assert_eq!(stepped_past(None, DEFAULT_PORT), None);
+        // A custom port that was free. This is the case that was wrong: it
+        // reported the port the user chose as busy purely for not being 3000.
+        assert_eq!(stepped_past(Some(3210), 3210), None);
+        // Actually stepped past, by default and by request.
+        assert_eq!(stepped_past(None, 3001), Some(DEFAULT_PORT));
+        assert_eq!(stepped_past(Some(3210), 3211), Some(3210));
     }
 
     #[test]
