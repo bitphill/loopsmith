@@ -314,6 +314,10 @@ export default function App() {
   const actions = STEP_ACTIONS[step] ?? [];
   const blocked = !review?.parsed || review.error_count > 0;
 
+  const stepIndex = STEPS.findIndex((s) => s.id === step);
+  const prevStep = stepIndex > 0 ? STEPS[stepIndex - 1] : null;
+  const nextStep = stepIndex < STEPS.length - 1 ? STEPS[stepIndex + 1] : null;
+
   const commands: Command[] = useMemo(() => [
     ...STEPS.map((s) => ({
       id: `step-${s.id}`, group: "Go to", label: s.label,
@@ -342,19 +346,12 @@ export default function App() {
   return (
     <PaletteProvider commands={commands}>
       <HelpProvider fields={help.fields}>
-        <div className="grid h-screen grid-rows-[auto_auto_1fr] overflow-hidden">
+        <div className="grid h-screen grid-rows-[auto_1fr] overflow-hidden">
           <Header
             meta={meta} island={island} theme={theme} setTheme={setTheme}
             onTour={() => setTourDone(false)}
             onRail={() => setRailOpen((v) => !v)} railOpen={railOpen}
           />
-
-          <div className="flex flex-wrap items-center gap-3 border-b bg-surface px-4 py-2">
-            <StepBar steps={STEPS} active={step} onPick={goStep} />
-            <span className="ml-auto hidden text-[11.5px] text-faint md:block">
-              press <span className="kbd">⌘K</span> to jump anywhere
-            </span>
-          </div>
 
           <div className={`grid min-h-0 ${railOpen ? "lg:grid-cols-[17rem_1fr_22rem]" : "lg:grid-cols-[17rem_1fr]"}`}>
             <div className="hidden min-h-0 lg:block">
@@ -365,7 +362,34 @@ export default function App() {
               />
             </div>
 
-            <div className="grid min-h-0 grid-rows-[1fr_auto]">
+            <div className="grid min-h-0 grid-rows-[auto_1fr_auto]">
+              <div className="flex flex-wrap items-center gap-3 border-b bg-surface px-4 py-2">
+                <StepBar steps={STEPS} active={step} onPick={goStep} />
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={!prevStep}
+                    title={prevStep ? `Back to ${prevStep.label}` : "This is the first step"}
+                    onClick={() => prevStep && goStep(prevStep.id)}
+                  >
+                    ← Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={!nextStep}
+                    title={nextStep ? `On to ${nextStep.label}` : "This is the last step"}
+                    onClick={() => nextStep && goStep(nextStep.id)}
+                  >
+                    Next →
+                  </button>
+                  <span className="hidden text-[11.5px] text-faint xl:block">
+                    press <span className="kbd">⌘K</span> to jump anywhere
+                  </span>
+                </div>
+              </div>
+
               <main id="step-panel" className="min-h-0 overflow-y-auto bg-ground p-4">
                 <MorphPanel view={step} direction={direction} className="space-y-4">
                   <StepView
@@ -383,8 +407,7 @@ export default function App() {
               </main>
 
               <StepActions
-                actions={actions} step={step} steps={STEPS} onStep={goStep}
-                blocked={blocked} created={created} facts={facts}
+                actions={actions} blocked={blocked} created={created} facts={facts}
                 onRun={(a) => (ACTION_LABEL[a].spends ? setConfirm(a) : run(a))}
                 shakeKey={shakeKey} shakeProps={shakeProps}
                 toast={toast} onDismissToast={() => setToast(null)}
@@ -463,8 +486,14 @@ function Header({
   const palette = usePalette();
   return (
     <header className="flex items-center gap-3 border-b bg-surface px-4 py-2.5">
-      <img src="/logo.png" alt="" width={30} height={30} className="shrink-0 select-none"
-        aria-hidden="true" draggable={false} />
+      {/* The plate is the point. The mark's own outlines are near-black, so a
+          transparent PNG on the dark theme loses its silhouette against the
+          ground. White is invisible against the light theme's white header, so
+          one treatment serves both rather than branching on theme. */}
+      <span className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-[6px] bg-white">
+        <img src="/logo.png" alt="" width={26} height={26} className="select-none"
+          aria-hidden="true" draggable={false} />
+      </span>
       <h1 className="forge-mark text-[18px] leading-none">loopsmith</h1>
       <span className="chip font-mono">{meta?.version ?? "…"}</span>
 
@@ -559,19 +588,20 @@ function StepView(props: {
 /* ------------------------------------------------------------ step actions */
 
 function StepActions({
-  actions, step, steps, onStep, blocked, created, facts, onRun, shakeKey, shakeProps, toast, onDismissToast,
+  actions, blocked, created, facts, onRun, shakeKey, shakeProps, toast, onDismissToast,
 }: {
-  actions: ActionId[]; step: string; steps: Step[]; onStep: (id: string) => void;
+  actions: ActionId[];
   blocked: boolean; created: boolean; facts: PathFacts | null;
   onRun: (a: ActionId) => void;
   shakeKey: number; shakeProps: Record<string, unknown>;
   toast: { tone: "good" | "bad"; text: string } | null;
   onDismissToast: () => void;
 }) {
-  const i = steps.findIndex((s) => s.id === step);
-  const prev = i > 0 ? steps[i - 1] : null;
-  const next = i < steps.length - 1 ? steps[i + 1] : null;
   const cantWrite = !!facts && !facts.writable;
+
+  // Steps that only collect input have no actions of their own, and an empty
+  // bar is worse than no bar — it reads as something that failed to load.
+  if (actions.length === 0 && !toast) return null;
 
   return (
     <div>
@@ -593,10 +623,6 @@ function StepActions({
 
       <motion.div key={shakeKey} {...shakeProps}
         className="flex flex-wrap items-center gap-2 border-t bg-surface px-4 py-3">
-        {prev && (
-          <button className="btn btn-sm" onClick={() => onStep(prev.id)}>← {prev.label}</button>
-        )}
-
         {actions.map((a) => {
           const m = ACTION_LABEL[a];
           const needsLoop = a !== "create" && a !== "validate" && a !== "plan";
@@ -621,13 +647,6 @@ function StepActions({
             </button>
           );
         })}
-
-        {next && (
-          <button className={`btn btn-sm ml-auto ${actions.length === 0 ? "btn-primary" : ""}`}
-            onClick={() => onStep(next.id)}>
-            {next.label} →
-          </button>
-        )}
       </motion.div>
     </div>
   );

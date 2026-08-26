@@ -98,11 +98,28 @@ test.describe("with the tour dismissed", () => {
   test("each step shows only its own actions", async ({ page }) => {
     // The whole point of the restructure: nine buttons at once was the wall.
     await expect(page.getByRole("button", { name: "Run once" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^Power/ })).toBeVisible();
 
     await page.getByRole("tab", { name: "Ship" }).click();
     await expect(page.getByRole("button", { name: "Run once" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Create loop" })).toBeVisible();
+  });
+
+  test("Previous and Next walk the steps and stop at both ends", async ({ page }) => {
+    const prev = page.getByRole("button", { name: "← Previous" });
+    const next = page.getByRole("button", { name: "Next →" });
+
+    // Place is the first step, so there is nowhere back to go.
+    await expect(prev).toBeDisabled();
+    await next.click();
+    await expect(page.getByRole("tab", { name: "Power" })).toHaveAttribute("aria-selected", "true");
+
+    await expect(prev).toBeEnabled();
+    await prev.click();
+    await expect(page.getByRole("tab", { name: "Place" })).toHaveAttribute("aria-selected", "true");
+
+    // And Ship is the last, so Next has nowhere to go either.
+    await page.getByRole("tab", { name: "Ship" }).click();
+    await expect(next).toBeDisabled();
   });
 
   test("the command palette reaches a step the current view does not show", async ({ page }) => {
