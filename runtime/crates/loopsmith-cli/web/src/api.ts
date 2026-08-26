@@ -44,6 +44,15 @@ export const api = {
   pathFacts: (path: string) =>
     call<PathFacts>(`/api/path?path=${encodeURIComponent(path)}`),
 
+  /**
+   * Open the OS folder chooser. Resolves when the user picks or cancels —
+   * `path` null and `unavailable` null means they cancelled, which is fine.
+   */
+  pickFolder: (startIn?: string) =>
+    post<{ path: string | null; unavailable: string | null }>("/api/pick-folder", {
+      start_in: startIn ?? null,
+    }),
+
   help: () => call<Help>("/api/help"),
 
   examples: () => call<ExampleCard[]>("/api/examples"),

@@ -9,6 +9,7 @@
  */
 import { useState } from "react";
 import { Icon, Note } from "./ui";
+import { PickFolder } from "./setup";
 import type { ExampleCard, LibraryEntry, Review } from "./types";
 
 /* --- left: examples and saved loops -------------------------------------- */
@@ -119,12 +120,19 @@ function OpenByPath({ onOpen }: { onOpen: (path: string) => void }) {
       className="card p-3"
     >
       <label className="label mb-1.5 block" htmlFor="open-path">Open a loop by path</label>
-      <div className="flex gap-2">
-        <input id="open-path" className="input mono" placeholder="~/loops/blog-pipeline"
+      <div className="flex items-start gap-2">
+        <input id="open-path" className="input mono min-w-0 flex-1" placeholder="~/loops/blog-pipeline"
           value={path} onChange={(e) => setPath(e.target.value)} />
+        <PickFolder
+          startIn={path || undefined}
+          label="Browse for a loop folder"
+          // Opening is the whole point of this control, so a pick goes straight
+          // through rather than filling the box and waiting for a second click.
+          onPick={(p) => { setPath(p); onOpen(p); }}
+        />
         <button type="submit" className="btn btn-sm shrink-0" disabled={!path.trim()}>Open</button>
       </div>
-      <p className="hint mt-1.5">A folder, or the config file inside it.</p>
+      <p className="hint mt-1.5">Browse to a folder, or type the path to one.</p>
     </form>
   );
 }

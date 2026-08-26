@@ -425,6 +425,13 @@ h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
 }
 .rise { animation: rise 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
+/* Drives <Shimmer>: a masked gradient swept across text while waiting on
+   something with no known end. */
+@keyframes shimmer-sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 @keyframes pulse-ember {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--ember) 45%, transparent); }
   50% { box-shadow: 0 0 0 6px transparent; }

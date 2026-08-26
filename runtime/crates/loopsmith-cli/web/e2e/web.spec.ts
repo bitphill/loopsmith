@@ -8,6 +8,11 @@ import { test, expect } from "@playwright/test";
 
 test("the shell mounts and reports the binary's own version", async ({ page }) => {
   await page.goto("/");
+  // The mark is served straight from the binary, so a broken route shows up
+  // here rather than as a silently missing image.
+  const logo = await page.request.get("/logo.png");
+  expect(logo.status()).toBe(200);
+  expect(logo.headers()["content-type"]).toContain("image/png");
   await expect(page.getByRole("heading", { name: "loopsmith", level: 1 })).toBeVisible();
   // Served from the binary, so a version here proves the API round trip too.
   await expect(page.locator("header").getByText(/^\d+\.\d+\.\d+$/)).toBeVisible();
@@ -76,6 +81,10 @@ test.describe("with the tour dismissed", () => {
 
   test("the review rail refuses a goal that nothing checks", async ({ page }) => {
     await field(page, "Loop name").fill("unchecked");
+
+    // Goals live on the Intent step now. Walking there is part of what is
+    // being checked: the review rail has to keep watching across steps.
+    await page.getByRole("tab", { name: "Intent" }).click();
     await page.getByRole("button", { name: "Add a goal" }).click();
     await field(page, "Name").fill("g1");
     await field(page, "Description").fill("a goal with a long enough description to be accepted");
@@ -86,7 +95,40 @@ test.describe("with the tour dismissed", () => {
     await expect(right.getByText(/error/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
+  test("each step shows only its own actions", async ({ page }) => {
+    // The whole point of the restructure: nine buttons at once was the wall.
+    await expect(page.getByRole("button", { name: "Run once" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Power/ })).toBeVisible();
+
+    await page.getByRole("tab", { name: "Ship" }).click();
+    await expect(page.getByRole("button", { name: "Run once" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create loop" })).toBeVisible();
+  });
+
+  test("the command palette reaches a step the current view does not show", async ({ page }) => {
+    await page.keyboard.press("ControlOrMeta+k");
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    await expect(palette).toBeVisible();
+
+    // Subsequence matching, so a rough guess still lands.
+    await palette.getByPlaceholder(/Jump to a section/).fill("stpgt");
+    await palette.getByText("Stop gates").click();
+
+    await expect(palette).toBeHidden();
+    await expect(page.getByRole("tab", { name: "Proof" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("both path fields offer the native folder chooser", async ({ page }) => {
+    // Clicking would open a real OS dialog and hang the run, so this asserts
+    // the control is present and reachable, not that the dialog appears.
+    await expect(page.getByRole("button", { name: "Choose the folder for this loop" })).toBeVisible();
+
+    await page.locator("aside").first().getByRole("button", { name: /Your loops/ }).click();
+    await expect(page.getByRole("button", { name: "Browse for a loop folder" })).toBeVisible();
+  });
+
   test("the run buttons stay locked until a loop exists on disk", async ({ page }) => {
+    await page.getByRole("tab", { name: "Ship" }).click();
     await expect(page.getByRole("button", { name: "Run once" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Dry run" })).toBeDisabled();
     // Checking a draft never needs anything on disk.

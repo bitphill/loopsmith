@@ -126,10 +126,20 @@ loopsmith --web
 
 That's it. No text files, no YAML, nothing to memorise. What you get:
 
+**It asks six short questions, not sixty.** The form is split into six steps in
+the order you'd actually think about it: where it goes, what does the work, what
+you want, how it's checked, how the work is arranged, and when it runs. One
+screen at a time. If you ever want something that isn't in front of you, press
+`Ctrl` and `K` together (`⌘K` on a Mac) and type a few letters of its name.
+
 **It looks at your computer first.** Before you type anything, it finds the AI
 tools you already have installed, the local models you've downloaded, and the
 keys you've already set. Anything it finds becomes a button — click it and that
 part is configured.
+
+**You never type a folder path.** Click the small folder button and your normal
+"choose a folder" window opens, the same one every other program on your
+computer uses.
 
 **Every single box is explained.** Under each one is a plain sentence saying what
 it's for. Next to the ones where the honest advice isn't obvious, there's an ⓘ

@@ -12,7 +12,7 @@
 //! hands it to the job runner. A browser cannot name a program to run, which
 //! is the difference between a control panel and a remote shell.
 
-use crate::web::{assemble, detect, examples, exec, help, secrets};
+use crate::web::{assemble, detect, examples, exec, help, picker, secrets};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -35,6 +35,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/detect", get(detect_handler))
         .route("/api/handshake", post(handshake))
         .route("/api/path", get(path_facts))
+        .route("/api/pick-folder", post(pick_folder))
         // Teaching material.
         .route("/api/help", get(help_handler))
         // The example library and the loops already made.
@@ -80,6 +81,7 @@ async fn meta(State(s): State<AppState>) -> Json<Value> {
         "exe": std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default(),
         "cwd": std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
         "keychain": secrets::keychain_kind(),
+        "folder_dialog": picker::available(),
         "profile": secrets::profile_path().map(|p| p.display().to_string()),
     }))
 }
@@ -145,6 +147,31 @@ struct PathQuery {
 
 async fn path_facts(Query(q): Query<PathQuery>) -> Json<detect::PathFacts> {
     Json(detect::path_facts(&expand_home(&q.path)))
+}
+
+#[derive(Deserialize)]
+struct PickBody {
+    /// Where the dialog should open. Best effort — an unusable value is ignored
+    /// rather than being allowed to fail the dialog.
+    #[serde(default)]
+    start_in: Option<String>,
+}
+
+/// Open the operating system's own folder chooser.
+///
+/// The dialog appears on this machine because the server runs on this machine.
+/// It is the only honest way to spare someone typing an absolute path: the
+/// browser's own directory picker hands back a handle with no filesystem path.
+async fn pick_folder(Json(b): Json<PickBody>) -> Json<Value> {
+    let start = b
+        .start_in
+        .as_deref()
+        .map(|s| expand_home(s).display().to_string());
+    let picked = picker::choose(start.as_deref()).await;
+    Json(json!({
+        "path": picked.path,
+        "unavailable": picked.unavailable,
+    }))
 }
 
 async fn help_handler() -> Json<Value> {

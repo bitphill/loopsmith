@@ -67,6 +67,31 @@ command's behaviour.
   flood-filled inward from the corners so the figure's own white highlights
   survive, which a lightness threshold would punch holes in.
 
+- **A six-step flow instead of one long form.** The first cut put sixteen
+  config sections in a single scroll, three columns wide, with nine buttons live
+  at the bottom: everything reachable, nothing findable. It is now one step at a
+  time — Place, Power, Intent, Proof, Work, Ship — in the order the problem is
+  actually thought about, with only the actions that make sense on the current
+  step. The step bar shows a red dot behind any step holding an error, so hiding
+  a section never hides a problem.
+
+  ⌘K is what makes that reasonable rather than obstructive: a palette over every
+  step, section, action, and example, matched as a subsequence so a rough guess
+  still lands. A status pill in the header morphs between idle, scanning, and
+  running, replacing a console column that was empty most of the time.
+
+  Motion throughout is for orientation, not decoration — the panel morphs height
+  and slides in the direction you moved, so going back reads as a return rather
+  than a fresh page. All of it degrades to instant under `prefers-reduced-motion`.
+
+- **The OS folder chooser**, on the folder button beside both path fields. The
+  browser cannot help here — `showDirectoryPicker()` hands back a handle with no
+  filesystem path, deliberately — but the server is a local process on the same
+  machine, so it opens the real dialog: `osascript` on macOS,
+  `FolderBrowserDialog` on Windows, `zenity` or `kdialog` on Linux. A machine
+  with none says so rather than leaving a button that does nothing, and the text
+  box has always worked and still does.
+
 - **`web` cargo feature**, on by default. `cargo install loopsmith
   --no-default-features` drops the whole async dependency tree.
 
@@ -79,13 +104,15 @@ command's behaviour.
 
 ### Notes
 
-- 173 tests in the CLI crate and 384 across the workspace, clippy clean, plus a
-  nine-case Playwright suite driving the real binary.
+- 175 tests in the CLI crate and 387 across the workspace, clippy clean, plus a
+  twelve-case Playwright suite driving the real binary.
 - New dependencies, both behind the `web` feature: `axum` and `tokio`. The
   WebSocket transport is `axum::extract::ws` — the same RFC6455 the browser
   speaks. The `websocket` crate was considered and rejected: it is published as
   `[deprecated]`, last updated 2024-03, and being synchronous it would need a
   second listener and a blocking thread pool alongside the axum server.
+- The frontend adds `motion` for the spring and layout transitions. It is the
+  only runtime dependency the UI has beyond React itself.
 
 ## [0.1.4] — 2026-08-18
 

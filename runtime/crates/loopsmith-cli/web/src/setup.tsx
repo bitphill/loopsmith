@@ -5,7 +5,62 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { Card, Field, Text, Select, Toggle, Note, Icon } from "./ui";
+import { Skeleton } from "./motion";
 import type { Detection, PathFacts, SecretStatus, SecretStore, Format, LoopConfig } from "./types";
+
+/**
+ * The folder icon, wired to the operating system's own chooser.
+ *
+ * The browser cannot help here — `showDirectoryPicker()` returns a handle with
+ * no filesystem path, by design — but the server is a local process on this
+ * machine, so it can open the real dialog. Typing an absolute path from memory
+ * was always the worst ask in this form.
+ *
+ * The text box keeps working regardless: a machine with no dialog (a bare Linux
+ * box with neither zenity nor kdialog) says so rather than leaving a button
+ * that does nothing.
+ */
+export function PickFolder({
+  startIn, onPick, label = "Browse for a folder",
+}: {
+  startIn?: string;
+  onPick: (path: string) => void;
+  label?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const open = async () => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const res = await api.pickFolder(startIn);
+      if (res.path) onPick(res.path);
+      else if (res.unavailable) setProblem(res.unavailable);
+      // Neither: the dialog was cancelled, which needs no comment.
+    } catch (e) {
+      setProblem((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn-icon shrink-0"
+        onClick={open}
+        disabled={busy}
+        aria-label={label}
+        title={label}
+      >
+        {busy ? Icon.refresh({ size: 15 }) : Icon.folder({ size: 15 })}
+      </button>
+      {problem && <p className="hint mt-1 w-full text-warn">{problem}</p>}
+    </>
+  );
+}
 
 /* --- where the loop lives ------------------------------------------------ */
 
@@ -36,11 +91,20 @@ export function Location({
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Field label="Folder" hint="Where the loop and its state will live. `~` works." required wide>
+        <Field
+          label="Folder"
+          hint="Pick one with the folder button, or type a path. `~` works."
+          required
+          wide
+        >
           {(id) => (
-            <div className="flex gap-2">
-              <span className="mt-2 shrink-0 text-faint">{Icon.folder({ size: 15 })}</span>
-              <Text id={id} mono value={path} onChange={onPath} placeholder="~/loops/blog-pipeline" invalid={!!facts && !facts.writable} />
+            <div className="flex items-start gap-2">
+              {/* min-w-0 lets the input actually shrink; without it the flex
+                  base size wins and the button is pushed to the next line. */}
+              <div className="min-w-0 flex-1">
+                <Text id={id} mono value={path} onChange={onPath} placeholder="~/loops/blog-pipeline" invalid={!!facts && !facts.writable} />
+              </div>
+              <PickFolder startIn={path || undefined} onPick={onPath} label="Choose the folder for this loop" />
             </div>
           )}
         </Field>
@@ -281,7 +345,9 @@ export function Preflight({ detection, onRescan, scanning }: {
   if (!detection) {
     return (
       <Card title="This machine" summary="Checking what is installed…">
-        <p className="hint">Probing.</p>
+        <Skeleton ready={false} lines={4}>
+          <span />
+        </Skeleton>
       </Card>
     );
   }

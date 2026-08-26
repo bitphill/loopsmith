@@ -139,10 +139,15 @@ Starts a local server on `http://127.0.0.1:3000` and opens a tab. Everything the
 CLI does, done by clicking — with every field explained in place, for people who
 would rather not learn a schema before they learn whether the tool is useful.
 
+Six steps rather than one long form — Place, Power, Intent, Proof, Work, Ship —
+with only the actions that make sense on the step you are on, and `⌘K` to reach
+any step, section, action, or example directly.
+
 It probes the machine first, so nothing has to be typed from memory: agent CLIs
 on `PATH`, the Ollama models actually pulled, MCP servers already configured by
 your editor or desktop app, which API keys are set, and which sub-agents are
-installed. Found providers become one-click cards that prefill a working argv,
+installed. The folder button beside either path field opens your operating
+system's own folder chooser, so no absolute path has to be typed at all. Found providers become one-click cards that prefill a working argv,
 and a **Test** button puts one real prompt through a provider so a wrong flag
 surfaces now rather than in iteration four of an unattended run.
 

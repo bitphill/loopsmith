@@ -64,6 +64,10 @@ export const Icon = {
   terminal: (p: IconProps = {}) => svg(<><path d="m4 17 6-5-6-5M12 19h8" /></>, p),
   download: (p: IconProps = {}) => svg(<><path d="M12 3v12M7 11l5 5 5-5M4 21h16" /></>, p),
   stop: (p: IconProps = {}) => svg(<rect x="6" y="6" width="12" height="12" rx="2" />, p),
+  target: (p: IconProps = {}) => svg(<><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3.5" /></>, p),
+  graph: (p: IconProps = {}) => svg(<><circle cx="5" cy="6" r="2.2" /><circle cx="5" cy="18" r="2.2" /><circle cx="18" cy="12" r="2.2" /><path d="M7 7.2 15.9 11M7 16.8 15.9 13" /></>, p),
+  command: (p: IconProps = {}) => svg(<path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" />, p),
+  panel: (p: IconProps = {}) => svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>, p),
 };
 
 /* --- info popover -------------------------------------------------------- */

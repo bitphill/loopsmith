@@ -24,6 +24,7 @@ pub mod detect;
 pub mod examples;
 pub mod exec;
 pub mod help;
+pub mod picker;
 pub mod secrets;
 pub mod ws;
 
