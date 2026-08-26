@@ -4,6 +4,39 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-08-27
+
+Release plumbing. No change to the binary's behaviour.
+
+### Changed
+
+- **Publishing moved off a laptop and into the release workflow, with no stored
+  tokens anywhere.** All three registries now authenticate by identity rather
+  than by a secret: GitHub mints a short-lived OIDC token for the workflow run,
+  the registry verifies it came from this repository and this workflow, and
+  issues a credential that expires in minutes.
+
+  That retires `CARGO_REGISTRY_TOKEN`, `NPM_TOKEN` and `PYPI_TOKEN` — three
+  long-lived credentials that sat in plaintext in a shell profile readable by
+  every process running as that user, never expired, and would have let anyone
+  holding the string publish as the maintainer indefinitely.
+
+- **npm packages are published with provenance.** A Sigstore attestation binds
+  the tarball to the exact commit and workflow run that produced it, which npm
+  shows as a verified build badge. It is the answer to the question supply-chain
+  scanners are actually asking when they fall back to counting downloads: does
+  the code on the registry match the code in the repository?
+
+- **The crates.io publish retries on index propagation.** Publishing 0.2.1 by
+  hand, `loopsmith-provider` failed because `loopsmith-util` had been accepted
+  but was not yet visible to its verification build. It succeeded unchanged on a
+  second attempt. Already-published is now treated as success too, so re-running
+  a partially-completed release does not fall over on the crates that got
+  through.
+
+- **`author` is set on all three packages** — missing entirely from npm, and a
+  bare handle on crates.io.
+
 ## [0.2.1] — 2026-08-27
 
 Patch. One user-visible bug in `loopsmith web`, no behaviour change anywhere else.

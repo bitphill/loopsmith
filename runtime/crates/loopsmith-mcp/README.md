@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.2/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
   <h1>loopsmith-mcp</h1>
   <p><em>Local stdio MCP server exposing loopsmith memory, gate, and graph to any MCP client.</em></p>
 </div>
