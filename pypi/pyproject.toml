@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # `loopsmith` on PyPI was already registered by an unrelated project, so the
 # distribution is `loopsmith-cli`. The installed command is `loopsmith`.
 name = "loopsmith-cli"
-version = "0.1.4"
+version = "0.2.0"
 description = "Self-evolving agent loops behind a deterministic verification gate. Installs the prebuilt Rust binary as `loopsmith`."
 readme = "README.md"
 license = "MIT"

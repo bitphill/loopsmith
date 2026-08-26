@@ -1,0 +1,267 @@
+# Build a small game in Godot that someone would actually finish and share.
+#
+# "Viral" is not a gate. What is gateable: does it build, does it run headless
+# without errors, is the first playable moment under thirty seconds, and does a
+# playtester who has never seen it reach the end. Those four are what "shareable"
+# decomposes into, and unlike virality they are checkable.
+
+name: viral-game-loop
+version: 0.1.0
+description: >
+  Build, test, and package a small Godot game around one mechanic, gated on
+  build health, time-to-first-play, and a cold playtest.
+
+information:
+  - key: idea
+    value: >
+      Replace with one sentence: the single mechanic, and the twist on it. If it
+      takes two sentences, it is two games.
+  - key: engine
+    value: "Godot 4.x — https://github.com/godotengine/godot, installed locally"
+    note: The engine runs on this machine. Nothing here uploads a build anywhere.
+  - key: shareability_rule
+    value: >
+      A player reaches something worth screenshotting within 30 seconds of first
+      input, and the whole game is finishable in under 5 minutes.
+  - key: export_dir
+    value: build/
+  - key: publish_notes
+    value: docs/publishing.md
+    note: >
+      Where and how to publish, written as a checklist for a human. The loop
+      writes the checklist; it does not publish.
+
+pre_execution:
+  - step: Built and exported a Godot hello-world on this machine
+    done: false
+    evidence: the export path
+  - step: Played three games in the target genre and wrote down what made each shareable
+    done: false
+    evidence: docs/references.md
+  - step: Prototyped the core mechanic by hand and confirmed it is fun for 60 seconds
+    done: false
+
+goals:
+  - name: builds
+    description: The project builds and exports headlessly with no errors.
+    priority: 1
+  - name: playable
+    description: >
+      The game runs, the core mechanic works, and the first interesting moment
+      arrives inside the stated window.
+    depends_on: [builds]
+    priority: 2
+  - name: shareable
+    description: >
+      A cold playtester finishes it and can say what the game is in one sentence.
+    depends_on: [playable]
+    priority: 3
+  - name: publishable
+    description: A publishing checklist exists that a human can follow.
+    depends_on: [playable]
+    priority: 3
+
+validations:
+  - target: builds
+    name: exports-clean
+    mode: objective
+    statement: A headless export exits zero.
+    detector: { type: script, command: scripts/godot-export.sh, expect_exit: 0 }
+  - target: builds
+    name: no-script-errors
+    mode: objective
+    statement: The headless run logs no script errors.
+    detector: { type: script, command: scripts/godot-check.sh, expect_exit: 0 }
+  - target: playable
+    name: time-to-first-play
+    mode: objective
+    statement: Seconds from first input to the first scoring moment is under the window.
+    detector: { type: threshold, metric: seconds_to_first_play, op: lt, value: 30 }
+  - target: playable
+    name: completable
+    mode: objective
+    statement: An automated playthrough reaches the end state.
+    detector: { type: script, command: scripts/godot-playthrough.sh, expect_exit: 0 }
+  - target: shareable
+    name: cold-read
+    mode: subjective
+    statement: >
+      Someone who has never seen this game can say what it is in one sentence
+      after watching thirty seconds of it.
+    detector: { type: judge, standard: "the shareability_rule stated in this config, and docs/references.md", min_score: 7 }
+  - target: publishable
+    name: checklist-exists
+    mode: objective
+    statement: A publishing checklist exists.
+    detector: { type: file_exists, path: docs/publishing.md, non_empty: true }
+  - target: overall
+    name: assets-licensed
+    mode: objective
+    statement: Every asset has a recorded licence permitting distribution.
+    detector: { type: script, command: scripts/check-licences.sh, expect_exit: 0 }
+
+success:
+  - target: overall
+    name: ready-to-publish
+    mode: percentage
+    statement: Every blocking check passes, including asset licensing.
+    threshold: 1.0
+
+stop_gates:
+  max_iterations: 15
+  max_revisions_per_node: 4
+  max_wall_clock_seconds: 14400
+  max_tokens: 4000000
+  max_cost_usd: 15.0
+  no_progress_iterations: 4
+  no_progress_iterations_randomness: 2
+  stop_on_overall_success: true
+
+schedules:
+  - { type: manual }
+  - { type: file_change, path: scenes/ }
+
+constraints:
+  global:
+    rules:
+      - One mechanic. A second mechanic is a second game; write it down and do not build it.
+      - Every asset must be original or carry a licence permitting distribution. Record the licence next to the asset.
+      - Never commit a binary export to git. Exports go to build/, which is ignored.
+      - Never publish, upload, or post anything. The loop writes the checklist; a human follows it.
+      - If the game is not fun in the first thirty seconds, cut content rather than adding it.
+      - Never git stash. Never git reset.
+    forbidden_paths: [".git/", "build/"]
+    forbidden_commands: ["git push", "rm -rf", "butler push"]
+    max_seconds: 1800
+    human_checkpoint:
+      - publishing or uploading a build anywhere
+      - adding an asset whose licence you cannot name
+
+execution_guidelines:
+  items:
+    - name: prototype
+      guideline: >
+        Get the core mechanic working and nothing else. No menus, no art, no
+        sound. If the mechanic is not fun as a grey box, art will not save it.
+    - name: build-out
+      guideline: >
+        Add exactly what the mechanic needs to be finishable: the loop, the end
+        state, and the feedback that makes progress legible.
+    - name: polish
+      guideline: >
+        Cut and tighten. In this phase the only additions allowed are ones that
+        reduce time-to-first-play.
+    - name: package
+      guideline: >
+        Export, check licences, and write the publishing checklist for a human.
+        Publish nothing.
+  dependency:
+    - prototype -> build-out -> polish -> package
+
+default_skills: []
+
+graph:
+  nodes:
+    - id: prototype
+      role: builder
+      instruction: >
+        Implement the core mechanic as a grey-box scene. No art, no menus. It must
+        run headlessly and be playable with one input.
+      goals: [builds, playable]
+      stage: prototype
+      isolated: true
+      weight: 4.0
+    - id: build-out
+      role: builder
+      instruction: >
+        Add the game loop, the end state, and the feedback that makes progress
+        visible. Keep it finishable in five minutes.
+      depends_on: [prototype]
+      goals: [playable]
+      stage: build-out
+      isolated: true
+      weight: 4.0
+    - id: measure
+      role: researcher
+      instruction: >
+        Run the headless playthrough, measure seconds_to_first_play, and write it
+        to metrics.json along with the playthrough result.
+      depends_on: [build-out]
+      goals: [playable]
+      stage: polish
+      tier: cheap
+      weight: 1.0
+    - id: polish
+      role: builder
+      instruction: >
+        Cut whatever delays the first interesting moment. Add nothing that does
+        not reduce it.
+      depends_on: [measure]
+      goals: [shareable]
+      stage: polish
+      isolated: true
+      weight: 2.0
+    - id: playtest
+      role: judge
+      instruction: >
+        Watch the recorded playthrough cold. Say in one sentence what the game is,
+        then report whether that sentence is interesting. Quote the moment the
+        game became legible, or say it never did.
+      depends_on: [polish]
+      goals: [shareable]
+      stage: polish
+      tier: strong
+      provider: openai
+    - id: package
+      role: builder
+      instruction: >
+        Export to build/, verify every asset's licence, and write docs/publishing.md
+        as a checklist a human can follow. Publish nothing.
+      depends_on: [playtest]
+      goals: [publishable]
+      stage: package
+      weight: 1.0
+  concurrency:
+    mode: auto
+    cap: 4
+    min_marginal_gain: 0.05
+
+providers:
+  providers:
+    - id: ollama
+      kind: ollama
+      tiers: [cheap]
+      command: ollama
+      args: ["run", "{model}"]
+      model: qwen2.5-coder
+      prompt_on_stdin: true
+      timeout_seconds: 600
+    - id: claude
+      kind: claude_code
+      tiers: [standard]
+      command: claude
+      args: ["-p", "{prompt}"]
+      timeout_seconds: 1800
+    - id: openai
+      kind: openai
+      tiers: [strong]
+      command: curl
+      args: ["-sS", "https://api.openai.com/v1/chat/completions", "-H", "Content-Type: application/json", "-H", "Authorization: Bearer $OPENAI_API_KEY", "-d", "@-"]
+      model: gpt-4o
+      requires_env: [OPENAI_API_KEY]
+      prompt_on_stdin: true
+      timeout_seconds: 600
+  cascade:
+    cheap: [ollama, claude]
+    standard: [claude]
+    strong: [openai, claude]
+  enforce_judge_independence: true
+
+skills:
+  acquisition_order: [installed, marketplace, generate]
+  explore: true
+  explore_candidates: ["frontend-design", "prototype"]
+  min_trials: 3
+
+context:
+  carry_summaries: 2

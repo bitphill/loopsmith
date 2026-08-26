@@ -4,6 +4,89 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-08-26
+
+Adds a browser UI. No change to the config model, the gate, or any existing
+command's behaviour.
+
+### Added
+
+- **`loopsmith --web` / `loopsmith web`** — a local browser UI for building,
+  checking, creating, and running loops. Both spellings resolve to one command;
+  `--web` combined with a subcommand is refused rather than silently resolved.
+  Serves `127.0.0.1:3000`, steps up a port if that one is busy, and opens a tab.
+
+  It exists for the reader `README-FOR-DUMMIES.md` was written for — the one who
+  bounced off a schema reference. Every field carries a permanent one-line hint
+  and an info control explaining *why the field exists and what goes wrong
+  without it*, and a dismissible five-panel tour explains the one idea the rest
+  depends on: that a model never certifies its own completion.
+
+  Three properties hold the design up. It binds loopback only, because it spawns
+  commands as this user. Every action spawns `current_exe()` rather than calling
+  the crates, so the browser cannot drift from the CLI and cannot do anything
+  `loopsmith --help` does not list — the browser names a verb from a closed list
+  and never names a program. And the frontend is compiled into the binary, so an
+  install from any registry has a working UI with nothing else to fetch.
+
+- **Machine detection.** Agent CLIs on `PATH` with their versions, Ollama models
+  via `ollama list`, MCP servers read from `~/.claude.json`,
+  `~/.claude/settings.json`, Claude Desktop, `~/.cursor/mcp.json`, VS Code and
+  `./.mcp.json`, which API keys are present (presence only — values are never
+  read), installed sub-agents, git, and the platform facts `doctor` reports.
+  Found CLIs become one-click provider cards prefilling a known-good argv;
+  entries whose argv is a starting point rather than verified say so on the card
+  instead of failing later as a spawn error.
+
+  A per-provider **Test** button performs a real handshake. It is a button and
+  not part of detection because a page load is not consent to spend money.
+
+- **Live review**, recomputed in-process on every edit: `loopsmith_core::validate`
+  issues with clickable field paths, the wave schedule and Amdahl ceiling from
+  `loopsmith_graph::plan`, parallel builders that would overwrite each other for
+  want of a worktree, the derived permission grant, and an upper-bound cost — or
+  the word **unbounded** where no ceiling is set.
+
+- **Secrets panel.** Writes to the shell profile (a real environment variable,
+  `0600`, inside a fenced block rewritten in place) or to the OS secret store —
+  Keychain, Credential Manager, libsecret. The profile file is chosen from
+  `$SHELL`, so a zsh login gets `.zshrc` rather than the `.profile` zsh never
+  reads. Only the key *name* ever reaches a config, via `requires_env`.
+
+- **The thirteen examples ship inside the binary** and load in one click.
+  `tools/sync-examples.sh` copies `config/examples/*.yaml` into the crate, since
+  `include_str!` cannot reach above the package root and `config/` is excluded
+  from the published tarball. A test fails when the copies have drifted, so a
+  stale example is caught by `cargo test` rather than by a user.
+
+- **The logo in the UI** — header, first-run tour, and favicon, all served from
+  the binary. `tools/sync-logo.sh` regenerates the crate's copy from
+  `assets/loopsmith-logo-256.png`, keying the flat background to alpha: the
+  published logo is RGB with no alpha, which is right for a README on GitHub and
+  renders as a white tile on the dark theme. The keying is stdlib Python —
+  flood-filled inward from the corners so the figure's own white highlights
+  survive, which a lightness threshold would punch holes in.
+
+- **`web` cargo feature**, on by default. `cargo install loopsmith
+  --no-default-features` drops the whole async dependency tree.
+
+### Fixed
+
+- `path_facts` reported an unwritable target whenever the parent directory did
+  not exist yet — the ordinary first-loop case, since `loopsmith new` creates the
+  whole chain. It now walks up to the first existing ancestor. This blocked the
+  Create button for exactly the newcomer the UI is for.
+
+### Notes
+
+- 173 tests in the CLI crate and 384 across the workspace, clippy clean, plus a
+  nine-case Playwright suite driving the real binary.
+- New dependencies, both behind the `web` feature: `axum` and `tokio`. The
+  WebSocket transport is `axum::extract::ws` — the same RFC6455 the browser
+  speaks. The `websocket` crate was considered and rejected: it is published as
+  `[deprecated]`, last updated 2024-03, and being synchronous it would need a
+  second listener and a blocking thread pool alongside the axum server.
+
 ## [0.1.4] — 2026-08-18
 
 Documentation only. No behaviour, no API, no config-model change.

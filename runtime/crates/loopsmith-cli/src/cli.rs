@@ -16,8 +16,43 @@ opinion: the dependency graph, the persistent ledger, and the gate that decides 
 goal is actually satisfied. Models supply judgment; this binary supplies the truth."
 )]
 pub struct Cli {
+    /// Start the browser UI. Identical to the `web` subcommand — both spellings
+    /// exist because `--web` is what people reach for and a subcommand is what
+    /// the rest of this grammar looks like. Neither is the "real" one.
+    #[arg(long, global = false)]
+    pub web: bool,
+
+    /// Absent when `--web` carries the invocation. Every other path requires
+    /// one, and [`Cli::resolve`] is where that requirement is enforced, so the
+    /// error message can name the flag instead of clap's generic complaint.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
+}
+
+impl Cli {
+    /// Collapse the two spellings into one command.
+    ///
+    /// `--web` and `web` mean exactly the same thing. Resolving here rather
+    /// than in `dispatch` keeps `dispatch` a pure match over `Command` and
+    /// leaves one place that knows the two spellings are the same.
+    pub fn resolve(self) -> Result<Command, String> {
+        match (self.web, self.command) {
+            (true, None) => Ok(Command::Web { port: None, no_open: false }),
+            // `loopsmith --web run loop.yaml` is a contradiction, not a
+            // shorthand. Refusing beats silently picking one.
+            (true, Some(_)) => Err(
+                "`--web` starts the browser UI and takes no subcommand. \
+                 Use `loopsmith web`, or drop `--web`."
+                    .into(),
+            ),
+            (false, Some(c)) => Ok(c),
+            (false, None) => Err(
+                "no command given. `loopsmith --help` lists them; `loopsmith web` \
+                 opens the browser UI if you would rather click than type."
+                    .into(),
+            ),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -153,6 +188,20 @@ pub enum Command {
     Mcp {
         #[arg(long, default_value = "state")]
         state: PathBuf,
+    },
+    /// Build, run, and watch loops from a browser. Same thing as `--web`.
+    ///
+    /// Everything this binary does from a terminal, done by clicking: pick a
+    /// provider it found on this machine, fill the A–J config with every field
+    /// explained in place, and press a button. Binds to localhost only.
+    Web {
+        /// Port to serve on. Defaults to 3000, and steps up one at a time
+        /// until a free port is found rather than failing on a busy one.
+        #[arg(long)]
+        port: Option<u16>,
+        /// Print the URL instead of opening a browser tab.
+        #[arg(long)]
+        no_open: bool,
     },
 }
 

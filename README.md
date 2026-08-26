@@ -34,7 +34,8 @@ deterministic checker reads the actual files and decides — and it can revoke, 
 a goal that stops being true stops being satisfied.
 
 **Not a developer?** You don't need to be. Marketing, sales, research, ops — if
-you can edit a text file, you can run a loop.
+you can edit a text file, you can run a loop. And if you would rather not open a
+text file at all, `loopsmith --web` builds one for you in a browser.
 
 ### ➜ [START-HERE — README-FOR-DUMMIES.md](README-FOR-DUMMIES.md)
 
@@ -125,6 +126,55 @@ release mode, puts the binary in `~/.loopsmith/bin/loopsmith`, and symlinks
 The eight libraries behind the binary — `loopsmith-util`, `-core`, `-memory`,
 `-graph`, `-gate`, `-provider`, `-skills`, `-mcp` — are published on crates.io
 too. They compile automatically as dependencies and need no separate install.
+
+---
+
+## The browser UI
+
+```bash
+loopsmith --web        # or: loopsmith web
+```
+
+Starts a local server on `http://127.0.0.1:3000` and opens a tab. Everything the
+CLI does, done by clicking — with every field explained in place, for people who
+would rather not learn a schema before they learn whether the tool is useful.
+
+It probes the machine first, so nothing has to be typed from memory: agent CLIs
+on `PATH`, the Ollama models actually pulled, MCP servers already configured by
+your editor or desktop app, which API keys are set, and which sub-agents are
+installed. Found providers become one-click cards that prefill a working argv,
+and a **Test** button puts one real prompt through a provider so a wrong flag
+surfaces now rather than in iteration four of an unattended run.
+
+The right-hand panel re-checks the draft on every keystroke — the same validator,
+planner, and permission derivation the CLI uses, in-process:
+
+- every problem, with the field it belongs to, clickable
+- what a run could cost at the ceilings currently set, or **unbounded** if none is
+- the wave schedule, the longest chain, and the Amdahl ceiling no worker count beats
+- the exact permission grant the loop will need
+- parallel builders that would overwrite each other for want of a worktree
+
+All thirteen examples are compiled into the binary and load with one click, which
+is the fastest way to read a working config with the explanations attached. The
+buttons — check, plan, create, dry run, run, watch, install schedule, grant
+permissions — spawn the real `loopsmith` binary and stream its output live, so the
+browser can never drift from the CLI and can never do anything `loopsmith --help`
+does not list.
+
+API keys go to your shell profile or your operating system's secret store,
+whichever you pick. Only the *name* is ever written into a config, which is the
+same rule `requires_env` has always had.
+
+| | |
+|---|---|
+| Binds to | `127.0.0.1` only, never a network interface |
+| Port | 3000, stepping up if it is busy — `--port` to choose |
+| Runs | by spawning this same binary, never by reimplementing it |
+| Needs | nothing installed; the whole UI is compiled in |
+
+Build without it — dropping the async dependency tree entirely — with
+`cargo install loopsmith --no-default-features`.
 
 ---
 

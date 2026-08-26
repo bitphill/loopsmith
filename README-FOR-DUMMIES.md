@@ -2,7 +2,7 @@
   <img src="assets/loopsmith-logo-512.png" alt="loopsmith logo" width="140" />
   <h1>loopsmith, for people who don't code</h1>
   <p><em>Hand a repeating job to an AI. Let a checker — not the AI — decide when it's actually done.</em></p>
-  <p><a href="#what-people-use-it-for">Uses</a> · <a href="#install-pick-one-line">Install</a> · <a href="#the-whole-idea-in-one-picture">The idea</a> · <a href="#your-first-loop-in-four-commands">First loop</a> · <a href="#the-six-things-you-edit">What to edit</a> · <a href="#put-it-on-a-schedule">Schedule</a></p>
+  <p><a href="#what-people-use-it-for">Uses</a> · <a href="#install-pick-one-line">Install</a> · <a href="#the-easy-way-do-it-all-in-a-browser">Browser</a> · <a href="#the-whole-idea-in-one-picture">The idea</a> · <a href="#your-first-loop-in-four-commands">First loop</a> · <a href="#the-six-things-you-edit">What to edit</a> · <a href="#put-it-on-a-schedule">Schedule</a></p>
 </div>
 
 ---
@@ -18,7 +18,8 @@ passes. It can run for weeks without you.
 The important part: **the AI never gets to say "done".** A separate checker
 looks at the actual files and decides. That's why you can leave it alone.
 
-You do not need to code. You edit one text file.
+You do not need to code. You edit one text file — or you don't even do that,
+and use [the browser version](#the-easy-way-do-it-all-in-a-browser) instead.
 
 ---
 
@@ -112,6 +113,57 @@ loopsmith providers loop.md
 ```
 
 Anything marked `available` is enough to start.
+
+---
+
+## The easy way: do it all in a browser
+
+One command. It opens a tab and you fill in a form.
+
+```bash
+loopsmith --web
+```
+
+That's it. No text files, no YAML, nothing to memorise. What you get:
+
+**It looks at your computer first.** Before you type anything, it finds the AI
+tools you already have installed, the local models you've downloaded, and the
+keys you've already set. Anything it finds becomes a button — click it and that
+part is configured.
+
+**Every single box is explained.** Under each one is a plain sentence saying what
+it's for. Next to the ones where the honest advice isn't obvious, there's an ⓘ
+that tells you *why the box exists* and what goes wrong if you get it wrong. You
+are not expected to know any of this in advance.
+
+**Thirteen finished loops, one click each.** Down the left is the same list from
+[the table above](#what-people-use-it-for). Click **Load** on the closest one and
+every box fills in with a real working answer. Change the bits that are about
+your job. This is far easier than starting from nothing, and it's the fastest way
+to understand what a loop actually is.
+
+**It tells you what a run would cost — before you run it.** The panel on the
+right updates as you type. It shows what's still wrong, what the job could cost
+at the limits you've set, and says **unbounded** in plain language if you haven't
+set any. Believe it when it does.
+
+**Nothing happens until you press a button.** Filling in the form changes
+nothing. There's a **Dry run** that walks through the entire job without calling
+an AI or spending a penny — use it as much as you like. The buttons that do cost
+money say so and ask first.
+
+**Your API keys never go in a file.** Paste one in and it's saved to your
+computer the way your other programs expect, or into your Mac's Keychain if you
+prefer. The loop file only ever records the *name* of the key, never the key.
+
+Two things worth knowing:
+
+- It only listens on your own machine. Nobody else can reach it, not even on your
+  own wifi.
+- Leave the terminal window open while you use it. Closing it stops the server.
+  Press `Ctrl` and `C` together when you're finished.
+
+If port 3000 is already busy it quietly uses 3001, and tells you which one.
 
 ---
 

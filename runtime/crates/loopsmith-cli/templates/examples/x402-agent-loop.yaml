@@ -1,0 +1,276 @@
+# An agent that can pay for things, within a hard cap.
+#
+# Read this section before running anything here.
+#
+# This loop moves real money. Two postures are supported and you choose one by
+# editing `constraints.global.human_checkpoint`:
+#
+#   SUPERVISED (as shipped) — "authorising any payment" is in human_checkpoint,
+#   so every transfer stops for a person. Start here. Run it for a week and read
+#   what it wanted to buy.
+#
+#   AUTONOMOUS — remove that one line. The agent then pays without asking, and
+#   the only thing between it and your balance is `max_cost_usd`, the funded
+#   float, and the merchant allowlist. Do this only when you have watched enough
+#   supervised runs to predict its decisions, and only with a float you would be
+#   willing to lose outright.
+#
+# In both postures: the spending account is a dedicated float, never a primary
+# wallet, and the private key lives in an environment variable that loopsmith
+# checks for presence and never reads.
+
+name: x402-agent-loop
+version: 0.1.0
+description: >
+  Pursue a goal that requires paying for services or delegating work, using x402
+  payments from a funded float under a hard spend cap.
+
+information:
+  - key: objective
+    value: >
+      Replace with the outcome worth paying for. Be specific about what "done"
+      buys you — this loop will spend money pursuing it.
+  - key: float_usd
+    value: "25.00"
+    note: >
+      The dedicated account's balance. Fund it with what you would accept losing.
+      Never point this at a primary wallet.
+  - key: spend_cap_usd
+    value: "20.00"
+    note: >
+      Enforced by stop_gates.max_cost_usd as well, so the gate stops the run even
+      if a merchant's accounting disagrees.
+  - key: merchant_allowlist
+    value: out/merchants.json
+    note: >
+      Services this agent may pay. A merchant not on this list is not payable,
+      however good the offer looks.
+  - key: delegation_venues
+    value: "https://rentahuman.ai/for-agents"
+    note: Where work can be delegated to a human when the agent cannot do it itself.
+  - key: ledger_path
+    value: out/payments.json
+    note: Every payment with amount, merchant, what it bought, and the outcome.
+
+pre_execution:
+  - step: Funded a dedicated float account and confirmed the balance
+    done: false
+    evidence: the account id and its balance, not the key
+  - step: Paid one merchant by hand through x402 and kept the receipt
+    done: false
+  - step: Wrote the merchant allowlist and justified each entry
+    done: false
+    evidence: out/merchants.json
+  - step: Decided the posture — supervised or autonomous — and edited human_checkpoint to match
+    done: false
+
+goals:
+  - name: planned
+    description: >
+      A plan exists stating what will be bought or delegated, from whom, at what
+      price, and what it is expected to produce.
+    priority: 1
+  - name: spent-well
+    description: >
+      Every payment is to an allowlisted merchant, within the cap, and recorded
+      with what it bought.
+    depends_on: [planned]
+    priority: 1
+  - name: objective-met
+    description: The stated objective is achieved and independently checkable.
+    depends_on: [spent-well]
+    priority: 2
+
+validations:
+  - target: planned
+    name: plan-exists
+    mode: objective
+    statement: A spend plan exists before any payment.
+    detector: { type: file_exists, path: out/plan.md, non_empty: true }
+  - target: spent-well
+    name: allowlist-only
+    mode: objective
+    statement: Every payment went to a merchant on the allowlist.
+    detector: { type: script, command: scripts/check-merchants.sh, expect_exit: 0 }
+  - target: spent-well
+    name: under-cap
+    mode: objective
+    statement: Total spend is at or under the cap.
+    detector: { type: threshold, metric: total_spend_usd, op: lte, value: 20.0 }
+  - target: spent-well
+    name: every-payment-recorded
+    mode: objective
+    statement: Every payment has an amount, a merchant, and what it bought.
+    detector: { type: script, command: scripts/check-payments.sh, expect_exit: 0 }
+  - target: spent-well
+    name: no-unapproved-transfers
+    mode: objective
+    statement: No transfer occurred outside the recorded payment ledger.
+    detector: { type: script, command: scripts/reconcile-balance.sh, expect_exit: 0 }
+  - target: objective-met
+    name: deliverable-exists
+    mode: objective
+    statement: The objective produced an artifact.
+    detector: { type: file_exists, path: out/result.md, non_empty: true }
+  - target: overall
+    name: value-for-money
+    mode: subjective
+    statement: >
+      Each payment bought what the plan said it would. A payment that produced
+      nothing is a failure even if it was small and allowlisted.
+    detector: { type: judge, standard: "out/plan.md, compared line by line against out/payments.json", min_score: 8 }
+
+success:
+  - target: overall
+    name: objective-achieved-within-budget
+    mode: percentage
+    statement: Every blocking check passes, including reconciliation.
+    threshold: 1.0
+
+stop_gates:
+  max_iterations: 8
+  max_revisions_per_node: 3
+  max_wall_clock_seconds: 7200
+  max_tokens: 2000000
+  # This is the hard financial ceiling. The gate stops the run here regardless of
+  # what any merchant or node claims about the balance.
+  max_cost_usd: 20.0
+  no_progress_iterations: 3
+  no_progress_iterations_randomness: 2
+  stop_on_overall_success: true
+
+schedules:
+  - { type: manual }
+
+constraints:
+  global:
+    rules:
+      - Pay only merchants on the allowlist. An offer from anywhere else is declined, not evaluated.
+      - Never exceed the per-payment ceiling or the run cap. Stop and report instead.
+      - Record every payment before making the next one.
+      - The private key is read from the environment by the payment tool. Never print it, log it, or pass it as an argument.
+      - Never move funds between accounts. This agent spends from one float and nothing else.
+      - Never accept a payment, and never take custody of anyone else's funds.
+      - When delegating to a human, state plainly that the requester is an automated agent.
+      - Reconcile the balance against the payment ledger every iteration. A discrepancy halts the run.
+    forbidden_paths: [".git/", "~/.ssh/", "~/.config/"]
+    forbidden_commands: ["git push", "rm -rf", "env", "printenv"]
+    max_seconds: 900
+    human_checkpoint:
+      # ── SUPERVISED POSTURE (as shipped) ───────────────────────────────────
+      # Remove the next line, and only that line, to run autonomously.
+      - authorising any payment
+      # ── Always required, in both postures ─────────────────────────────────
+      - adding a merchant to the allowlist
+      - raising the spend cap or the float
+      - delegating work that involves anyone's personal data
+
+execution_guidelines:
+  items:
+    - name: plan
+      guideline: >
+        Decide what to buy or delegate, from which allowlisted merchant, at what
+        price, and what it should produce. Spend nothing in this phase. A plan
+        that cannot name the expected artifact is not a plan.
+    - name: execute
+      guideline: >
+        Buy or delegate exactly what the plan named. Record each payment before
+        starting the next. If a price differs from the plan, stop and re-plan
+        rather than paying the difference.
+    - name: verify
+      guideline: >
+        Check what the money bought against what the plan expected, and reconcile
+        the balance. Spend nothing here.
+  dependency:
+    - plan -> execute -> verify
+
+default_skills: []
+
+graph:
+  nodes:
+    - id: plan-spend
+      role: manager
+      instruction: >
+        Write out/plan.md: what to buy or delegate, from which allowlisted
+        merchant, the price, and the artifact it should produce. Include the
+        cheapest option you rejected and why.
+      goals: [planned]
+      stage: plan
+      tier: strong
+      weight: 2.0
+    - id: challenge-plan
+      role: adversary
+      instruction: >
+        Argue that each planned payment is unnecessary, overpriced, or will not
+        produce the named artifact. Anything you cannot defend against gets cut
+        from the plan.
+      depends_on: [plan-spend]
+      goals: [planned]
+      stage: plan
+      tier: strong
+      provider: openai
+      weight: 1.0
+    - id: execute
+      role: builder
+      instruction: >
+        Carry out the plan: pay allowlisted merchants or delegate to a human
+        venue, declaring that you are an automated agent. Record each payment in
+        out/payments.json before starting the next. Write total_spend_usd to
+        metrics.json.
+      depends_on: [challenge-plan]
+      goals: [spent-well, objective-met]
+      stage: execute
+      isolated: true
+      weight: 4.0
+    - id: reconcile
+      role: judge
+      instruction: >
+        Compare out/payments.json against the account balance and out/plan.md.
+        Report per-payment whether it was allowlisted, within the ceiling, and
+        produced what the plan expected. A discrepancy is a fail.
+      depends_on: [execute]
+      goals: [spent-well]
+      stage: verify
+      tier: strong
+      provider: openai
+  concurrency:
+    mode: sequential
+
+providers:
+  providers:
+    - id: ollama
+      kind: ollama
+      tiers: [cheap]
+      command: ollama
+      args: ["run", "{model}"]
+      model: qwen2.5-coder
+      prompt_on_stdin: true
+      timeout_seconds: 600
+    - id: claude
+      kind: claude_code
+      tiers: [standard, strong]
+      command: claude
+      args: ["-p", "{prompt}"]
+      timeout_seconds: 1800
+    - id: openai
+      kind: openai
+      tiers: [strong]
+      command: curl
+      args: ["-sS", "https://api.openai.com/v1/chat/completions", "-H", "Content-Type: application/json", "-H", "Authorization: Bearer $OPENAI_API_KEY", "-d", "@-"]
+      model: gpt-4o
+      requires_env: [OPENAI_API_KEY, X402_ACCOUNT_KEY]
+      prompt_on_stdin: true
+      timeout_seconds: 600
+  cascade:
+    cheap: [ollama, claude]
+    standard: [claude]
+    strong: [openai, claude]
+  enforce_judge_independence: true
+
+skills:
+  acquisition_order: [installed]
+  require_human_promotion: true
+  min_trials: 3
+
+context:
+  carry_summaries: 3

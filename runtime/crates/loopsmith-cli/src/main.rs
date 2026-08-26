@@ -11,13 +11,20 @@ mod permissions;
 mod run;
 mod scaffold;
 mod schedule;
+#[cfg(feature = "web")]
+mod web;
 mod worktree;
 
 use clap::Parser;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    match cmd::dispatch(cli::Cli::parse()) {
+    // `resolve` collapses `--web` and the `web` subcommand into one value, so
+    // everything downstream sees a single `Command` and neither spelling is
+    // privileged. Its errors are the same shape as a command's, so they take
+    // the same exit path.
+    let result = cli::Cli::parse().resolve().and_then(cmd::dispatch);
+    match result {
         Ok(code) => code,
         Err(e) => {
             eprintln!("error: {e}");
