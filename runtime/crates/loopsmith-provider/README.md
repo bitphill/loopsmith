@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.0/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
   <h1>loopsmith-provider</h1>
   <p><em>Provider routing for loopsmith: Claude Code, Ollama, Grok, OpenAI, Gemini, Hermes, MCP, and any BYOK command.</em></p>
 </div>

@@ -4,6 +4,26 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-08-27
+
+Patch. One user-visible bug in `loopsmith web`, no behaviour change anywhere else.
+
+### Fixed
+
+- **`--port` no longer claims a free port was busy.** Starting the web UI with
+  an explicit port printed `(port 3210 was busy)` even when nothing was using
+  3210 and the server had bound it on the first attempt. The condition fired
+  whenever the bound port differed from the 3000 default, which is true of every
+  custom port by definition.
+
+  That is worse than printing nothing, because it sends someone looking for a
+  port conflict that does not exist. The decision is now a named function with
+  all four cases pinned by a test: the default taken as asked, a custom port
+  that was free, and each of the two ways of genuinely stepping past a busy one.
+
+  Found by running the published 0.2.0 binary rather than a local build, which
+  is the only reason it was caught at all.
+
 ## [0.2.0] — 2026-08-26
 
 ### Security

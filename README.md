@@ -8,7 +8,7 @@
     <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" /></a>
     <img alt="rust" src="https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white" />
     <img alt="platforms" src="https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A" />
-    <img alt="tests" src="https://img.shields.io/badge/tests-327%20passing-2A5A8A" />
+    <img alt="tests" src="https://img.shields.io/badge/tests-402%20passing-2A5A8A" />
   </p>
   <p>
     <a href="https://crates.io/crates/loopsmith"><img alt="crates.io" src="https://img.shields.io/crates/v/loopsmith?logo=rust&logoColor=white&label=crates.io&color=e6522c" /></a>

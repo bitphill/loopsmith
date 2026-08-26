@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.0/assets/loopsmith-logo-256.png" alt="loopsmith" width="180" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="180" />
   <h1>loopsmith</h1>
   <p><em>Self-evolving agent loops. The gate is code, so "done" cannot be argued.</em></p>
 </div>
@@ -37,9 +37,10 @@ deterministic checker reads the actual files and decides — and it can revoke, 
 a goal that stops being true stops being satisfied.
 
 **Not a developer?** Marketing, sales, research, ops — if you can edit a text
-file, you can run a loop.
+file, you can run a loop. And if you would rather not open a text file at all,
+`loopsmith --web` builds one for you in a browser.
 
-### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.2.0/README-FOR-DUMMIES.md)
+### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.2.1/README-FOR-DUMMIES.md)
 
 A plain-English guide: one install line, thirteen ready-made loops to copy, the
 six settings you actually edit, and how to leave it running on a schedule.
@@ -61,6 +62,44 @@ One rule holds the whole design up:
 `goal_satisfied` is written by a deterministic Rust gate and by nothing else, and
 the gate can **revoke**: delete a required artifact and a satisfied goal flips
 back. A system that can only promote is a burndown chart with extra steps.
+
+## The browser UI
+
+```bash
+loopsmith --web        # or: loopsmith web
+```
+
+Serves `http://127.0.0.1:3000` and opens a tab. Everything the CLI does, done by
+clicking — with every field explained in place, for people who would rather not
+learn a schema before they learn whether the tool is useful.
+
+Six steps rather than one long form — Place, Power, Intent, Proof, Work, Ship —
+carrying only the actions that make sense on each, and `⌘K` to reach any step,
+section, action, or example directly.
+
+It probes the machine first, so nothing has to be typed from memory: agent CLIs
+on `PATH`, the Ollama models actually pulled, MCP servers already configured by
+your editor, which API keys are set, and which sub-agents are installed. Found
+CLIs become one-click provider cards prefilling a working argv, and a **Test**
+button puts one real prompt through a provider so a wrong flag surfaces now
+rather than in iteration four of an unattended run. The folder button opens your
+operating system's own folder chooser, so no path has to be typed at all.
+
+The right-hand panel re-checks the draft on every keystroke — the same validator,
+planner, and permission derivation the CLI uses, in-process: every problem with
+the field it belongs to, what a run could cost at the ceilings currently set (or
+**unbounded** if none is), the wave schedule and the speedup ceiling no worker
+count beats, and parallel builders that would overwrite each other.
+
+All thirteen examples are compiled into the binary and load with one click. The
+buttons spawn the real `loopsmith` binary and stream its output live, so the
+browser can never drift from the CLI and can never do anything `loopsmith --help`
+does not list. A run belongs to the server, not the page: close the tab and it
+keeps going, reopen and the log picks up from the start.
+
+Binds loopback only, and refuses any request not addressed to it. API keys go to
+your shell profile or your OS secret store — only the variable *name* is ever
+written into a config.
 
 ## Five minutes
 

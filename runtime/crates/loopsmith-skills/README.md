@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.0/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
   <h1>loopsmith-skills</h1>
   <p><em>Sub-agent acquisition for loopsmith: installed skills, marketplace, quarantine, and outcome-ranked selection.</em></p>
 </div>
