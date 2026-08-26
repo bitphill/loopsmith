@@ -51,6 +51,31 @@ All notable changes to loopsmith. Format follows
   every page load, with the Keychain free to stop and prompt. Moved to
   `spawn_blocking`.
 
+### Fixed (provider catalog)
+
+- **A chosen model was silently discarded.** The Claude and Grok entries listed
+  models, the UI offered them, the user picked one — and the argv never
+  mentioned `{model}`, so the CLI used its own default. Both now pass it.
+- **Hermes was invoked with a flag it does not have.** `-p` is not a Hermes
+  option; `-z` / `--oneshot` is, and its own description is exactly what a loop
+  wants: one prompt, only the final response on stdout, no banner or spinner.
+- **`llm` would have been handed an empty model.** It listed no models but
+  substituted `{model}`, and an unset model renders as an empty string, so the
+  CLI would receive a bare `-m ""`. It now reads the prompt from stdin and uses
+  its own configured default.
+- **Three entries claimed to be verified without having been.** `gemini`,
+  `codex` and `llm` are not installed on the machine this table was checked
+  against, so their argv was written from memory rather than from evidence.
+  They are marked as templates, which is what that grade is for.
+
+  Four invariants now hold the table honest: an entry may not substitute
+  `{model}` unless it has one to offer, an entry that offers models must
+  actually pass one, the prompt must be delivered exactly once by exactly one
+  route, and a template must say so in its own note. Three of those four failed
+  when first written, which is how the bugs above were found. Ollama is the one
+  entry whose models are discovered at run time rather than listed, and that is
+  now a field rather than an absence.
+
 ### Changed
 
 - **A new loop gets its own directory inside the folder you choose**, named
@@ -180,7 +205,7 @@ command's behaviour.
 
 ### Notes
 
-- 183 tests in the CLI crate and 395 across the workspace, clippy clean, plus a
+- 187 tests in the CLI crate and 399 across the workspace, clippy clean, plus a
   fourteen-case Playwright suite driving the real binary.
 - New dependencies, both behind the `web` feature: `axum` and `tokio`. The
   WebSocket transport is `axum::extract::ws` — the same RFC6455 the browser

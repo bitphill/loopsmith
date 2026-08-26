@@ -53,6 +53,11 @@ pub struct Known {
     /// Model identifiers offered in the dropdown. The field stays free text,
     /// because a list in a binary goes stale and a text box never does.
     pub models: &'static [&'static str],
+    /// This CLI reports its own models at run time, so `models` above is empty
+    /// on purpose and the UI fills the list from the machine. Only Ollama does
+    /// this today; without the distinction, "no models listed" and "models
+    /// discovered elsewhere" look identical to anything checking the table.
+    pub discovers_models: bool,
     /// Rough price per 1000 tokens, for the cost ceiling. `None` where the
     /// answer is "nothing, it runs on your machine" or genuinely unknown.
     pub cost_per_1k: Option<f64>,
@@ -74,10 +79,14 @@ pub const KNOWN: &[Known] = &[
         label: "Claude Code",
         bin: "claude",
         kind: "claude_code",
-        args: &["-p", "{prompt}", "--append-system-prompt", "{system}"],
+        // `--model` matters: without it the `model` field below is set, shown
+        // in the UI, and then silently ignored, so picking "opus" got you
+        // whatever the CLI defaults to.
+        args: &["-p", "{prompt}", "--append-system-prompt", "{system}", "--model", "{model}"],
         prompt_on_stdin: false,
         requires_env: &[],
         tiers: &["standard", "strong"],
+        discovers_models: false,
         models: &["opus", "sonnet", "haiku"],
         cost_per_1k: Some(0.015),
         version_arg: "--version",
@@ -95,6 +104,7 @@ pub const KNOWN: &[Known] = &[
         prompt_on_stdin: true,
         requires_env: &[],
         tiers: &["cheap"],
+        discovers_models: true,
         models: &[],
         cost_per_1k: Some(0.0),
         version_arg: "--version",
@@ -112,13 +122,16 @@ pub const KNOWN: &[Known] = &[
         prompt_on_stdin: false,
         requires_env: &["GEMINI_API_KEY"],
         tiers: &["cheap", "standard"],
+        discovers_models: false,
         models: &["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"],
         cost_per_1k: Some(0.002),
         version_arg: "--version",
         note: "Google's agentic CLI. A generous free tier makes it a good judge \
                to pair against a Claude builder, since a judge must not run on \
-               the same family as the work it grades.",
-        confidence: Confidence::Verified,
+               the same family as the work it grades. Not installed on the \
+               machine this table was checked against — confirm the argv with \
+               `gemini --help` before a long run.",
+        confidence: Confidence::Template,
     },
     Known {
         id: "codex",
@@ -129,28 +142,34 @@ pub const KNOWN: &[Known] = &[
         prompt_on_stdin: false,
         requires_env: &["OPENAI_API_KEY"],
         tiers: &["standard", "strong"],
+        discovers_models: false,
         models: &["gpt-5-codex", "gpt-5", "o4-mini"],
         cost_per_1k: Some(0.01),
         version_arg: "--version",
         note: "OpenAI's agentic CLI. `exec` is the non-interactive mode — the \
-               interactive one would hang a hands-off loop forever.",
-        confidence: Confidence::Verified,
+               interactive one would hang a hands-off loop forever. Not installed \
+               on the machine this table was checked against — confirm the argv \
+               with `codex --help` before a long run.",
+        confidence: Confidence::Template,
     },
     Known {
         id: "grok",
         label: "Grok CLI",
         bin: "grok",
         kind: "grok_cli",
-        args: &["-p", "{prompt}"],
+        args: &["-p", "{prompt}", "-m", "{model}"],
         prompt_on_stdin: false,
         requires_env: &["XAI_API_KEY"],
         tiers: &["standard"],
+        discovers_models: false,
         models: &["grok-4", "grok-3", "grok-code-fast-1"],
         cost_per_1k: Some(0.005),
         version_arg: "--version",
-        note: "xAI's CLI. Confirm the prompt flag against `grok --help` before a \
-               long unattended run.",
-        confidence: Confidence::Template,
+        note: "`-p` is the short form of `--single`: one prompt, printed to stdout, \
+               then exit. A run that seems to hang is usually Grok waiting to \
+               approve a tool call — `--always-approve` removes that pause, which \
+               is worth understanding before adding it.",
+        confidence: Confidence::Verified,
     },
     Known {
         id: "opencode",
@@ -161,11 +180,14 @@ pub const KNOWN: &[Known] = &[
         prompt_on_stdin: false,
         requires_env: &[],
         tiers: &["standard"],
+        discovers_models: false,
         models: &[],
         cost_per_1k: None,
         version_arg: "--version",
         note: "Open-source agentic CLI that fronts many providers. Whichever \
-               model it is configured for is the one this loop will spend.",
+               model it is configured for is the one this loop will spend. Not \
+               installed on the machine this table was checked against — confirm \
+               the argv with `opencode --help` before a long run.",
         confidence: Confidence::Template,
     },
     Known {
@@ -177,11 +199,14 @@ pub const KNOWN: &[Known] = &[
         prompt_on_stdin: false,
         requires_env: &[],
         tiers: &["standard"],
+        discovers_models: false,
         models: &[],
         cost_per_1k: None,
         version_arg: "--version",
         note: "Cursor's headless agent. Uses your Cursor subscription rather \
-               than a key in the environment.",
+               than a key in the environment. Not installed on the machine this \
+               table was checked against — confirm the argv with \
+               `cursor-agent --help` before a long run.",
         confidence: Confidence::Template,
     },
     Known {
@@ -193,12 +218,15 @@ pub const KNOWN: &[Known] = &[
         prompt_on_stdin: false,
         requires_env: &[],
         tiers: &["standard"],
+        discovers_models: false,
         models: &[],
         cost_per_1k: None,
         version_arg: "--version",
         note: "Pair-programming CLI. `--yes` and `--no-auto-commits` matter for a \
                hands-off loop: the first stops it waiting on a prompt, the second \
-               keeps it out of your git history.",
+               keeps it out of your git history. Not installed on the machine this \
+               table was checked against — confirm the argv with `aider --help` \
+               before a long run.",
         confidence: Confidence::Template,
     },
     Known {
@@ -206,32 +234,45 @@ pub const KNOWN: &[Known] = &[
         label: "Hermes",
         bin: "hermes",
         kind: "hermes",
-        args: &["-p", "{prompt}"],
+        // `-z` / `--oneshot`, not `-p`, which this CLI does not have at all.
+        // Its own description is exactly what a loop wants: send one prompt,
+        // print only the final response, no banner and no spinner.
+        args: &["-z", "{prompt}"],
         prompt_on_stdin: false,
         requires_env: &[],
         tiers: &["standard"],
+        discovers_models: false,
         models: &[],
         cost_per_1k: None,
         version_arg: "--version",
-        note: "Confirm the argv against `hermes --help` before relying on it.",
-        confidence: Confidence::Template,
+        note: "One-shot mode prints just the answer, which is what a loop needs. \
+               A run that seems to hang is usually Hermes waiting on a command \
+               approval — `--yolo` bypasses those, which is worth understanding \
+               before adding it.",
+        confidence: Confidence::Verified,
     },
     Known {
         id: "llm",
         label: "llm (Datasette)",
         bin: "llm",
         kind: "byok",
-        args: &["-m", "{model}"],
+        // No `-m {model}`: this entry offers no model list, so the placeholder
+        // would render as an empty string and the CLI would be handed `-m ""`.
+        // Bare `llm` reads the prompt from stdin and uses its own configured
+        // default, which is the right behaviour when nothing was chosen.
+        args: &[],
         prompt_on_stdin: true,
         requires_env: &[],
         tiers: &["cheap", "standard"],
+        discovers_models: false,
         models: &[],
         cost_per_1k: None,
         version_arg: "--version",
         note: "Simon Willison's `llm`. Talks to almost any provider through its \
                own plugins, and keeps its keys in its own store rather than the \
-               environment.",
-        confidence: Confidence::Verified,
+               environment. Not installed on the machine this table was checked \
+               against — confirm the argv with `llm --help` before a long run.",
+        confidence: Confidence::Template,
     },
 ];
 
@@ -255,3 +296,73 @@ pub const ENV_KEYS: &[(&str, &str)] = &[
     ("TOGETHER_API_KEY", "Together AI"),
     ("HF_TOKEN", "Hugging Face"),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_entry_asks_for_a_model_it_cannot_offer() {
+        // `spec.model.unwrap_or_default()` turns an unset model into an empty
+        // string, so `["-m", "{model}"]` on an entry with nothing to prefill
+        // hands the CLI a bare `-m ""`. The web UI prefills `models[0]`, so an
+        // entry is safe exactly when it has a model to prefill.
+        for k in KNOWN {
+            let wants_model = k.args.iter().any(|a| a.contains("{model}"));
+            assert!(
+                !wants_model || !k.models.is_empty() || k.discovers_models,
+                "`{}` substitutes {{model}} but offers no models, so it would be \
+                 invoked with an empty one",
+                k.id
+            );
+        }
+    }
+
+    #[test]
+    fn every_entry_passes_the_prompt_exactly_once() {
+        // A provider that never receives the prompt is the most confusing
+        // possible failure: it runs, it succeeds, and it answers a question
+        // nobody asked.
+        for k in KNOWN {
+            let in_args = k.args.iter().filter(|a| a.contains("{prompt}")).count();
+            if k.prompt_on_stdin {
+                assert_eq!(in_args, 0, "`{}` sends the prompt on stdin and in argv", k.id);
+            } else {
+                assert_eq!(in_args, 1, "`{}` must pass {{prompt}} exactly once", k.id);
+            }
+        }
+    }
+
+    #[test]
+    fn a_model_that_is_offered_is_actually_used() {
+        // The inverse of the first test, and a real bug it caught: the Claude
+        // entry listed models, the UI showed them, the user picked one, and
+        // the argv never mentioned {model} — so the choice was silently
+        // discarded and the CLI used its own default.
+        for k in KNOWN {
+            if k.models.is_empty() && !k.discovers_models {
+                continue;
+            }
+            assert!(
+                k.args.iter().any(|a| a.contains("{model}")),
+                "`{}` offers models but never passes one, so the choice is ignored",
+                k.id
+            );
+        }
+    }
+
+    #[test]
+    fn a_verified_entry_names_no_doubt_and_a_template_one_does() {
+        // The grade is only worth carrying if it means something. Verified is
+        // reserved for argv actually checked against the CLI's own help.
+        for k in KNOWN {
+            if k.confidence == Confidence::Template {
+                assert!(
+                    k.note.contains("confirm") || k.note.contains("Confirm"),
+                    "`{}` is a template but its note does not say to confirm it",
+                    k.id
+                );
+            }
+        }
+    }
+}
