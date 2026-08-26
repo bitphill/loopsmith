@@ -58,6 +58,31 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Run blocking work off the async worker threads.
+///
+/// The modules underneath this one are deliberately synchronous — they are
+/// shared with the CLI, which has no runtime at all — so every handler that
+/// touches the filesystem, the keychain, or a subprocess is blocking a tokio
+/// worker for the duration. With a handful of workers and a Keychain that is
+/// entitled to stop and prompt, that starves the runtime and the whole page
+/// stops answering.
+///
+/// `spawn_blocking` moves the work to the pool built for it. The alternative,
+/// rewriting those modules as async, would infect the CLI with a runtime it
+/// does not need.
+async fn blocking<T, F>(f: F) -> Result<T, ApiError>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f).await.map_err(|e| {
+        ApiError(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("that work could not be completed: {e}"),
+        )
+    })
+}
+
 /// One error shape for the whole API, so the browser has one thing to render.
 struct ApiError(StatusCode, String);
 
@@ -145,8 +170,10 @@ struct PathQuery {
     path: String,
 }
 
-async fn path_facts(Query(q): Query<PathQuery>) -> Json<detect::PathFacts> {
-    Json(detect::path_facts(&expand_home(&q.path)))
+async fn path_facts(Query(q): Query<PathQuery>) -> ApiResult<detect::PathFacts> {
+    // Writability is probed by actually writing, so this touches the disk.
+    let path = expand_home(&q.path);
+    Ok(Json(blocking(move || detect::path_facts(&path)).await?))
 }
 
 #[derive(Deserialize)]
@@ -178,8 +205,9 @@ async fn help_handler() -> Json<Value> {
     Json(json!({ "sections": help::SECTIONS, "fields": help::FIELDS }))
 }
 
-async fn list_examples() -> Json<Vec<examples::ExampleCard>> {
-    Json(examples::list())
+async fn list_examples() -> ApiResult<Vec<examples::ExampleCard>> {
+    // Scans two directories and parses every config it finds.
+    Ok(Json(blocking(examples::list).await?))
 }
 
 /// The YAML *and* the parsed config, because the browser needs both: the
@@ -192,8 +220,9 @@ async fn load_example(Path(id): Path<String>) -> ApiResult<Value> {
     Ok(Json(json!({ "id": id, "yaml": text, "config": cfg })))
 }
 
-async fn list_library() -> Json<Vec<assemble::LibraryEntry>> {
-    Json(assemble::library())
+async fn list_library() -> ApiResult<Vec<assemble::LibraryEntry>> {
+    // Stats every remembered loop to drop the ones that are gone.
+    Ok(Json(blocking(assemble::library).await?))
 }
 
 #[derive(Deserialize)]
@@ -264,13 +293,17 @@ async fn render(Json(b): Json<RenderBody>) -> ApiResult<Value> {
     Ok(Json(json!({ "text": text, "file_name": b.format.file_name() })))
 }
 
-async fn list_secrets() -> Json<Vec<secrets::SecretStatus>> {
-    Json(
-        crate::web::catalog::ENV_KEYS
-            .iter()
-            .map(|(name, _)| secrets::status(name))
-            .collect(),
-    )
+async fn list_secrets() -> ApiResult<Vec<secrets::SecretStatus>> {
+    // One `security`/`secret-tool` spawn per key, so a dozen subprocesses.
+    Ok(Json(
+        blocking(|| {
+            crate::web::catalog::ENV_KEYS
+                .iter()
+                .map(|(name, _)| secrets::status(name))
+                .collect()
+        })
+        .await?,
+    ))
 }
 
 #[derive(Deserialize)]
@@ -285,8 +318,10 @@ struct SetSecretBody {
 async fn set_secret(Json(b): Json<SetSecretBody>) -> ApiResult<secrets::SecretStatus> {
     // The value is used and dropped. It is never echoed back in the response,
     // never logged, and never written into a config.
-    secrets::set(&b.name, b.value.as_deref().filter(|v| !v.is_empty()), b.store)?;
-    Ok(Json(secrets::status(&b.name)))
+    let value = b.value.filter(|v| !v.is_empty());
+    let name = b.name.clone();
+    blocking(move || secrets::set(&name, value.as_deref(), b.store)).await??;
+    Ok(Json(blocking(move || secrets::status(&b.name)).await?))
 }
 
 #[derive(Deserialize)]
@@ -296,7 +331,8 @@ struct RevealBody {
 }
 
 async fn reveal_secret(Json(b): Json<RevealBody>) -> ApiResult<Value> {
-    let value = secrets::reveal(&b.name, b.store)?;
+    let name = b.name.clone();
+    let value = blocking(move || secrets::reveal(&name, b.store)).await??;
     Ok(Json(json!({ "name": b.name, "value": value })))
 }
 

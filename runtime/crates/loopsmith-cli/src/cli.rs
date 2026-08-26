@@ -82,6 +82,13 @@ pub enum Command {
         /// Treat a config read from stdin as Markdown rather than YAML.
         #[arg(long)]
         markdown: bool,
+        /// Initialise a git repository in the new directory, with one commit.
+        ///
+        /// This is what lets `isolated: true` nodes have a worktree each.
+        /// Without a repository they all share one directory, which is fine for
+        /// a single builder and destructive for two running at once.
+        #[arg(long)]
+        git: bool,
     },
     /// Check a config against the A–H model.
     Validate {

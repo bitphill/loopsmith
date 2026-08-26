@@ -148,6 +148,46 @@ pub fn set(name: &str, value: Option<&str>, store: Store) -> Result<(), String> 
     Ok(())
 }
 
+/// Variables that change how programs are found or loaded.
+///
+/// Writing one of these into a shell profile is not storing a secret, it is
+/// arranging for code to run at the next login. `PATH` alone is enough: point
+/// it at a directory the attacker controls and every command the user types
+/// afterwards is theirs.
+///
+/// Nothing here is a credential, so refusing them costs a legitimate user
+/// nothing. This is defence in depth behind [`crate::web::guard`] — that stops
+/// a hostile page reaching this code at all, and this stops the damage if some
+/// other path ever does.
+const NEVER_WRITABLE: &[&str] = &[
+    "PATH",
+    "HOME",
+    "SHELL",
+    "IFS",
+    "PS1",
+    "PROMPT_COMMAND",
+    "BASH_ENV",
+    "ENV",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "NODE_OPTIONS",
+    "PERL5OPT",
+    "RUBYOPT",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_EXTERNAL_DIFF",
+    "GIT_PAGER",
+    "PAGER",
+    "EDITOR",
+    "VISUAL",
+];
+
 /// Names are `A-Z`, `0-9`, `_`. Not a style preference: a name containing a
 /// quote, a newline, or a `$` would break out of the generated `export` line
 /// and turn a saved secret into an arbitrary shell command at next login.
@@ -165,6 +205,14 @@ fn validate_name(name: &str) -> Result<(), String> {
         return Err(format!(
             "`{name}` is not a usable variable name. Use capitals, digits, and \
              underscores only — that is what every shell agrees on."
+        ));
+    }
+    if NEVER_WRITABLE.contains(&name) {
+        return Err(format!(
+            "`{name}` is not a credential — it changes how your machine finds and \
+             loads programs, so writing it to a shell profile would run code at \
+             your next login rather than store a key. loopsmith will not set it. \
+             If you genuinely need to change it, edit your shell profile yourself."
         ));
     }
     Ok(())
@@ -385,6 +433,24 @@ pub fn status(name: &str) -> SecretStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_variables_that_would_run_code_at_next_login_are_refused() {
+        // Each of these is a perfectly valid variable name and none of them is
+        // a credential. Setting PATH from a form is how a "save my API key"
+        // feature becomes a persistence mechanism.
+        for bad in [
+            "PATH", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "NODE_OPTIONS",
+            "GIT_SSH_COMMAND", "BASH_ENV", "PYTHONSTARTUP", "IFS", "EDITOR",
+        ] {
+            let err = validate_name(bad).expect_err("`{bad}` must be refused");
+            assert!(err.contains("not a credential"), "for {bad}: {err}");
+        }
+        // The ones people actually came here to set still work.
+        for good in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY", "MY_OWN_TOKEN"] {
+            assert!(validate_name(good).is_ok(), "`{good}` must be allowed");
+        }
+    }
 
     #[test]
     fn a_name_that_could_escape_the_export_line_is_refused() {

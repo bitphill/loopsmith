@@ -25,6 +25,26 @@ use tokio::sync::broadcast;
 /// this bounds memory without bounding the run.
 const MAX_RETAINED_LINES: usize = 4000;
 
+/// How many jobs may be running at once.
+///
+/// Every job is a subprocess, and most of them go on to call a model. Without a
+/// ceiling, a stuck finger on a button — or a page that reloads in a loop —
+/// spawns processes until the machine gives up. Eight is far more than the UI
+/// can usefully show and far less than it takes to hurt anything.
+const MAX_CONCURRENT_JOBS: usize = 8;
+
+/// Take a lock, recovering if a previous holder panicked.
+///
+/// `lock().unwrap()` is the usual spelling and it is wrong here. A panic
+/// anywhere inside a critical section poisons the mutex permanently, so every
+/// later call panics too and the whole panel dies for the rest of the session
+/// — a far worse outcome than the momentary glitch that caused it. Rust's
+/// guarantee is that the data is still structurally valid; for a job registry
+/// that is enough to carry on with.
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
@@ -92,6 +112,17 @@ impl Jobs {
             ));
         }
 
+        let running = lock(&self.inner)
+            .values()
+            .filter(|j| j.summary.state == JobState::Running)
+            .count();
+        if running >= MAX_CONCURRENT_JOBS {
+            return Err(format!(
+                "{running} jobs are already running, which is the ceiling. Stop one \
+                 from the console, or wait for it to finish."
+            ));
+        }
+
         let id = format!("job-{}-{}", crate::web::detect::now_ms(), next(&self.seq));
         let (tx, _rx) = broadcast::channel(512);
 
@@ -109,7 +140,7 @@ impl Jobs {
         };
 
         let holder = Arc::new(Mutex::new(None));
-        self.inner.lock().unwrap().insert(
+        lock(&self.inner).insert(
             id.clone(),
             Job {
                 summary,
@@ -165,7 +196,7 @@ impl Jobs {
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        *holder.lock().unwrap() = Some(child);
+        *lock(&holder) = Some(child);
 
         let mut tasks = Vec::new();
         if let Some(out) = stdout {
@@ -195,7 +226,7 @@ impl Jobs {
         }
 
         let status = {
-            let mut guard = holder.lock().unwrap();
+            let mut guard = lock(&holder);
             guard.take()
         };
         let code = match status {
@@ -225,7 +256,7 @@ impl Jobs {
     }
 
     fn push(&self, id: &str, stream: &'static str, text: String) {
-        let mut jobs = self.inner.lock().unwrap();
+        let mut jobs = lock(&self.inner);
         let Some(job) = jobs.get_mut(id) else { return };
         let line = JobLine {
             seq: job.lines.len() as u64,
@@ -244,7 +275,7 @@ impl Jobs {
     }
 
     fn finish(&self, id: &str, state: JobState, code: Option<i32>) {
-        let mut jobs = self.inner.lock().unwrap();
+        let mut jobs = lock(&self.inner);
         if let Some(job) = jobs.get_mut(id) {
             // A cancel already recorded its state; do not overwrite it.
             if job.summary.state == JobState::Running || state == JobState::Cancelled {
@@ -257,15 +288,15 @@ impl Jobs {
     }
 
     fn state(&self, id: &str) -> Option<JobState> {
-        self.inner.lock().unwrap().get(id).map(|j| j.summary.state)
+        lock(&self.inner).get(id).map(|j| j.summary.state)
     }
 
     pub fn summary(&self, id: &str) -> Option<JobSummary> {
-        self.inner.lock().unwrap().get(id).map(|j| j.summary.clone())
+        lock(&self.inner).get(id).map(|j| j.summary.clone())
     }
 
     pub fn list(&self) -> Vec<JobSummary> {
-        let jobs = self.inner.lock().unwrap();
+        let jobs = lock(&self.inner);
         let mut out: Vec<JobSummary> = jobs.values().map(|j| j.summary.clone()).collect();
         // Newest first: the job someone just started is the one they want.
         out.sort_by_key(|j| std::cmp::Reverse(j.started_ms));
@@ -283,7 +314,7 @@ impl Jobs {
     }
 
     pub fn subscribe(&self, id: &str) -> Option<broadcast::Receiver<JobLine>> {
-        self.inner.lock().unwrap().get(id).map(|j| j.tx.subscribe())
+        lock(&self.inner).get(id).map(|j| j.tx.subscribe())
     }
 
     /// Kill a running job.
@@ -293,7 +324,7 @@ impl Jobs {
     /// the user asked for is not the same thing as a run that broke.
     pub fn cancel(&self, id: &str) -> Result<(), String> {
         let holder = {
-            let mut jobs = self.inner.lock().unwrap();
+            let mut jobs = lock(&self.inner);
             let job = jobs.get_mut(id).ok_or("no such job")?;
             if job.summary.state != JobState::Running {
                 return Err("that job has already finished".into());
@@ -301,7 +332,7 @@ impl Jobs {
             job.summary.state = JobState::Cancelled;
             job.child.clone().ok_or("that job has no process")?
         };
-        let mut guard = holder.lock().unwrap();
+        let mut guard = lock(&holder);
         match guard.as_mut() {
             Some(child) => {
                 let _ = child.start_kill();
@@ -313,7 +344,7 @@ impl Jobs {
 }
 
 fn next(seq: &Arc<Mutex<u64>>) -> u64 {
-    let mut n = seq.lock().unwrap();
+    let mut n = lock(seq);
     *n += 1;
     *n
 }
@@ -333,6 +364,7 @@ pub fn argv_for(action: &Action) -> Result<(String, Vec<String>), String> {
             purpose,
             config_file,
             force,
+            git,
         } => (
             a("create"),
             {
@@ -353,6 +385,9 @@ pub fn argv_for(action: &Action) -> Result<(String, Vec<String>), String> {
                 v.push(config_file.clone());
                 if *force {
                     v.push(a("--force"));
+                }
+                if *git {
+                    v.push(a("--git"));
                 }
                 v
             },
@@ -446,6 +481,10 @@ pub enum Action {
         config_file: String,
         #[serde(default)]
         force: bool,
+        /// Initialise a git repository in the new directory, so `isolated`
+        /// nodes get a worktree each instead of silently sharing one.
+        #[serde(default)]
+        git: bool,
     },
     Validate { config: String, #[serde(default)] strict: bool },
     Plan { config: String },
@@ -486,6 +525,7 @@ mod tests {
                 purpose: "p".into(),
                 config_file: "/tmp/d.yaml".into(),
                 force: false,
+                git: true,
             },
             Action::Validate { config: "c".into(), strict: true },
             Action::Plan { config: "c".into() },
@@ -522,6 +562,7 @@ mod tests {
             purpose: "p".into(),
             config_file: "/tmp/draft.yaml".into(),
             force: false,
+            git: false,
         })
         .unwrap();
         assert_eq!(argv[0], "new");
@@ -541,11 +582,13 @@ mod tests {
             purpose: String::new(),
             config_file: "/tmp/d.yaml".into(),
             force: true,
+            git: true,
         })
         .unwrap();
         assert!(!argv.contains(&"--name".to_string()), "{argv:?}");
         assert!(!argv.contains(&"--purpose".to_string()), "{argv:?}");
         assert!(argv.contains(&"--force".to_string()));
+        assert!(argv.contains(&"--git".to_string()));
     }
 
     #[test]

@@ -75,7 +75,9 @@ jobs:
 
       - name: Build
         working-directory: runtime
-        run: cargo build --release --locked --bin loopsmith --target ${{ matrix.target }}
+        # `dist`, not `release`: same code, fat LTO and one codegen unit, which
+        # is 16% off the download for build time nobody is waiting on here.
+        run: cargo build --profile dist --locked --bin loopsmith --target ${{ matrix.target }}
 
       # One archive per target, named for the version and the triple, because both
       # downloaders construct the filename from exactly those two facts.
@@ -87,7 +89,7 @@ jobs:
           [ -n "${{ github.event.inputs.tag }}" ] && version="${{ github.event.inputs.tag }}" && version="${version#v}"
           name="loopsmith-v${version}-${{ matrix.target }}.tar.gz"
           mkdir -p dist
-          tar czf "dist/$name" -C "runtime/target/${{ matrix.target }}/release" loopsmith
+          tar czf "dist/$name" -C "runtime/target/${{ matrix.target }}/dist" loopsmith
           echo "ASSET=$name" >> "$GITHUB_ENV"
 
       - name: Package (windows)
@@ -99,7 +101,7 @@ jobs:
           name="loopsmith-v${version}-${{ matrix.target }}.zip"
           mkdir -p dist
           # tar.exe ships with Windows and writes zips, so no extra dependency.
-          tar acf "dist/$name" -C "runtime/target/${{ matrix.target }}/release" loopsmith.exe
+          tar acf "dist/$name" -C "runtime/target/${{ matrix.target }}/dist" loopsmith.exe
           echo "ASSET=$name" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4

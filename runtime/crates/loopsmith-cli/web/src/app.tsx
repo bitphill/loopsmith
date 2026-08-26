@@ -36,6 +36,24 @@ import type {
 
 const BLANK: LoopConfig = { name: "", version: "0.1.0", description: "", goals: [], validations: [] };
 
+/**
+ * Where the loop will actually live: a directory of its own, named after it,
+ * inside the folder that was picked.
+ *
+ * Creating straight into the picked folder was the earlier behaviour and it is
+ * a trap — the obvious thing to pick is somewhere like `~/loops`, and a loop
+ * scaffolded directly into that turns the container into the loop. Every
+ * subsequent loop then either refuses (not empty) or is forced on top of the
+ * first one's ledger.
+ */
+function loopDir(parent: string, name: string): string {
+    const base = parent.trim().replace(/\/+$/, "");
+    const leaf = name.trim().replace(/^\/+|\/+$/g, "");
+    if (!base) return leaf;
+    if (!leaf) return base;
+    return `${base}/${leaf}`;
+}
+
 /** Which config keys each step owns, so a problem can route to a step. */
 const STEP_KEYS: Record<string, string[]> = {
   place: ["name", "description", "version"],
@@ -91,7 +109,10 @@ type ThemeChoice = "system" | "light" | "dark";
 
 export default function App() {
   const [cfg, setCfg] = useState<LoopConfig>(BLANK);
-  const [path, setPath] = useState("");
+  /** The container the loop's own directory is created inside. */
+  const [parent, setParent] = useState("");
+  /** Initialise a repo in the new directory, so `isolated` nodes isolate. */
+  const [initGit, setInitGit] = useState(true);
   const [format, setFormat] = useState<Format>("yaml");
   const [created, setCreated] = useState(false);
 
@@ -133,6 +154,9 @@ export default function App() {
   }, [toast]);
   const patch = useCallback((p: Partial<LoopConfig>) => setCfg((c) => ({ ...c, ...p })), []);
 
+  /** Where the loop actually lands: its own directory inside the container. */
+  const path = useMemo(() => loopDir(parent, cfg.name), [parent, cfg.name]);
+
   useEffect(() => {
     const root = document.documentElement;
     if (theme === "system") root.removeAttribute("data-theme");
@@ -147,6 +171,34 @@ export default function App() {
     api.meta().then(setMeta).catch(() => {});
     setScanning(true);
     api.detect(false).then(setDetection).catch(() => {}).finally(() => setScanning(false));
+
+    // Reattach to whatever is already going.
+    //
+    // A run is a subprocess of the *server*, not of this page, so closing the
+    // tab never stopped it — but the page forgot which job it had been
+    // watching, which looked exactly like it had. The server is the source of
+    // truth here rather than localStorage: it knows what is genuinely still
+    // running, and a remembered id from a previous session would be a lie.
+    //
+    // The socket replays every retained line before going live, so a run
+    // rejoined halfway through arrives whole rather than mid-sentence.
+    api.jobs()
+      .then((all) => {
+        const live = all.find((j) => j.state === "running");
+        if (live) {
+          setJob(live.id);
+          setRailOpen(true);
+          setToast({
+            tone: "good",
+            text: `Still running: ${live.kind}. It kept going while this page was closed — picking the log back up.`,
+          });
+          return;
+        }
+        // Nothing running, but the most recent outcome is still worth showing
+        // in the header rather than starting blank.
+        if (all.length > 0) setLastJob(all[0]);
+      })
+      .catch(() => {});
   }, []);
 
   const reviewTimer = useRef<number>(0);
@@ -158,17 +210,11 @@ export default function App() {
 
   const pathTimer = useRef<number>(0);
   useEffect(() => {
-    if (!path.trim()) { setFacts(null); return; }
+    if (!parent.trim() || !cfg.name.trim()) { setFacts(null); return; }
     window.clearTimeout(pathTimer.current);
     pathTimer.current = window.setTimeout(() => { api.pathFacts(path).then(setFacts).catch(() => {}); }, 300);
     return () => window.clearTimeout(pathTimer.current);
   }, [path]);
-
-  useEffect(() => {
-    if (cfg.name.trim()) return;
-    const leaf = path.trim().replace(/\/+$/, "").split("/").pop();
-    if (leaf && leaf !== "~") patch({ name: leaf });
-  }, [path, cfg.name, patch]);
 
   const sectionHelp = useMemo(
     () => new Map<string, SectionHelp>(help.sections.map((s) => [s.key, s])), [help.sections]);
@@ -209,16 +255,16 @@ export default function App() {
     setLoadingId(id);
     try {
       const { config } = await api.example(id);
-      if (isEmpty(cfg)) applyLoaded(config, id);
+      if (isEmpty(cfg)) applyLoaded(config);
       else setPendingLoad({ id, incoming: config });
     } catch (e) { setToast({ tone: "bad", text: (e as Error).message }); }
     finally { setLoadingId(null); }
   };
 
-  const applyLoaded = (config: LoopConfig, id: string) => {
+  const applyLoaded = (config: LoopConfig) => {
     setCfg(config);
     setCreated(false);
-    if (!path.trim()) setPath(`~/loops/${id}`);
+    if (!parent.trim()) setParent("~/loops");
     goStep("place");
     setToast({ tone: "good", text: `Loaded ${config.name}. Nothing is on disk yet — walk the steps and press Create loop.` });
   };
@@ -226,7 +272,12 @@ export default function App() {
   const openLoop = async (p: string) => {
     try {
       const res = await api.open(p);
-      setCfg(res.config); setFormat(res.format); setPath(res.dir);
+      // An existing loop's directory IS the loop, so its container is the
+      // parent — otherwise the derived path would gain a second copy of the
+      // name and point at somewhere that does not exist.
+      const dir = res.dir.replace(/\/+$/, "");
+      setParent(dir.slice(0, dir.lastIndexOf("/")) || "/");
+      setCfg(res.config); setFormat(res.format);
       setFacts(res.facts); setCreated(true); goStep("ship");
       setToast({ tone: "good", text: `Opened ${res.config_path}.` });
     } catch (e) { setToast({ tone: "bad", text: (e as Error).message }); }
@@ -240,7 +291,8 @@ export default function App() {
     if (action === "create") {
       Object.assign(body, {
         path: dir, name: cfg.name, purpose: cfg.description ?? "",
-        config_file: "", force: false, draft: { config: cfg, format },
+        config_file: "", force: false, git: initGit,
+        draft: { config: cfg, format },
       });
     } else if (action === "permissions_write") {
       Object.assign(body, { config: configFile, settings: `${dir}/.claude/settings.local.json` });
@@ -394,7 +446,9 @@ export default function App() {
                 <MorphPanel view={step} direction={direction} className="space-y-4">
                   <StepView
                     step={step} sectionProps={sectionProps} detection={detection}
-                    path={path} setPath={setPath} format={format} setFormat={setFormat}
+                    parent={parent} setParent={setParent} loopPath={path}
+                    initGit={initGit} setInitGit={setInitGit}
+                    format={format} setFormat={setFormat}
                     facts={facts} review={review} neededKeys={neededKeys}
                     onTest={testProvider} testing={testing} testResults={testResults}
                     scanning={scanning}
@@ -449,7 +503,7 @@ export default function App() {
                   setPendingLoad(null);
                 }}>Fill blanks only</button>
                 <button className="btn btn-primary" onClick={() => {
-                  applyLoaded(pendingLoad.incoming, pendingLoad.id);
+                  applyLoaded(pendingLoad.incoming);
                   setPendingLoad(null);
                 }}>Replace everything</button>
               </>
@@ -534,7 +588,8 @@ function StepView(props: {
   step: string;
   sectionProps: { cfg: LoopConfig; patch: (p: Partial<LoopConfig>) => void; help: Map<string, SectionHelp> };
   detection: Detection | null;
-  path: string; setPath: (v: string) => void;
+  parent: string; setParent: (v: string) => void; loopPath: string;
+  initGit: boolean; setInitGit: (v: boolean) => void;
   format: Format; setFormat: (f: Format) => void;
   facts: PathFacts | null; review: Review | null; neededKeys: string[];
   onTest: (p: ProviderSpec) => void; testing: string | null;
@@ -548,7 +603,9 @@ function StepView(props: {
     case "place":
       return <div className="space-y-4">{wrap([
         <Location
-          path={props.path} onPath={props.setPath} cfg={sp.cfg} patch={sp.patch}
+          parent={props.parent} onParent={props.setParent} loopPath={props.loopPath}
+          initGit={props.initGit} onInitGit={props.setInitGit}
+          cfg={sp.cfg} patch={sp.patch}
           format={props.format} onFormat={props.setFormat} facts={props.facts}
           permissions={props.review?.permissions ?? []}
         />,

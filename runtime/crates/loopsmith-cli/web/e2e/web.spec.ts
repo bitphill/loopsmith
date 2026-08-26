@@ -167,6 +167,31 @@ test.describe("with the tour dismissed", () => {
     await expect(root).not.toHaveAttribute("data-theme", /.*/);
   });
 
+  test("a run survives the tab closing and streams back on reopen", async ({ page }) => {
+    // The job is a subprocess of the server, not of this page, so it never
+    // stopped — but the page used to forget which one it was watching, which
+    // looked identical to it having stopped.
+    const started = await page.request.post("/api/jobs", {
+      data: { cwd: "/tmp", action: "doctor" },
+    });
+    expect(started.ok()).toBe(true);
+    const { job } = await started.json();
+
+    // A reload is the closest thing to reopening the tab.
+    await page.reload();
+
+    // The console reattaches on its own, and the replay means the output is
+    // there from the beginning rather than from the moment we rejoined.
+    await expect(page.getByText(/Still running|doctor/).first()).toBeVisible({ timeout: 15_000 });
+
+    // And the server agrees the job is its own, independent of any client.
+    const seen = await page.request.get(`/api/jobs/${job}`);
+    expect(seen.ok()).toBe(true);
+    const detail = await seen.json();
+    expect(detail.summary.id).toBe(job);
+    expect(detail.lines.length).toBeGreaterThan(0);
+  });
+
   test("no console errors on a clean load", async ({ page }) => {
     const errors: string[] = [];
     page.on("console", (m) => m.type() === "error" && errors.push(m.text()));

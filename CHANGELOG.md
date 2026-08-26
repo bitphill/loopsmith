@@ -6,6 +6,82 @@ All notable changes to loopsmith. Format follows
 
 ## [0.2.0] — 2026-08-26
 
+### Security
+
+- **Closed a DNS-rebinding hole in `loopsmith web`.** Binding loopback stops the
+  network reaching the server; it does not stop a *browser* reaching it. A page
+  on any domain whose DNS re-resolves to `127.0.0.1` is same-origin to the
+  browser, so no CORS check ever runs and the request arrives looking ordinary.
+
+  Verified exploitable before the fix: `Host: evil.com` returned 200 on every
+  endpoint, and a cross-origin `POST /api/jobs` executed. That reachability
+  meant `POST /api/secrets/reveal` could read back every API key in the shell
+  profile, and `POST /api/secrets` could write a variable into it — which is
+  code execution at the next login.
+
+  The fix is the standard one: an attacker controls the DNS name but cannot
+  change the `Host` header, because the browser sets it from the URL. Requests
+  not addressed to a loopback name are refused, as are state-changing requests
+  carrying a foreign `Origin`. The guard wraps the assets too, so a rebound page
+  cannot even read the bundle.
+
+- **Refused environment variables that are not credentials.** The secrets panel
+  accepted any all-caps name, including `PATH`, `LD_PRELOAD`,
+  `DYLD_INSERT_LIBRARIES`, `NODE_OPTIONS` and `GIT_SSH_COMMAND`. Writing one of
+  those into a shell profile arranges for code to run at the next login rather
+  than storing a key. None of them is a credential, so refusing them costs a
+  legitimate user nothing.
+
+### Fixed
+
+- **A run no longer appears to stop when the tab closes.** It never did stop —
+  a job is a subprocess of the server, not of the page — but the page forgot
+  which job it had been watching, which looked identical. It now reattaches to
+  anything still running on load, and the socket's replay means the log arrives
+  whole rather than from the moment of rejoining.
+- **Mutex poisoning could permanently disable the job panel.** Twelve
+  `lock().unwrap()` call sites meant one panic inside any critical section
+  poisoned the registry for the rest of the session. They now recover.
+- **Unbounded process spawning.** `POST /api/jobs` had no ceiling; a stuck
+  button or a reloading page could spawn subprocesses until the machine gave up.
+  Capped at eight concurrent.
+- **Blocking work on the async workers.** Handlers touching the filesystem, the
+  keychain, or a subprocess ran on tokio worker threads. `list_secrets` was the
+  worst: one `security` spawn per key, so a dozen sequential subprocesses on
+  every page load, with the Keychain free to stop and prompt. Moved to
+  `spawn_blocking`.
+
+### Changed
+
+- **A new loop gets its own directory inside the folder you choose**, named
+  after the loop, rather than being scaffolded into that folder directly. The
+  obvious thing to pick is a container like `~/loops`, and scaffolding straight
+  into it turned the container into the loop — after which every later loop
+  either refused as non-empty or was forced on top of the first one's ledger.
+
+- **`loopsmith new --git`** initialises a repository, with one commit, in the
+  new directory. This is what makes `isolated: true` isolate: a worktree is a
+  second checkout, so with no repository every node shares one directory —
+  fine for a single builder, destructive for two at once. The initial commit is
+  not optional, because `git worktree add` resolves a start point and a
+  repository with no HEAD has none. The web UI turns it on by default, which
+  removes the "not inside a git repository" warning entirely. The scaffold has
+  always written a `.gitignore`; nothing ever created the repository it implied.
+
+- **Split `release` and `dist` build profiles.** `cargo install` and Homebrew
+  build on the user's machine while they wait, so `release` stays at thin LTO.
+  The published npm and PyPI binaries are built once in CI, where nobody is
+  waiting, so the release workflow now uses `dist` — fat LTO and one codegen
+  unit. Measured on this workspace: 8.21 MB in 3m50s against 6.88 MB in 9m29s,
+  16% off the download for build time that costs nothing.
+
+  `panic` stays at `unwind` in both. The usual argument for `abort` is size,
+  but loopsmith is a long-running server as well as a CLI, and tokio catches a
+  panicking request handler to keep the rest alive; under `abort` one bad
+  request would take down a server the user has open.
+
+### Added
+
 Adds a browser UI. No change to the config model, the gate, or any existing
 command's behaviour.
 
@@ -104,8 +180,8 @@ command's behaviour.
 
 ### Notes
 
-- 175 tests in the CLI crate and 387 across the workspace, clippy clean, plus a
-  twelve-case Playwright suite driving the real binary.
+- 183 tests in the CLI crate and 395 across the workspace, clippy clean, plus a
+  fourteen-case Playwright suite driving the real binary.
 - New dependencies, both behind the `web` feature: `axum` and `tokio`. The
   WebSocket transport is `axum::extract::ws` — the same RFC6455 the browser
   speaks. The `websocket` crate was considered and rejected: it is published as

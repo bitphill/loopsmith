@@ -23,6 +23,7 @@ pub mod catalog;
 pub mod detect;
 pub mod examples;
 pub mod exec;
+pub mod guard;
 pub mod help;
 pub mod picker;
 pub mod secrets;
@@ -106,14 +107,19 @@ pub fn serve(port: Option<u16>, no_open: bool) -> Result<(), String> {
     };
     // The API is merged over the asset router rather than nested, so
     // `/api/…` wins and everything else falls through to the app shell.
-    let app = api::router(state).merge(assets::router());
+    // The Host guard wraps everything, assets included: a rebound page that
+    // could not call the API could still read the bundle and learn about the
+    // machine from it.
+    let app = api::router(state)
+        .merge(assets::router())
+        .layer(axum::middleware::from_fn(guard::guard));
 
     println!("loopsmith web {}", env!("CARGO_PKG_VERSION"));
     println!("  {url}");
     if port.is_some_and(|p| p != addr.port()) || addr.port() != DEFAULT_PORT {
         println!("  (port {} was busy)", port.unwrap_or(DEFAULT_PORT));
     }
-    println!("  bound to localhost only — nothing else on the network can reach it");
+    println!("  bound to localhost only, and refuses any request not addressed to it");
     println!("\nPress Ctrl-C to stop.");
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

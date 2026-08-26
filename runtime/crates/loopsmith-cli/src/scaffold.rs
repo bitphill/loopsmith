@@ -13,6 +13,61 @@ use loopsmith_core::{
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// Turn the new loop directory into a git repository.
+///
+/// This is what makes `isolated: true` actually isolate. A worktree is a second
+/// checkout of the same repository, so without a repository there is nothing to
+/// check out a second time and every node falls back to sharing one directory —
+/// which is fine for a single builder and silently destructive for two.
+///
+/// The initial commit is not optional. `git worktree add` resolves a start
+/// point, and a repository with no HEAD has none, so an uncommitted repo fails
+/// exactly as unhelpfully as no repo at all.
+///
+/// Identity is passed inline with `-c` rather than written to the repo's
+/// config: a machine with no `user.email` set would otherwise fail the commit,
+/// and silently editing someone's git identity to scaffold a loop is not a
+/// trade anyone agreed to.
+pub fn init_git(root: &Path) -> Result<(), String> {
+    if loopsmith_util::which("git").is_none() {
+        return Err("git is not on PATH".into());
+    }
+    let run = |args: &[&str]| -> Result<(), String> {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .map_err(|e| format!("git {}: {e}", args[0]))?;
+        if out.status.success() {
+            return Ok(());
+        }
+        Err(format!(
+            "git {} failed: {}",
+            args[0],
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    };
+
+    // Already a repository — someone scaffolded into an existing checkout, and
+    // re-initialising it would be a surprise rather than a service.
+    if root.join(".git").exists() {
+        return Ok(());
+    }
+
+    run(&["init", "-q"])?;
+    run(&[
+        "-c", "user.email=loopsmith@localhost",
+        "-c", "user.name=loopsmith",
+        "add", "-A",
+    ])?;
+    run(&[
+        "-c", "user.email=loopsmith@localhost",
+        "-c", "user.name=loopsmith",
+        "commit", "-qm", "loopsmith: initial scaffold",
+    ])?;
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct NewLoopArgs {
     pub path: PathBuf,
@@ -21,6 +76,9 @@ pub struct NewLoopArgs {
     pub force: bool,
     /// A complete config supplied by the caller, instead of the starter.
     pub config: Option<ProvidedConfig>,
+    /// Initialise a git repository in the new directory, so `isolated: true`
+    /// nodes can have a worktree each.
+    pub git: bool,
 }
 
 /// Config text handed in whole, from a file or from stdin.
@@ -36,6 +94,10 @@ pub struct Scaffold {
     pub written: Vec<PathBuf>,
     /// `loop.yaml` or `loop.md`, whichever was written.
     pub config_file: String,
+    /// `Some(Ok(()))` when a repository was initialised, `Some(Err(why))` when
+    /// it was asked for and could not be, `None` when it was not asked for.
+    /// Never fatal: a loop without a repository still runs.
+    pub git: Option<Result<(), String>>,
 }
 
 pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
@@ -695,9 +757,14 @@ pub fn scaffold(args: &NewLoopArgs) -> std::io::Result<Scaffold> {
         &mut written,
     )?;
 
+    // Last, so the initial commit captures the whole scaffold rather than
+    // whatever half of it existed when git was called.
+    let git = args.git.then(|| init_git(root));
+
     Ok(Scaffold {
         written,
         config_file: config_file.to_string(),
+        git,
     })
 }
 
@@ -737,6 +804,10 @@ mod tests {
 
     fn args(path: &Path) -> NewLoopArgs {
         NewLoopArgs {
+            // Off in the shared helper: most scaffold tests are about which
+            // files land, and shelling out to git in each of them would make
+            // the suite slower and dependent on a git install for no gain.
+            git: false,
             path: path.to_path_buf(),
             name: "demo".into(),
             purpose: "a demo loop".into(),
@@ -967,9 +1038,69 @@ mod tests {
     }
 
     #[test]
+    fn asking_for_git_produces_a_repo_a_worktree_can_actually_resolve_against() {
+        // The point is not that `.git` exists. `git worktree add` resolves a
+        // start point, so a repository with no commit fails exactly as
+        // unhelpfully as no repository at all — which is the whole reason
+        // `init_git` commits rather than just initialising.
+        if loopsmith_util::which("git").is_none() {
+            return;
+        }
+        let dir = tmp("scaffold-git");
+        let mut a = args(&dir);
+        a.git = true;
+        let s = scaffold(&a).expect("scaffold succeeds");
+
+        assert!(matches!(s.git, Some(Ok(()))), "git init reported: {:?}", s.git);
+        assert!(dir.join(".git").exists(), "no repository was created");
+
+        let wt = dir.join("state").join("worktrees").join("probe");
+        let out = std::process::Command::new("git")
+            .args(["worktree", "add", "-B", "loopsmith/probe"])
+            .arg(&wt)
+            .current_dir(&dir)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "a worktree must resolve against the fresh repo: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    #[test]
+    fn not_asking_for_git_leaves_no_repository_and_says_nothing() {
+        let dir = tmp("scaffold-nogit");
+        let s = scaffold(&args(&dir)).expect("scaffold succeeds");
+        assert!(s.git.is_none(), "nothing was asked for, nothing is reported");
+        assert!(!dir.join(".git").exists());
+    }
+
+    #[test]
+    fn init_git_on_an_existing_repository_leaves_it_alone() {
+        // Scaffolding into a checkout someone already had is a plausible
+        // thing to do; re-initialising it would be a surprise, not a service.
+        if loopsmith_util::which("git").is_none() {
+            return;
+        }
+        let dir = tmp("scaffold-existing-git");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::process::Command::new("git").args(["init", "-q"]).current_dir(&dir).output().unwrap();
+        std::fs::write(dir.join("mine.txt"), "keep me").unwrap();
+
+        assert!(init_git(&dir).is_ok());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("mine.txt")).unwrap(),
+            "keep me",
+            "an existing working tree must not be touched"
+        );
+    }
+
+    #[test]
     fn scaffold_writes_the_expected_files() {
         let root = tmp("writes");
         let s = scaffold(&NewLoopArgs {
+            git: false,
             path: root.clone(),
             name: "demo".into(),
             purpose: "a demo loop".into(),
@@ -990,6 +1121,7 @@ mod tests {
     fn the_written_config_round_trips_through_the_parser() {
         let root = tmp("roundtrip");
         scaffold(&NewLoopArgs {
+            git: false,
             path: root.clone(),
             name: "demo".into(),
             purpose: "a demo loop".into(),
@@ -1010,6 +1142,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("something.txt"), b"hi").unwrap();
         let err = scaffold(&NewLoopArgs {
+            git: false,
             path: root.clone(),
             name: "demo".into(),
             purpose: "p".into(),
@@ -1027,6 +1160,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("something.txt"), b"hi").unwrap();
         assert!(scaffold(&NewLoopArgs {
+            git: false,
             path: root.clone(),
             name: "demo".into(),
             purpose: "p".into(),

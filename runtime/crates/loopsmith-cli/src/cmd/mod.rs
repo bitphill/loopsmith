@@ -118,6 +118,7 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
             config_file,
             config_stdin,
             markdown,
+            git,
         } => new::execute(new::NewArgs {
             path,
             name,
@@ -126,6 +127,7 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
             config_file,
             config_stdin,
             markdown,
+            git,
         }),
         Command::Validate { config, strict } => validate::execute(&config, strict),
         Command::Convert {

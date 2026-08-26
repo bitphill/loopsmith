@@ -76,6 +76,15 @@ export function RunConsole({
         </div>
       </header>
 
+      {state === "running" && (
+        <p className="hint border-b px-2.5 py-1.5">
+          This is running inside the loopsmith server, not this page. Close the tab or the whole
+          browser and it keeps going — reopen and the log picks up from the start. It stops if you
+          stop the server in the terminal; for something that must outlive that, use{" "}
+          <span className="font-semibold">Install schedule</span>.
+        </p>
+      )}
+
       <div
         ref={box}
         className="console min-h-0 flex-1 overflow-y-auto p-3"

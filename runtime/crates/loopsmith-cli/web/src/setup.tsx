@@ -65,10 +65,16 @@ export function PickFolder({
 /* --- where the loop lives ------------------------------------------------ */
 
 export function Location({
-  path, onPath, cfg, patch, format, onFormat, facts, permissions,
+  parent, onParent, loopPath, initGit, onInitGit,
+  cfg, patch, format, onFormat, facts, permissions,
 }: {
-  path: string;
-  onPath: (v: string) => void;
+  /** The folder the loop's own directory is created inside. */
+  parent: string;
+  onParent: (v: string) => void;
+  /** `parent/name` — where the loop will actually live. */
+  loopPath: string;
+  initGit: boolean;
+  onInitGit: (v: boolean) => void;
   cfg: LoopConfig;
   patch: (p: Partial<LoopConfig>) => void;
   format: Format;
@@ -92,8 +98,8 @@ export function Location({
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Field
-          label="Folder"
-          hint="Pick one with the folder button, or type a path. `~` works."
+          label="Put it in this folder"
+          hint="A container, not the loop itself. The loop gets its own directory inside it, named after the loop."
           required
           wide
         >
@@ -102,9 +108,9 @@ export function Location({
               {/* min-w-0 lets the input actually shrink; without it the flex
                   base size wins and the button is pushed to the next line. */}
               <div className="min-w-0 flex-1">
-                <Text id={id} mono value={path} onChange={onPath} placeholder="~/loops/blog-pipeline" invalid={!!facts && !facts.writable} />
+                <Text id={id} mono value={parent} onChange={onParent} placeholder="~/loops" invalid={!!facts && !facts.writable} />
               </div>
-              <PickFolder startIn={path || undefined} onPick={onPath} label="Choose the folder for this loop" />
+              <PickFolder startIn={parent || undefined} onPick={onParent} label="Choose the folder for this loop" />
             </div>
           )}
         </Field>
@@ -124,6 +130,12 @@ export function Location({
           {(id) => <Text id={id} value={cfg.description ?? ""} onChange={(description) => patch({ description })} placeholder="Draft, fact-check, and publish one post a week in the house voice." />}
         </Field>
       </div>
+
+      {parent.trim() && cfg.name.trim() && (
+        <p className="hint mt-3 stripe stripe-ember py-1">
+          Will be created at <span className="font-mono text-text">{loopPath}</span>
+        </p>
+      )}
 
       {facts && (
         <div className="mt-4 space-y-2">
@@ -151,15 +163,25 @@ export function Location({
               instead if you meant to edit it.
             </Note>
           )}
-          {!facts.in_git_repo && (
-            <Note>
-              Not inside a git repository, so nodes marked <span className="font-mono">isolated</span> cannot
-              have their own worktree — they will run in the shared directory and say so. Run{" "}
-              <span className="font-mono">git init</span> there if you plan to run builders in parallel.
+          {!facts.in_git_repo && !initGit && (
+            <Note tone="warning">
+              Without a repository, nodes marked <span className="font-mono">isolated</span> cannot have
+              their own worktree — they will all share one directory and say so. That is fine for a single
+              builder and destructive for two running at once, because they overwrite each other's files.
+              Turn the setting below back on, or run <span className="font-mono">git init</span> there
+              yourself later.
             </Note>
           )}
         </div>
       )}
+
+      <hr className="rule my-4" />
+      <Toggle
+        checked={initGit}
+        onChange={onInitGit}
+        label="Make it a git repository"
+        hint="Initialises a repo with one commit in the new directory. This is what lets nodes marked `isolated` get a worktree each instead of silently sharing one — the scaffold already writes a .gitignore expecting it."
+      />
 
       <hr className="rule my-4" />
       <p className="label mb-1.5">What this loop will be allowed to do</p>
