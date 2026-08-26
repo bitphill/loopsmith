@@ -25,10 +25,75 @@ pub struct SledStore {
     db: sled::Db,
 }
 
+/// Is this the "somebody else holds the lock" error, rather than a real one?
+///
+/// Matched on the OS error kind where sled surfaces one, and on the message
+/// otherwise — sled wraps the io::Error into a string in some paths, which
+/// leaves no typed error to inspect. A corrupt database or a missing directory
+/// must not be retried, so this deliberately matches narrowly.
+fn is_lock_contention(e: &sled::Error) -> bool {
+    if let sled::Error::Io(io) = e {
+        if matches!(
+            io.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::ResourceBusy
+        ) {
+            return true;
+        }
+    }
+    let text = e.to_string();
+    text.contains("could not acquire lock") || text.contains("WouldBlock")
+}
+
 impl SledStore {
+    /// How long to keep trying for a lock that somebody is still letting go of.
+    ///
+    /// Not a guess: the failure it exists for is a previous holder that has
+    /// already been dropped or has already exited, so the lock is coming free
+    /// in milliseconds. Two seconds is far longer than that and still short
+    /// enough that a genuinely held lock reports quickly rather than hanging.
+    const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let db = sled::open(path).map_err(|e| MemError::Backend(e.to_string()))?;
-        Ok(Self { db })
+        let path = path.as_ref();
+        let deadline = std::time::Instant::now() + Self::LOCK_WAIT;
+        let mut backoff = std::time::Duration::from_millis(5);
+
+        loop {
+            match sled::open(path) {
+                Ok(db) => return Ok(Self { db }),
+                Err(e) => {
+                    // Sled releases its file lock as part of cleanup, and
+                    // neither `drop` nor process exit makes that instantaneous.
+                    // So "locked" here usually means "locked for another
+                    // millisecond", and failing immediately turns an ordinary
+                    // race into a user-visible error.
+                    //
+                    // The web UI is what made this reachable: pressing Run and
+                    // then Status spawns two processes back to back, and the
+                    // first is often still exiting when the second opens.
+                    // Under the CLI alone the gap was a human's reaction time.
+                    let contended = is_lock_contention(&e);
+                    if !contended || std::time::Instant::now() >= deadline {
+                        return Err(MemError::Backend(if contended {
+                            format!(
+                                "{} is locked by another loopsmith process and did not \
+                                 come free within {}s. A run, a watch, or an MCP server \
+                                 is probably still using it.",
+                                path.display(),
+                                Self::LOCK_WAIT.as_secs()
+                            )
+                        } else {
+                            e.to_string()
+                        }));
+                    }
+                    std::thread::sleep(backoff);
+                    // Doubling rather than a fixed interval: the common case
+                    // clears on the first retry and should not pay for the
+                    // rare one.
+                    backoff = (backoff * 2).min(std::time::Duration::from_millis(150));
+                }
+            }
+        }
     }
 
     /// Monotonic sequence shared by every keyspace; only ordering matters.
@@ -291,6 +356,68 @@ mod tests {
         }
         assert_eq!(s.runs().unwrap(), vec!["alpha", "beta"]);
         let _ = std::fs::remove_dir_all(p);
+    }
+
+    #[test]
+    fn opening_waits_for_a_lock_that_is_being_released() {
+        // The failure this exists for, made deterministic. A holder that is
+        // about to let go looks exactly like a holder that never will, for the
+        // few milliseconds it takes sled to finish cleaning up — and on a
+        // loaded machine those milliseconds are when the next process opens.
+        let dir = tmp_dir("resume-lock-wait");
+        let held = SledStore::open(&dir).unwrap();
+
+        let releasing = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            drop(held);
+        });
+
+        // Without the retry this returns WouldBlock immediately.
+        let started = std::time::Instant::now();
+        let reopened = SledStore::open(&dir);
+        assert!(
+            reopened.is_ok(),
+            "open should have waited for the lock, got {:?}",
+            reopened.err()
+        );
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(100),
+            "it returned too fast to have actually waited"
+        );
+
+        releasing.join().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_lock_nobody_releases_is_reported_rather_than_waited_on_forever() {
+        // The other half of the trade: retrying must not become hanging. The
+        // holder is kept alive for the whole call, so this exercises the
+        // deadline rather than the happy path.
+        let dir = tmp_dir("resume-lock-held");
+        let _held = SledStore::open(&dir).unwrap();
+
+        let started = std::time::Instant::now();
+        let opened = SledStore::open(&dir);
+        let waited = started.elapsed();
+        let Err(err) = opened else {
+            panic!("a lock held for the whole call must not open");
+        };
+
+        assert!(
+            waited >= SledStore::LOCK_WAIT,
+            "gave up after {waited:?}, before the deadline"
+        );
+        assert!(
+            waited < SledStore::LOCK_WAIT * 3,
+            "took {waited:?}, which is not a bounded wait"
+        );
+        // The message has to say what is holding it, or the user has nothing
+        // to act on.
+        let text = err.to_string();
+        assert!(text.contains("locked by another loopsmith process"), "got: {text}");
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

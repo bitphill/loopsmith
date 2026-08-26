@@ -51,6 +51,24 @@ All notable changes to loopsmith. Format follows
   every page load, with the Keychain free to stop and prompt. Moved to
   `spawn_blocking`.
 
+### Fixed
+
+- **Opening the memory store now waits for a lock that is being released.**
+  Sled holds a file lock and releases it as part of cleanup, which neither
+  `drop` nor process exit makes instantaneous — so opening a store microseconds
+  after the previous holder let go returned `WouldBlock` and failed outright.
+
+  The CLI barely exposed this: each command opens once and exits, and `watch`
+  opens once and reuses it. The web UI is what made it reachable, because
+  pressing Run and then Status spawns two processes back to back and the first
+  is often still exiting when the second opens. Caught by a macOS CI runner
+  under load, on a test that had passed thirty consecutive times locally.
+
+  `open` now retries for up to two seconds, backing off, and only for lock
+  contention — a corrupt database or a missing directory still fails at once. A
+  lock nobody releases reports which process is probably holding it rather than
+  hanging.
+
 ### Fixed (provider catalog)
 
 - **A chosen model was silently discarded.** The Claude and Grok entries listed
@@ -205,7 +223,7 @@ command's behaviour.
 
 ### Notes
 
-- 187 tests in the CLI crate and 399 across the workspace, clippy clean, plus a
+- 187 tests in the CLI crate and 401 across the workspace, clippy clean, plus a
   fourteen-case Playwright suite driving the real binary.
 - New dependencies, both behind the `web` feature: `axum` and `tokio`. The
   WebSocket transport is `axum::extract::ws` — the same RFC6455 the browser
