@@ -1,0 +1,450 @@
+@import "tailwindcss";
+
+/* ===========================================================================
+   FORGE
+   ---------------------------------------------------------------------------
+   The palette is derived from the product rather than from a trend: loopsmith
+   is a smith's tool, so the accent is the heat — molten orange against cold
+   iron — and the secondary is the quench, an electric cyan that only ever
+   appears where something has been verified or has settled.
+
+   Three theme states, not two. An explicit choice stamps data-theme on the
+   root; the default "system" setting stamps nothing, and only
+   prefers-color-scheme separates light from dark there. Every colour is a
+   token defined on bare :root, redefined in the two override blocks, and read
+   through var() everywhere else — a colour whose only definition sits inside a
+   media query renders one theme's text on the other theme's ground.
+   =========================================================================== */
+
+:root {
+  /* --- Forge, light: warm bone and cold ink, heat kept for the accents --- */
+  --ground: #faf7f2;
+  --surface: #ffffff;
+  --raised: #f4efe6;
+  --sunken: #efe8dc;
+  --line: #e2dacd;
+  --line-strong: #cfc4b2;
+
+  --text: #191410;
+  --text-dim: #6a6055;
+  --text-faint: #9a9084;
+
+  /* The heat. Deeper on light so it clears 4.5:1 against bone. */
+  --ember: #c2410c;
+  --ember-hot: #ea580c;
+  --ember-wash: #fdefe6;
+  --ember-line: #f3c9ad;
+  --on-ember: #fffaf5;
+
+  /* The quench. Only ever means "verified", "settled", "deterministic". */
+  --quench: #0e7490;
+  --quench-wash: #e6f6fa;
+  --quench-line: #a9dced;
+
+  --good: #15803d;
+  --good-wash: #e9f7ee;
+  --warn: #a16207;
+  --warn-wash: #fdf4e0;
+  --bad: #be123c;
+  --bad-wash: #fdeaef;
+
+  --shadow: 0 1px 2px rgb(60 40 20 / 0.06), 0 8px 24px -12px rgb(60 40 20 / 0.18);
+  --shadow-lift: 0 2px 4px rgb(60 40 20 / 0.08), 0 18px 40px -16px rgb(60 40 20 / 0.28);
+
+  /* One radius scale, applied everywhere. Mixed corner systems read as an
+     accident rather than a decision. */
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
+
+  --sans: "Archivo", ui-sans-serif, "Segoe UI", Roboto, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  color-scheme: light;
+}
+
+/* System dark. Guarded so an explicit light choice still wins on a dark OS. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0b0a09;
+    --surface: #141210;
+    --raised: #1c1917;
+    --sunken: #0f0d0c;
+    --line: #2b2521;
+    --line-strong: #3d352f;
+
+    --text: #f5f0e8;
+    --text-dim: #a49a8d;
+    --text-faint: #6e655c;
+
+    --ember: #ff6b1a;
+    --ember-hot: #ffa033;
+    --ember-wash: #2a1509;
+    --ember-line: #57290d;
+    --on-ember: #1a0c02;
+
+    --quench: #22d3ee;
+    --quench-wash: #08252c;
+    --quench-line: #12505f;
+
+    --good: #4ade80;
+    --good-wash: #0c2417;
+    --warn: #fbbf24;
+    --warn-wash: #2a1f06;
+    --bad: #fb7185;
+    --bad-wash: #2c0d15;
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px -12px rgb(0 0 0 / 0.7);
+    --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.6), 0 18px 40px -16px rgb(0 0 0 / 0.8);
+
+    color-scheme: dark;
+  }
+}
+
+/* Explicit dark, so the toggle wins in the other direction too. */
+:root[data-theme="dark"] {
+  --ground: #0b0a09;
+  --surface: #141210;
+  --raised: #1c1917;
+  --sunken: #0f0d0c;
+  --line: #2b2521;
+  --line-strong: #3d352f;
+
+  --text: #f5f0e8;
+  --text-dim: #a49a8d;
+  --text-faint: #6e655c;
+
+  --ember: #ff6b1a;
+  --ember-hot: #ffa033;
+  --ember-wash: #2a1509;
+  --ember-line: #57290d;
+  --on-ember: #1a0c02;
+
+  --quench: #22d3ee;
+  --quench-wash: #08252c;
+  --quench-line: #12505f;
+
+  --good: #4ade80;
+  --good-wash: #0c2417;
+  --warn: #fbbf24;
+  --warn-wash: #2a1f06;
+  --bad: #fb7185;
+  --bad-wash: #2c0d15;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px -12px rgb(0 0 0 / 0.7);
+  --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.6), 0 18px 40px -16px rgb(0 0 0 / 0.8);
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--text);
+  --color-dim: var(--text-dim);
+  --color-faint: var(--text-faint);
+  --color-ember: var(--ember);
+  --color-ember-hot: var(--ember-hot);
+  --color-ember-wash: var(--ember-wash);
+  --color-ember-line: var(--ember-line);
+  --color-on-ember: var(--on-ember);
+  --color-quench: var(--quench);
+  --color-quench-wash: var(--quench-wash);
+  --color-quench-line: var(--quench-line);
+  --color-good: var(--good);
+  --color-good-wash: var(--good-wash);
+  --color-warn: var(--warn);
+  --color-warn-wash: var(--warn-wash);
+  --color-bad: var(--bad);
+  --color-bad-wash: var(--bad-wash);
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+  --radius-sm: var(--r-sm);
+  --radius-DEFAULT: var(--r);
+  --radius-lg: var(--r-lg);
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   ---------------------------------------------------------------------------
+   Everything below lives in a cascade layer on purpose. Component classes
+   written as bare rules after `@import "tailwindcss"` outrank every utility,
+   so `.rule { margin: 0 }` silently cancelled `my-4` and two sections ran into
+   each other with no gap and no visible divider. Inside @layer, utilities win,
+   which is what anyone writing `class="rule my-4"` expects.
+   -------------------------------------------------------------------------- */
+
+@layer base {
+
+* { border-color: var(--line); }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+
+/* Digits that line up in columns. Costs nothing, and a table of token counts
+   that jitters as it updates is genuinely harder to read. */
+.tabular { font-variant-numeric: tabular-nums; }
+
+:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+::selection { background: var(--ember); color: var(--on-ember); }
+
+/* Scrollbars, so a dark panel does not get a light-grey gutter bolted on. */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--r-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+} /* @layer base */
+
+/* --------------------------------------------------------------------------
+   The forge mark: a heat gradient used once, on the wordmark.
+   Boldness spent in one place; everything around it stays quiet.
+   -------------------------------------------------------------------------- */
+
+@layer components {
+
+.forge-mark {
+  background: linear-gradient(100deg, var(--ember) 0%, var(--ember-hot) 55%, var(--ember) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+}
+
+/* --------------------------------------------------------------------------
+   Components
+   -------------------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+}
+
+.rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
+
+.label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--text);
+}
+
+.hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  padding: 8px 11px;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+}
+.input::placeholder,
+.textarea::placeholder { color: var(--text-faint); }
+
+.input:hover, .select:hover, .textarea:hover { border-color: var(--ember-line); }
+
+.input:focus, .select:focus, .textarea:focus {
+  outline: none;
+  border-color: var(--ember);
+  box-shadow: 0 0 0 3px var(--ember-wash);
+}
+
+.input.mono, .textarea.mono { font-family: var(--mono); font-size: 12.5px; }
+
+.select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 51%, calc(100% - 10px) 51%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.textarea { resize: vertical; min-height: 64px; }
+
+.invalid { border-color: var(--bad) !important; }
+.invalid:focus { box-shadow: 0 0 0 3px var(--bad-wash) !important; }
+
+/* Buttons. One radius, one motion language: a 1px press, nothing more. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+  border-radius: var(--r);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.1s ease, background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.btn:hover:not(:disabled) { background: var(--raised); border-color: var(--ember-line); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--ember);
+  border-color: var(--ember);
+  color: var(--on-ember);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--ember-hot);
+  border-color: var(--ember-hot);
+  color: var(--on-ember);
+}
+
+.btn-quench {
+  background: var(--quench-wash);
+  border-color: var(--quench-line);
+  color: var(--quench);
+}
+.btn-quench:hover:not(:disabled) { background: var(--quench-wash); border-color: var(--quench); }
+
+.btn-danger { color: var(--bad); border-color: var(--line-strong); }
+.btn-danger:hover:not(:disabled) { background: var(--bad-wash); border-color: var(--bad); }
+
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn-ghost:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+
+.btn-sm { padding: 5px 10px; font-size: 12px; border-radius: var(--r-sm); }
+.btn-icon { padding: 6px; width: 30px; height: 30px; }
+
+/* Chips carry state, never decoration. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--text-dim);
+  padding: 2px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.chip-good { background: var(--good-wash); border-color: color-mix(in oklab, var(--good) 35%, transparent); color: var(--good); }
+.chip-warn { background: var(--warn-wash); border-color: color-mix(in oklab, var(--warn) 35%, transparent); color: var(--warn); }
+.chip-bad  { background: var(--bad-wash);  border-color: color-mix(in oklab, var(--bad) 35%, transparent);  color: var(--bad); }
+.chip-ember { background: var(--ember-wash); border-color: var(--ember-line); color: var(--ember); }
+.chip-quench { background: var(--quench-wash); border-color: var(--quench-line); color: var(--quench); }
+
+/* A severity stripe reads at a glance in a way a colour word does not. */
+.stripe { border-left: 3px solid var(--line-strong); padding-left: 11px; }
+.stripe-error { border-left-color: var(--bad); }
+.stripe-warning { border-left-color: var(--warn); }
+.stripe-note { border-left-color: var(--quench); }
+.stripe-ember { border-left-color: var(--ember); }
+
+/* The run console. Mono, dark in both themes: a terminal that turns white in
+   light mode is a terminal nobody recognises. */
+.console {
+  background: #0b0a09;
+  color: #e8e2d8;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.console .out { color: #e8e2d8; }
+.console .err { color: #fb7185; }
+.console .meta { color: #ffa033; }
+
+.kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--r-sm);
+  padding: 1px 5px;
+  background: var(--raised);
+  color: var(--text-dim);
+}
+
+/* Entry motion, used once per mount rather than on a loop. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: rise 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Drives <Shimmer>: a masked gradient swept across text while waiting on
+   something with no known end. */
+@keyframes shimmer-sweep {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@keyframes pulse-ember {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--ember) 45%, transparent); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+/* Reserved for the one thing that is genuinely live: a running job. */
+.running { animation: pulse-ember 1.8s ease-in-out infinite; }
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in oklab, var(--ground) 72%, transparent);
+  backdrop-filter: blur(3px);
+  z-index: 50;
+}
+
+} /* @layer components */

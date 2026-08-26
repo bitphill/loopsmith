@@ -37,6 +37,13 @@ npm/bin/loopsmith.exe
 npm/*.tgz
 pypi/dist/
 pypi/build/
+# Playwright's own output. `src/web/dist/` is deliberately NOT here: it is the
+# compiled web UI, `include_str!` reads it at build time, and it has to travel
+# in the published tarball or `--web` 404s for everyone who installed from a
+# registry.
+runtime/crates/loopsmith-cli/web/test-results/
+runtime/crates/loopsmith-cli/web/playwright-report/
+runtime/crates/loopsmith-cli/web/.playwright/
 pypi/src/*.egg-info/
 pypi/.venv-build/
 __pycache__/

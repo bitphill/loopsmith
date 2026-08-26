@@ -18,11 +18,21 @@ description = "loopsmith: plan, run, resume, and gate self-evolving agent loops 
 # Leading slashes anchor these to the package root. Unanchored `README.md`
 # matches `tests/README.md` too, which is a note to whoever adds a test and has
 # no business in a published tarball.
+# `src/web/dist/` holds the compiled web UI. It sits under `src/` on
+# purpose: `config/` and `assets/` cannot travel in the tarball, so a
+# frontend served from anywhere else would 404 for every installed user.
 include = ["/src/**/*", "/templates/**/*", "/README.md"]
 
 [[bin]]
 name = "loopsmith"
 path = "src/main.rs"
+
+[features]
+default = ["web"]
+# `loopsmith web` — the browser UI. On by default because the people it exists
+# for are the ones least likely to know a cargo flag. Dropping it removes the
+# whole async tree: `cargo install loopsmith --no-default-features`.
+web = ["dep:axum", "dep:tokio"]
 
 [dependencies]
 loopsmith-util = { workspace = true }
@@ -37,6 +47,8 @@ clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+axum = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
 loopsmith-util = { workspace = true, features = ["testing"] }

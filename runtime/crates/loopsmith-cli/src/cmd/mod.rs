@@ -3,7 +3,7 @@
 //! Every command returns `Result<ExitCode, String>` rather than exiting, so a
 //! command is testable and the exit code is decided in one place.
 
-use crate::cli::{Cli, Command, SkillsAction};
+use crate::cli::{Command, SkillsAction};
 use crate::run::RunOutcome;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -26,6 +26,8 @@ pub mod skills;
 pub mod status;
 pub mod validate;
 pub mod watch;
+#[cfg(feature = "web")]
+pub mod web;
 
 /// Directory holding the config. `Path::parent()` yields `Some("")` for a
 /// bare filename like `loop.yaml`, and an empty path is not a usable working
@@ -105,9 +107,9 @@ pub fn report_outcome(out: &RunOutcome) {
     }
 }
 
-/// Route a parsed command to its module.
-pub fn dispatch(cli: Cli) -> Result<ExitCode, String> {
-    match cli.command {
+/// Route a resolved command to its module.
+pub fn dispatch(command: Command) -> Result<ExitCode, String> {
+    match command {
         Command::New {
             path,
             name,
@@ -116,6 +118,7 @@ pub fn dispatch(cli: Cli) -> Result<ExitCode, String> {
             config_file,
             config_stdin,
             markdown,
+            git,
         } => new::execute(new::NewArgs {
             path,
             name,
@@ -124,6 +127,7 @@ pub fn dispatch(cli: Cli) -> Result<ExitCode, String> {
             config_file,
             config_stdin,
             markdown,
+            git,
         }),
         Command::Validate { config, strict } => validate::execute(&config, strict),
         Command::Convert {
@@ -178,5 +182,14 @@ pub fn dispatch(cli: Cli) -> Result<ExitCode, String> {
         Command::Proposals { config, run_id } => proposals::execute(&config, &run_id),
         Command::Prune { config } => prune::execute(&config),
         Command::Mcp { state } => mcp::execute(state),
+        #[cfg(feature = "web")]
+        Command::Web { port, no_open } => web::execute(port, no_open),
+        // Built without the `web` feature: say which flag brings it back
+        // rather than pretending the command does not exist.
+        #[cfg(not(feature = "web"))]
+        Command::Web { .. } => Err("this build has no web UI. Rebuild with the `web` feature: \
+             `cargo install loopsmith` (it is on by default), or \
+             `cargo build --features web` from a checkout."
+            .into()),
     }
 }

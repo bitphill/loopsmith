@@ -121,6 +121,112 @@ The scaffolded config ships with `pre_execution` steps set to `done: false`, so
 
 ---
 
+## 4b. The browser UI
+
+```bash
+loopsmith --web        # identical to: loopsmith web
+```
+
+Both spellings exist and neither is the real one. `--web` is what people reach
+for; a subcommand is what the rest of this grammar looks like. `--web` combined
+with any subcommand is refused rather than silently resolved.
+
+Serves `http://127.0.0.1:3000`, stepping up a port at a time if that is busy, and
+opens a browser tab. `--no-open` prints the URL instead; `--port` picks a
+starting port.
+
+### What it is, structurally
+
+Three properties hold, and each is load-bearing:
+
+| Property | Why |
+|---|---|
+| Binds `127.0.0.1` only | It spawns commands as this user. An interface bind would hand that to the network. |
+| Every action spawns `current_exe()` | The browser cannot drift from the CLI, and cannot do anything `loopsmith --help` does not list. |
+| The frontend is compiled in | Someone who installed from a registry has no checkout; a UI that only works beside its own source is one most users never see. |
+
+The browser names a **verb** from a closed list and its parameters. It never
+names a program to run. That is the difference between a control panel and a
+remote shell.
+
+### What it computes in-process
+
+The right-hand rail re-runs on every edit, calling the same crates the CLI does:
+
+- `loopsmith_core::validate` — every issue, with its dotted field path
+- `loopsmith_graph::plan` — waves, critical path, Amdahl ceiling, chosen concurrency
+- `loopsmith_graph::unisolated_parallel_writers` — builders that would clobber each other
+- the permission derivation from §7
+- an upper-bound cost from iterations × nodes × the priciest reachable provider
+
+None of it spawns a process, so it answers in under a millisecond and can run on
+every keystroke.
+
+### Detection
+
+Probing is free by default: `which` plus a `--version` bounded at six seconds,
+run concurrently. The budget is generous because a Node-based CLI with a cold
+module cache can take several seconds to print its own version on the first scan
+after a reboot — and that first scan is the one a new user sees.
+
+Detected: agent CLIs on `PATH`, Ollama models via `ollama list`, MCP servers from
+`~/.claude.json`, `~/.claude/settings.json`, Claude Desktop, `~/.cursor/mcp.json`,
+VS Code and `./.mcp.json`, which API keys are present (presence only — values are
+never read), installed sub-agents, git, and the platform facts `doctor` reports.
+
+Codex keeps its MCP servers in TOML. That file is named in a note rather than
+parsed: a TOML dependency for one file is not a trade worth making.
+
+A **Test** button per provider performs a real handshake — one prompt, one round
+trip. It is a button rather than part of detection because a page load is not
+consent to spend money.
+
+### Secrets
+
+Two stores, and the trade is stated rather than hidden:
+
+- **Shell profile** — a real environment variable every tool on the machine sees.
+  Plaintext on disk, mode `0600`, inside a fenced block that is rewritten in
+  place. The file is chosen from `$SHELL`, so a zsh login gets `.zshrc` and not
+  `.profile`, which zsh never reads.
+- **OS secret store** — Keychain, Credential Manager, or libsecret. Nothing in a
+  dotfile; only loopsmith-started runs see the value.
+
+Either way the config records the key **name** only, in `requires_env`, which is
+the rule that section already had.
+
+### The example library
+
+All thirteen `config/examples/*.yaml` are compiled in with `include_str!`, since
+`include_str!` cannot reach above the package root and `config/` is excluded from
+the published tarball. `tools/sync-examples.sh` copies them into
+`runtime/crates/loopsmith-cli/templates/examples/`, and a test fails if the two
+have drifted — so a stale copy is caught by `cargo test`, not by a user.
+
+A user's own `~/.loopsmith/examples/*.yaml` take priority, and a checkout's
+`config/examples/` is read live so edits show up without a rebuild.
+
+### Building it
+
+The frontend is React 19 + Vite + Tailwind v4, emitted to fixed filenames
+(`index.html`, `app.js`, `app.css`) because a content hash cannot be chased by an
+`include_str!` literal.
+
+```bash
+npm --prefix runtime/crates/loopsmith-cli/web install
+npm --prefix runtime/crates/loopsmith-cli/web run build   # writes src/web/dist/
+cargo build -p loopsmith --release
+```
+
+`npm run dev` serves on 5173 and proxies `/api` to a `loopsmith web --no-open`,
+so the UI can be iterated on without a Rust rebuild. `npm run test:e2e` drives
+the real binary through Playwright.
+
+The whole thing sits behind a default-on `web` feature. To drop the async
+dependency tree entirely: `cargo install loopsmith --no-default-features`.
+
+---
+
 ## 5. Configuration reference, section by section
 
 Validated against `config/loop.schema.json`. Cross-field rules the schema

@@ -4,6 +4,235 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-08-26
+
+### Security
+
+- **Closed a DNS-rebinding hole in `loopsmith web`.** Binding loopback stops the
+  network reaching the server; it does not stop a *browser* reaching it. A page
+  on any domain whose DNS re-resolves to `127.0.0.1` is same-origin to the
+  browser, so no CORS check ever runs and the request arrives looking ordinary.
+
+  Verified exploitable before the fix: `Host: evil.com` returned 200 on every
+  endpoint, and a cross-origin `POST /api/jobs` executed. That reachability
+  meant `POST /api/secrets/reveal` could read back every API key in the shell
+  profile, and `POST /api/secrets` could write a variable into it — which is
+  code execution at the next login.
+
+  The fix is the standard one: an attacker controls the DNS name but cannot
+  change the `Host` header, because the browser sets it from the URL. Requests
+  not addressed to a loopback name are refused, as are state-changing requests
+  carrying a foreign `Origin`. The guard wraps the assets too, so a rebound page
+  cannot even read the bundle.
+
+- **Refused environment variables that are not credentials.** The secrets panel
+  accepted any all-caps name, including `PATH`, `LD_PRELOAD`,
+  `DYLD_INSERT_LIBRARIES`, `NODE_OPTIONS` and `GIT_SSH_COMMAND`. Writing one of
+  those into a shell profile arranges for code to run at the next login rather
+  than storing a key. None of them is a credential, so refusing them costs a
+  legitimate user nothing.
+
+### Fixed
+
+- **A run no longer appears to stop when the tab closes.** It never did stop —
+  a job is a subprocess of the server, not of the page — but the page forgot
+  which job it had been watching, which looked identical. It now reattaches to
+  anything still running on load, and the socket's replay means the log arrives
+  whole rather than from the moment of rejoining.
+- **Mutex poisoning could permanently disable the job panel.** Twelve
+  `lock().unwrap()` call sites meant one panic inside any critical section
+  poisoned the registry for the rest of the session. They now recover.
+- **Unbounded process spawning.** `POST /api/jobs` had no ceiling; a stuck
+  button or a reloading page could spawn subprocesses until the machine gave up.
+  Capped at eight concurrent.
+- **Blocking work on the async workers.** Handlers touching the filesystem, the
+  keychain, or a subprocess ran on tokio worker threads. `list_secrets` was the
+  worst: one `security` spawn per key, so a dozen sequential subprocesses on
+  every page load, with the Keychain free to stop and prompt. Moved to
+  `spawn_blocking`.
+
+### Fixed
+
+- **Opening the memory store now waits for a lock that is being released.**
+  Sled holds a file lock and releases it as part of cleanup, which neither
+  `drop` nor process exit makes instantaneous — so opening a store microseconds
+  after the previous holder let go returned `WouldBlock` and failed outright.
+
+  The CLI barely exposed this: each command opens once and exits, and `watch`
+  opens once and reuses it. The web UI is what made it reachable, because
+  pressing Run and then Status spawns two processes back to back and the first
+  is often still exiting when the second opens. Caught by a macOS CI runner
+  under load, on a test that had passed thirty consecutive times locally.
+
+  `open` now retries for up to two seconds, backing off, and only for lock
+  contention — a corrupt database or a missing directory still fails at once. A
+  lock nobody releases reports which process is probably holding it rather than
+  hanging.
+
+### Fixed (provider catalog)
+
+- **A chosen model was silently discarded.** The Claude and Grok entries listed
+  models, the UI offered them, the user picked one — and the argv never
+  mentioned `{model}`, so the CLI used its own default. Both now pass it.
+- **Hermes was invoked with a flag it does not have.** `-p` is not a Hermes
+  option; `-z` / `--oneshot` is, and its own description is exactly what a loop
+  wants: one prompt, only the final response on stdout, no banner or spinner.
+- **`llm` would have been handed an empty model.** It listed no models but
+  substituted `{model}`, and an unset model renders as an empty string, so the
+  CLI would receive a bare `-m ""`. It now reads the prompt from stdin and uses
+  its own configured default.
+- **Three entries claimed to be verified without having been.** `gemini`,
+  `codex` and `llm` are not installed on the machine this table was checked
+  against, so their argv was written from memory rather than from evidence.
+  They are marked as templates, which is what that grade is for.
+
+  Four invariants now hold the table honest: an entry may not substitute
+  `{model}` unless it has one to offer, an entry that offers models must
+  actually pass one, the prompt must be delivered exactly once by exactly one
+  route, and a template must say so in its own note. Three of those four failed
+  when first written, which is how the bugs above were found. Ollama is the one
+  entry whose models are discovered at run time rather than listed, and that is
+  now a field rather than an absence.
+
+### Changed
+
+- **A new loop gets its own directory inside the folder you choose**, named
+  after the loop, rather than being scaffolded into that folder directly. The
+  obvious thing to pick is a container like `~/loops`, and scaffolding straight
+  into it turned the container into the loop — after which every later loop
+  either refused as non-empty or was forced on top of the first one's ledger.
+
+- **`loopsmith new --git`** initialises a repository, with one commit, in the
+  new directory. This is what makes `isolated: true` isolate: a worktree is a
+  second checkout, so with no repository every node shares one directory —
+  fine for a single builder, destructive for two at once. The initial commit is
+  not optional, because `git worktree add` resolves a start point and a
+  repository with no HEAD has none. The web UI turns it on by default, which
+  removes the "not inside a git repository" warning entirely. The scaffold has
+  always written a `.gitignore`; nothing ever created the repository it implied.
+
+- **Split `release` and `dist` build profiles.** `cargo install` and Homebrew
+  build on the user's machine while they wait, so `release` stays at thin LTO.
+  The published npm and PyPI binaries are built once in CI, where nobody is
+  waiting, so the release workflow now uses `dist` — fat LTO and one codegen
+  unit. Measured on this workspace: 8.21 MB in 3m50s against 6.88 MB in 9m29s,
+  16% off the download for build time that costs nothing.
+
+  `panic` stays at `unwind` in both. The usual argument for `abort` is size,
+  but loopsmith is a long-running server as well as a CLI, and tokio catches a
+  panicking request handler to keep the rest alive; under `abort` one bad
+  request would take down a server the user has open.
+
+### Added
+
+Adds a browser UI. No change to the config model, the gate, or any existing
+command's behaviour.
+
+### Added
+
+- **`loopsmith --web` / `loopsmith web`** — a local browser UI for building,
+  checking, creating, and running loops. Both spellings resolve to one command;
+  `--web` combined with a subcommand is refused rather than silently resolved.
+  Serves `127.0.0.1:3000`, steps up a port if that one is busy, and opens a tab.
+
+  It exists for the reader `README-FOR-DUMMIES.md` was written for — the one who
+  bounced off a schema reference. Every field carries a permanent one-line hint
+  and an info control explaining *why the field exists and what goes wrong
+  without it*, and a dismissible five-panel tour explains the one idea the rest
+  depends on: that a model never certifies its own completion.
+
+  Three properties hold the design up. It binds loopback only, because it spawns
+  commands as this user. Every action spawns `current_exe()` rather than calling
+  the crates, so the browser cannot drift from the CLI and cannot do anything
+  `loopsmith --help` does not list — the browser names a verb from a closed list
+  and never names a program. And the frontend is compiled into the binary, so an
+  install from any registry has a working UI with nothing else to fetch.
+
+- **Machine detection.** Agent CLIs on `PATH` with their versions, Ollama models
+  via `ollama list`, MCP servers read from `~/.claude.json`,
+  `~/.claude/settings.json`, Claude Desktop, `~/.cursor/mcp.json`, VS Code and
+  `./.mcp.json`, which API keys are present (presence only — values are never
+  read), installed sub-agents, git, and the platform facts `doctor` reports.
+  Found CLIs become one-click provider cards prefilling a known-good argv;
+  entries whose argv is a starting point rather than verified say so on the card
+  instead of failing later as a spawn error.
+
+  A per-provider **Test** button performs a real handshake. It is a button and
+  not part of detection because a page load is not consent to spend money.
+
+- **Live review**, recomputed in-process on every edit: `loopsmith_core::validate`
+  issues with clickable field paths, the wave schedule and Amdahl ceiling from
+  `loopsmith_graph::plan`, parallel builders that would overwrite each other for
+  want of a worktree, the derived permission grant, and an upper-bound cost — or
+  the word **unbounded** where no ceiling is set.
+
+- **Secrets panel.** Writes to the shell profile (a real environment variable,
+  `0600`, inside a fenced block rewritten in place) or to the OS secret store —
+  Keychain, Credential Manager, libsecret. The profile file is chosen from
+  `$SHELL`, so a zsh login gets `.zshrc` rather than the `.profile` zsh never
+  reads. Only the key *name* ever reaches a config, via `requires_env`.
+
+- **The thirteen examples ship inside the binary** and load in one click.
+  `tools/sync-examples.sh` copies `config/examples/*.yaml` into the crate, since
+  `include_str!` cannot reach above the package root and `config/` is excluded
+  from the published tarball. A test fails when the copies have drifted, so a
+  stale example is caught by `cargo test` rather than by a user.
+
+- **The logo in the UI** — header, first-run tour, and favicon, all served from
+  the binary. `tools/sync-logo.sh` regenerates the crate's copy from
+  `assets/loopsmith-logo-256.png`, keying the flat background to alpha: the
+  published logo is RGB with no alpha, which is right for a README on GitHub and
+  renders as a white tile on the dark theme. The keying is stdlib Python —
+  flood-filled inward from the corners so the figure's own white highlights
+  survive, which a lightness threshold would punch holes in.
+
+- **A six-step flow instead of one long form.** The first cut put sixteen
+  config sections in a single scroll, three columns wide, with nine buttons live
+  at the bottom: everything reachable, nothing findable. It is now one step at a
+  time — Place, Power, Intent, Proof, Work, Ship — in the order the problem is
+  actually thought about, with only the actions that make sense on the current
+  step. The step bar shows a red dot behind any step holding an error, so hiding
+  a section never hides a problem.
+
+  ⌘K is what makes that reasonable rather than obstructive: a palette over every
+  step, section, action, and example, matched as a subsequence so a rough guess
+  still lands. A status pill in the header morphs between idle, scanning, and
+  running, replacing a console column that was empty most of the time.
+
+  Motion throughout is for orientation, not decoration — the panel morphs height
+  and slides in the direction you moved, so going back reads as a return rather
+  than a fresh page. All of it degrades to instant under `prefers-reduced-motion`.
+
+- **The OS folder chooser**, on the folder button beside both path fields. The
+  browser cannot help here — `showDirectoryPicker()` hands back a handle with no
+  filesystem path, deliberately — but the server is a local process on the same
+  machine, so it opens the real dialog: `osascript` on macOS,
+  `FolderBrowserDialog` on Windows, `zenity` or `kdialog` on Linux. A machine
+  with none says so rather than leaving a button that does nothing, and the text
+  box has always worked and still does.
+
+- **`web` cargo feature**, on by default. `cargo install loopsmith
+  --no-default-features` drops the whole async dependency tree.
+
+### Fixed
+
+- `path_facts` reported an unwritable target whenever the parent directory did
+  not exist yet — the ordinary first-loop case, since `loopsmith new` creates the
+  whole chain. It now walks up to the first existing ancestor. This blocked the
+  Create button for exactly the newcomer the UI is for.
+
+### Notes
+
+- 187 tests in the CLI crate and 401 across the workspace, clippy clean, plus a
+  fourteen-case Playwright suite driving the real binary.
+- New dependencies, both behind the `web` feature: `axum` and `tokio`. The
+  WebSocket transport is `axum::extract::ws` — the same RFC6455 the browser
+  speaks. The `websocket` crate was considered and rejected: it is published as
+  `[deprecated]`, last updated 2024-03, and being synchronous it would need a
+  second listener and a blocking thread pool alongside the axum server.
+- The frontend adds `motion` for the spring and layout transitions. It is the
+  only runtime dependency the UI has beyond React itself.
+
 ## [0.1.4] — 2026-08-18
 
 Documentation only. No behaviour, no API, no config-model change.

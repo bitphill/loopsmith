@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.1.4/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.0/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
   <h1>loopsmith-graph</h1>
   <p><em>DAG scheduling, critical path, and Amdahl-driven concurrency for loopsmith.</em></p>
 </div>

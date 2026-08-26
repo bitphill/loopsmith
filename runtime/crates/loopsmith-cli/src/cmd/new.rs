@@ -18,6 +18,7 @@ pub struct NewArgs {
     pub config_file: Option<PathBuf>,
     pub config_stdin: bool,
     pub markdown: bool,
+    pub git: bool,
 }
 
 pub fn execute(args: NewArgs) -> Result<ExitCode, String> {
@@ -34,6 +35,7 @@ pub fn execute(args: NewArgs) -> Result<ExitCode, String> {
         purpose: args.purpose,
         force: args.force,
         config,
+        git: args.git,
     })
     .map_err(|e| e.to_string())?;
 
@@ -43,6 +45,19 @@ pub fn execute(args: NewArgs) -> Result<ExitCode, String> {
     println!("Created loop `{name}` at {dir}\n");
     for f in &s.written {
         println!("  {}", f.display());
+    }
+
+    // Reported rather than merely done: whether this directory is a repository
+    // decides whether `isolated: true` isolates anything, and a silent failure
+    // here surfaces much later as two builders overwriting each other.
+    match &s.git {
+        Some(Ok(())) => println!(
+            "\n  git repository initialised — `isolated: true` nodes can have a worktree each"
+        ),
+        Some(Err(why)) => println!(
+            "\n  ⚠  could not initialise a git repository: {why}\n                  `isolated: true` nodes will share one directory and say so. Two\n                  builders running at once in a shared directory overwrite each other."
+        ),
+        None => {}
     }
 
     println!("\n── configure ──────────────────────────────────────────────");

@@ -1,0 +1,204 @@
+name: research-loop
+version: 0.1.0
+description: >
+  Research a question against primary sources, verify every claim against the
+  source it came from, and stop when the brief is both complete and cited.
+
+# ---------------------------------------------------------------- A
+information:
+  - key: output_path
+    value: out/brief.md
+    note: The deliverable. Everything else is working material.
+  - key: citation_rule
+    value: Every factual claim carries a URL or a file path plus line reference.
+  - key: source_floor
+    value: At least four independent sources; a single origin is not corroboration.
+
+# ---------------------------------------------------------------- B
+# Set each to done:true only after you have actually done it. Validation
+# fails while any step is false, because a loop cannot automate a process
+# you have not yet described.
+pre_execution:
+  - step: Ran this research by hand once and kept the transcript
+    done: false
+    evidence: "link the transcript here"
+  - step: Wrote down what a finished brief contains, in checkable terms
+    done: false
+  - step: Confirmed the citation checker script runs locally
+    done: false
+
+# ---------------------------------------------------------------- C
+goals:
+  - name: gather
+    description: Collect primary sources that actually address the question, not adjacent material.
+  - name: draft
+    description: Produce a brief that answers the question with every claim traced to a source.
+    depends_on: [gather]
+  - name: adversarial
+    description: Find the strongest case against the brief's conclusion and address or concede it.
+    depends_on: [draft]
+
+# ---------------------------------------------------------------- D
+validations:
+  - target: gather
+    name: source-count
+    mode: percentage
+    statement: At least four independent sources were collected.
+    detector: { type: threshold, metric: independent_sources, op: gte, value: 4 }
+
+  - target: draft
+    name: brief-exists
+    mode: objective
+    statement: The brief exists and is non-empty.
+    detector: { type: file_exists, path: out/brief.md, non_empty: true }
+
+  - target: draft
+    name: every-claim-cited
+    mode: objective
+    statement: The citation checker finds no uncited claim.
+    detector: { type: script, command: scripts/check-citations.sh }
+
+  - target: adversarial
+    name: countercase-present
+    mode: subjective
+    statement: The brief engages the strongest opposing argument rather than a weak version of it.
+    detector:
+      type: judge
+      standard: "steelman test: the opposing case is stated so its own advocates would accept the phrasing"
+
+  - target: overall
+    name: no-broken-links
+    mode: objective
+    statement: Every cited URL resolves.
+    detector: { type: script, command: scripts/check-links.sh }
+
+# ---------------------------------------------------------------- E
+success:
+  - target: overall
+    name: complete-and-cited
+    mode: percentage
+    statement: Every blocking validation passes.
+    threshold: 1.0
+
+# ---------------------------------------------------------------- F
+stop_gates:
+  max_iterations: 6
+  max_revisions_per_node: 3
+  max_wall_clock_seconds: 5400
+  max_tokens: 3000000
+  max_cost_usd: 8.0
+  no_progress_iterations: 2
+  stop_on_overall_success: true
+
+# ---------------------------------------------------------------- G
+schedules:
+  - type: manual
+
+# ---------------------------------------------------------------- H
+constraints:
+  global:
+    rules:
+      - Quote at most one sentence per source; paraphrase the rest.
+      - A claim you cannot trace to a source does not go in the brief.
+      - State uncertainty explicitly rather than smoothing it over.
+    forbidden_paths: [".git/", "state/"]
+    forbidden_commands: ["rm -rf", "git push"]
+    max_seconds: 900
+    human_checkpoint:
+      - publishing the brief anywhere
+      - contacting a source
+  per_node:
+    critic:
+      rules:
+        - You are not here to approve. Find the strongest objection that survives scrutiny.
+
+graph:
+  nodes:
+    - id: search
+      role: researcher
+      instruction: Find primary sources that directly address the question. Prefer the original over commentary about it. Record why each source qualifies.
+      goals: [gather]
+      tier: cheap
+      weight: 2.0
+
+    - id: write
+      role: builder
+      instruction: Draft the brief from the gathered sources. Every claim carries its citation inline. State assumptions you had to make.
+      depends_on: [search]
+      goals: [draft]
+      tier: standard
+      weight: 3.0
+      isolated: true
+
+    - id: critic
+      role: adversary
+      instruction: Argue against the brief's conclusion using its own sources. Name the single strongest objection and whether the brief survives it.
+      depends_on: [write]
+      goals: [adversarial]
+      tier: strong
+      weight: 1.0
+
+    - id: verify
+      role: judge
+      instruction: Check each claim against the source it cites. Report per-claim PASS or FAIL with the quoted evidence. Do not summarise.
+      depends_on: [write]
+      goals: [draft]
+      tier: strong
+      # Pinned to a different family than `write` so the judge is not grading
+      # the model that produced the draft.
+      provider: openai
+      weight: 1.0
+
+  concurrency:
+    mode: auto
+    cap: 8
+    min_marginal_gain: 0.05
+
+providers:
+  providers:
+    - id: ollama
+      kind: ollama
+      tiers: [cheap]
+      command: ollama
+      args: ["run", "{model}"]
+      model: llama3
+      prompt_on_stdin: true
+      timeout_seconds: 600
+
+    - id: claude
+      kind: claude_code
+      tiers: [standard, strong]
+      command: claude
+      args: ["-p", "{prompt}"]
+      timeout_seconds: 900
+
+    - id: openai
+      kind: openai
+      tiers: [strong]
+      command: curl
+      args:
+        - "-sS"
+        - "https://api.openai.com/v1/chat/completions"
+        - "-H"
+        - "Content-Type: application/json"
+        - "-H"
+        - "Authorization: Bearer $OPENAI_API_KEY"
+        - "-d"
+        - "@-"
+      model: gpt-4o
+      requires_env: [OPENAI_API_KEY]
+      prompt_on_stdin: true
+      timeout_seconds: 300
+
+  cascade:
+    cheap: [ollama, claude]
+    standard: [claude, ollama]
+    strong: [openai, claude]
+
+  enforce_judge_independence: true
+
+skills:
+  acquisition_order: [installed, marketplace, generate]
+  quarantine_dir: generated-skills
+  min_marketplace_stars: 100
+  require_human_promotion: true

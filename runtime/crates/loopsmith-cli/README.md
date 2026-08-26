@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.1.4/assets/loopsmith-logo-256.png" alt="loopsmith" width="180" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.0/assets/loopsmith-logo-256.png" alt="loopsmith" width="180" />
   <h1>loopsmith</h1>
   <p><em>Self-evolving agent loops. The gate is code, so "done" cannot be argued.</em></p>
 </div>
@@ -30,7 +30,7 @@ a goal that stops being true stops being satisfied.
 **Not a developer?** Marketing, sales, research, ops — if you can edit a text
 file, you can run a loop.
 
-### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.1.4/README-FOR-DUMMIES.md)
+### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.2.0/README-FOR-DUMMIES.md)
 
 A plain-English guide: one install line, thirteen ready-made loops to copy, the
 six settings you actually edit, and how to leave it running on a schedule.
