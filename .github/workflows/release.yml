@@ -259,3 +259,92 @@ jobs:
       - name: Publish with provenance
         working-directory: npm
         run: npm publish --provenance --access public
+
+  # ── Homebrew tap ───────────────────────────────────────────────────────────
+  #
+  # `brew install` reads github.com/bitphill/homebrew-loopsmith, a separate
+  # repository that nothing syncs. Updating this repo's Formula/ alone leaves
+  # the tap pinning the previous release while the copy here looks correct —
+  # the one way a release can silently half-land, and the reason this job
+  # exists rather than a note in a checklist.
+  #
+  # Authentication is a deploy key rather than a token: scoped to that one
+  # repository, write-only to it, and unable to publish a package or touch this
+  # repo. Narrow enough to be worth the one stored secret, right after three
+  # broader ones were retired in favour of OIDC.
+  #
+  # `needs: publish` so the tap only moves for a release that fully succeeded.
+  homebrew:
+    name: Homebrew tap
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # The formula body lives here; only the url and digest are rendered per
+      # release. The tap holds the rendered result, and is what brew reads.
+      - name: Render the formula for this tag
+        id: render
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          url="https://github.com/${{ github.repository }}/archive/refs/tags/${tag}.tar.gz"
+
+          curl -sL "$url" -o src.tar.gz
+
+          # Every one of these guards a real failure seen on this project.
+          # codeload rate-limits unauthenticated archive fetches and curl exits
+          # 0 while writing the 429 body to the output file, so hashing blind
+          # produces a well-formed digest of an error page and pins a checksum
+          # no install can ever match. The tell was two tags hashing identically.
+          size=$(wc -c < src.tar.gz)
+          echo "tarball is $size bytes"
+          gzip -t src.tar.gz || { echo "::error::not valid gzip — probably an error page"; exit 1; }
+          [ "$size" -ge 500000 ] || { echo "::error::$size bytes is too small to be the source tarball"; exit 1; }
+          tar tzf src.tar.gz | head -1 | grep -q . || { echo "::error::tarball is empty"; exit 1; }
+
+          sha=$(sha256sum src.tar.gz | cut -d' ' -f1)
+          previous=$(grep -oE '^  sha256 "[0-9a-f]{64}"' Formula/loopsmith.rb | grep -oE '[0-9a-f]{64}')
+          if [ "$sha" = "$previous" ]; then
+            echo "::error::digest is identical to the previous release — that is the rate-limit signature, not a coincidence"
+            exit 1
+          fi
+
+          sed -i -E "s|^  url \".*\"|  url \"$url\"|" Formula/loopsmith.rb
+          sed -i -E "s|^  sha256 \".*\"|  sha256 \"$sha\"|" Formula/loopsmith.rb
+          grep -E "^  (url|sha256) " Formula/loopsmith.rb
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Push it to the tap
+        env:
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/tap
+          chmod 600 ~/.ssh/tap
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap -o IdentitiesOnly=yes"
+
+          git clone --depth 1 git@github.com:bitphill/homebrew-loopsmith.git tap
+          cp Formula/loopsmith.rb tap/Formula/loopsmith.rb
+          cd tap
+
+          # A re-run of a release that already updated the tap is a success,
+          # not a failure: git commit exits non-zero when there is nothing to do.
+          if git diff --quiet; then
+            echo "tap already carries ${{ steps.render.outputs.tag }}"
+            exit 0
+          fi
+
+          git config user.name "loopsmith release"
+          git config user.email "bitphill@duck.com"
+          git commit -aqm "loopsmith ${{ steps.render.outputs.version }}
+
+          Digest verified against the real tarball: valid gzip, plausible size,
+          and distinct from the previous release's."
+          git push origin HEAD
+          echo "tap updated to ${{ steps.render.outputs.tag }}"
