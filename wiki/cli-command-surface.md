@@ -15,10 +15,16 @@ The design rule for the whole module: **this crate parses, routes, prints, and d
 | `src/cmd/mod.rs` | `dispatch()` plus the four helpers every command shares. |
 | `src/cmd/*.rs` | One module per subcommand, each exposing `execute(...)`. |
 | `src/scaffold.rs` | `loopsmith new`'s file materialisation, path guards, and generated launchers. |
+| `src/guided/` | `loopsmith guided` / `--guided` — the interactive terminal wizard that builds (or `--edit`s) a config by asking one field at a time. Reuses `scaffold.rs` to write, and `catalog.rs` + a synchronous `PATH` scan to offer installed CLIs. |
+| `src/catalog.rs` | The static table of known agent CLIs (argv, env, models, cost). Shared by the guided wizard and the web UI; plain data, no async, so a `--no-default-features` build still has it. |
 | `src/logging.rs` | The plain-text run log and the `Recorder` that keeps it in sync with the sled ledger. |
 | `src/run/`, `src/schedule.rs`, `src/worktree.rs`, `src/permissions.rs`, `src/judgment.rs` | Supporting machinery the command bodies call into. |
 
-The split between `main.rs` and `cli.rs` is deliberate and worth preserving: the argument grammar for sixteen commands is readable in one sitting only if no command bodies are interleaved with it.
+The split between `main.rs` and `cli.rs` is deliberate and worth preserving: the argument grammar for the whole command set is readable in one sitting only if no command bodies are interleaved with it.
+
+### Three front ends, one config
+
+`new`, `guided`, and `web` are three ways to produce the **same** `LoopConfig`. `new` hands you a starter file to edit; `guided` (`src/guided/`) asks one field at a time in the terminal; `web` (`src/web/`, behind the `web` feature) paints the same fields in a browser. All three converge on `loopsmith_core::validate` before anything runs — there is no second schema and no privileged path. `guided` and `web` additionally share `catalog.rs` so both can pre-fill a working argv for the agent CLIs already on `PATH`; the wizard's detection is synchronous (no `tokio`), so it survives a build with the `web` feature compiled out.
 
 ## The three layers
 
