@@ -29,7 +29,8 @@ a goal that stops being true stops being satisfied.
 
 **Not a developer?** Marketing, sales, research, ops — if you can edit a text
 file, you can run a loop. And if you would rather not open a text file at all,
-`loopsmith --web` builds one for you in a browser.
+two front ends build one for you: `loopsmith --web` in a browser, or
+`loopsmith --guided` as a terminal wizard that asks one question at a time.
 
 ### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.2.2/README-FOR-DUMMIES.md)
 
@@ -53,6 +54,21 @@ One rule holds the whole design up:
 `goal_satisfied` is written by a deterministic Rust gate and by nothing else, and
 the gate can **revoke**: delete a required artifact and a satisfied goal flips
 back. A system that can only promote is a burndown chart with extra steps.
+
+## Guided terminal setup
+
+```bash
+loopsmith --guided        # or: loopsmith guided
+```
+
+The config the browser paints, built by answering one question at a time — no
+browser, so it works over SSH and in any bare terminal. Each field explains
+itself, then shows its default in `[brackets]`; choices are numbered and you type
+the number (or the name). Installed agent CLIs are offered as a menu, pre-filled
+with a working argv. `:back`, `:next`, `:help`, and `:quit` work at every prompt,
+and nothing is written until the config passes the same validator `loopsmith
+validate` runs. `loopsmith guided --edit <file>` walks through changing an
+existing loop instead of starting fresh.
 
 ## The browser UI
 

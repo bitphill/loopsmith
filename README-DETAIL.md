@@ -89,6 +89,8 @@ The orchestrator is a binary rather than a chat session because a loop has to su
 | Command | Does |
 |---|---|
 | `new --path <dir>` | Scaffold a purpose-specific loop. `--path` is required |
+| `guided [dir] [--edit f]` | Build (or `--edit` an existing) config by answering one question at a time in the terminal; also `--guided`. `:back` `:next` `:help` `:quit` at any prompt |
+| `web [--port n] [--no-open]` | Build and run loops from a local browser UI; also `--web` |
 | `validate <config>` | Check the A–J model; fails on unfinished manual work |
 | `plan <config>` | Waves, critical path, parallel fraction, predicted speedup |
 | `run <config>` | Execute once. `--dry-run` plans without spending anything |
@@ -107,6 +109,88 @@ The orchestrator is a binary rather than a chat session because a loop has to su
 | `permissions <config> [--write f]` | Derive and merge the narrowest grant |
 | `prune <config>` | Remove the git worktrees this loop created |
 | `mcp --state <dir>` | Serve the control plane over stdio MCP |
+
+---
+
+## Architecture
+
+Three front ends — the guided terminal wizard, the browser UI, and the raw
+subcommands — all produce the **same** `LoopConfig` (the A–J model), which is
+parsed by one `serde` schema, checked by one validator, and executed by one
+deterministic runtime. There is no second schema and no privileged path: what
+`--guided` writes, `--web` writes, and a hand-edited file all meet at `validate`.
+
+<div align="center"><img src="assets/architecture.png" alt="loopsmith architecture" width="680" /></div>
+
+```mermaid
+flowchart TD
+    G["loopsmith --guided<br/><i>terminal wizard</i>"]:::red
+    W["loopsmith --web<br/><i>browser UI</i>"]:::blue
+    C["loopsmith &lt;cmd&gt;<br/><i>new · run · plan · watch</i>"]:::blue
+    CFG["LoopConfig — the A–J model<br/><i>one serde schema</i>"]:::ink
+    V["validate<br/><i>deny_unknown_fields</i>"]:::red
+    P["plan<br/><i>waves · critical path</i>"]:::blue
+    RT["runtime<br/>graph engine · gate · providers · memory"]:::ink
+    G --> CFG
+    W --> CFG
+    C --> CFG
+    CFG --> V
+    CFG --> P
+    V --> RT
+    P --> RT
+    classDef red stroke:#C1272D,stroke-width:2px,fill:#fdf3f3;
+    classDef blue stroke:#2A5A8A,stroke-width:2px,fill:#f7f8fa;
+    classDef ink stroke:#222,stroke-width:2px,fill:#eef;
+```
+
+`--guided` and `--web` share one thing the raw subcommands do not need: a
+**provider catalog** and a `PATH` scan, so both can offer the agent CLIs this
+machine already has, pre-filled with a working argv. The catalog is plain data
+(`src/catalog.rs`) with no async, so the wizard works in a
+`--no-default-features` build that has compiled the whole web server out.
+
+### The guided wizard, step by step
+
+<div align="center"><img src="assets/guided-flow.png" alt="the guided wizard flow" width="620" /></div>
+
+```mermaid
+flowchart TD
+    I[Identity] --> PR[Providers] --> GO[Goals] --> VA[Validations] --> SG[Stop gates]
+    SG --> ADV["Advanced (opt-in)<br/>graph · A · B · E · G · H · I · J · context"]
+    ADV --> RV{Review:<br/>validate}
+    RV -- errors --> I
+    RV -- ok --> WR[Write loop + git init] --> RUN[Offer dry run]
+    CMD["at every prompt:<br/>:back · :next · :help · :quit"]:::note -.-> RV
+    classDef note stroke:#787e8c,stroke-width:1px,fill:#f7f8fa,stroke-dasharray:4 3;
+```
+
+Plain-text fallback for a terminal with no image or mermaid support:
+
+```text
+  ┌──────────┐   ┌───────────┐   ┌───────┐   ┌─────────────┐   ┌────────────┐
+  │ Identity │──▶│ Providers │──▶│ Goals │──▶│ Validations │──▶│ Stop gates │
+  └──────────┘   └───────────┘   └───────┘   └─────────────┘   └─────┬──────┘
+                                                                      │
+        ┌─────────────────────────────────────────────────────┐      │
+        │ Advanced (opt-in): graph · A B E G H I J · context   │◀─────┘
+        └───────────────────────────┬─────────────────────────┘
+                                     ▼
+                         ┌────────────────────┐   errors
+                         │  Review: validate  │───────────▶ step back and fix
+                         └─────────┬──────────┘
+                                   │ ok
+                                   ▼
+             ┌──────────────────────────┐     ┌────────────────────┐
+             │  Write loop + git init   │────▶│ Offer dry run (free)│
+             └──────────────────────────┘     └────────────────────┘
+
+  At every prompt:  :back (previous field)  :next (keep default)
+                    :help (explain again)   :quit (save a draft)
+```
+
+Nothing is written until the finished config passes `loopsmith_core::validate`,
+the same check `loopsmith validate` runs on a file — so the wizard is never
+trusted further than a hand-written config is.
 
 ---
 

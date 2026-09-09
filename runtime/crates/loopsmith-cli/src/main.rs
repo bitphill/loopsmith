@@ -3,8 +3,10 @@
 //! This file is the entry point and nothing more. The argument grammar lives in
 //! [`cli`], and each subcommand body lives in its own module under [`cmd`].
 
+mod catalog;
 mod cli;
 mod cmd;
+mod guided;
 mod judgment;
 mod logging;
 mod permissions;

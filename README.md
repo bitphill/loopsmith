@@ -16,7 +16,7 @@
     <a href="https://pypi.org/project/loopsmith-cli/"><img alt="PyPI" src="https://img.shields.io/pypi/v/loopsmith-cli?logo=python&logoColor=white&label=PyPI&color=3775a9" /></a>
     <a href="https://github.com/bitphill/homebrew-loopsmith"><img alt="Homebrew" src="https://img.shields.io/badge/Homebrew-tap-FBB040?logo=homebrew&logoColor=white" /></a>
   </p>
-  <p><a href="#install">Install</a> · <a href="#five-minutes">Five minutes</a> · <a href="#examples">Examples</a> · <a href="#scheduling">Scheduling</a> · <a href="#portability">Portability</a> · <a href="README-DETAIL.md">Full reference</a> · <a href="https://bitphill.github.io/loopsmith/wiki/#overview">Code wiki</a></p>
+  <p><a href="#install">Install</a> · <a href="#five-minutes">Five minutes</a> · <a href="#guided-terminal-setup">Guided</a> · <a href="#examples">Examples</a> · <a href="#scheduling">Scheduling</a> · <a href="#portability">Portability</a> · <a href="README-DETAIL.md">Full reference</a> · <a href="https://bitphill.github.io/loopsmith/wiki/#overview">Code wiki</a></p>
 </div>
 
 ---
@@ -35,7 +35,9 @@ a goal that stops being true stops being satisfied.
 
 **Not a developer?** You don't need to be. Marketing, sales, research, ops — if
 you can edit a text file, you can run a loop. And if you would rather not open a
-text file at all, `loopsmith --web` builds one for you in a browser.
+text file at all, two front ends build one *for* you: `loopsmith --web` in a
+browser, or `loopsmith --guided` as a question-and-answer wizard right in the
+terminal — no browser, so it works over SSH and in a bare shell.
 
 ### ➜ [START-HERE — README-FOR-DUMMIES.md](README-FOR-DUMMIES.md)
 
@@ -126,6 +128,51 @@ release mode, puts the binary in `~/.loopsmith/bin/loopsmith`, and symlinks
 The eight libraries behind the binary — `loopsmith-util`, `-core`, `-memory`,
 `-graph`, `-gate`, `-provider`, `-skills`, `-mcp` — are published on crates.io
 too. They compile automatically as dependencies and need no separate install.
+
+---
+
+## Guided terminal setup
+
+```bash
+loopsmith --guided        # or: loopsmith guided
+```
+
+<div align="center"><img src="assets/guided-flow.png" alt="the guided wizard flow" width="640" /></div>
+
+The same config the browser paints, built by answering one question at a time —
+no browser, no schema to learn first. It works over SSH and in any bare terminal,
+which is exactly where the browser UI cannot go.
+
+Each field explains itself in place, then shows its default in `[brackets]` —
+press Enter to accept it. Where a field is a choice, the options are numbered and
+you type the number (or the option's name). A list — goals, validations,
+providers — keeps a small **Add / Edit / Remove / Done** menu, so nothing has to
+be right the first time.
+
+It probes the machine the same way the browser does: the agent CLIs already on
+`PATH` are offered as a numbered menu, each pre-filled with a working argv, the
+right model list, and the environment it needs — so a provider is usually one
+keystroke, not a remembered command line.
+
+Four commands work at **every** prompt:
+
+- `:back` — return to the previous field
+- `:next` — keep the shown default and move on
+- `:help` — show the field's full explanation again
+- `:quit` — leave; you are offered a saved draft to resume from later
+
+Nothing is written until the finished config passes the **same** validator
+`loopsmith validate` runs — errors are shown with the field they belong to, and
+you can step back through the sections to fix them. When it passes, the wizard
+writes the loop, offers to `git init` it, and offers a first **dry run** that
+spends nothing. To revise an existing loop instead of starting fresh:
+
+```bash
+loopsmith guided --edit path/to/loop.yaml
+```
+
+which loads the file, shows every current value as the default, and writes the
+result back.
 
 ---
 

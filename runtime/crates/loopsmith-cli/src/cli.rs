@@ -22,6 +22,14 @@ pub struct Cli {
     #[arg(long, global = false)]
     pub web: bool,
 
+    /// Build a loop by answering questions in the terminal, one at a time.
+    /// Identical to the `guided` subcommand. Where `--web` clicks and `new`
+    /// hands you a starter file to edit, this walks the whole A–J config with
+    /// every field explained in place, and needs no browser — so it works over
+    /// SSH and in a bare terminal.
+    #[arg(long, global = false)]
+    pub guided: bool,
+
     /// Absent when `--web` carries the invocation. Every other path requires
     /// one, and [`Cli::resolve`] is where that requirement is enforced, so the
     /// error message can name the flag instead of clap's generic complaint.
@@ -36,19 +44,33 @@ impl Cli {
     /// than in `dispatch` keeps `dispatch` a pure match over `Command` and
     /// leaves one place that knows the two spellings are the same.
     pub fn resolve(self) -> Result<Command, String> {
-        match (self.web, self.command) {
-            (true, None) => Ok(Command::Web { port: None, no_open: false }),
+        match (self.web, self.guided, self.command) {
+            (true, false, None) => Ok(Command::Web { port: None, no_open: false }),
+            (false, true, None) => Ok(Command::Guided { path: None, edit: None }),
+            // Two different UIs onto the same config. Picking one for the user
+            // would guess wrong half the time.
+            (true, true, _) => Err(
+                "`--web` and `--guided` are two front ends for the same thing — \
+                 a browser and a terminal wizard. Pick one."
+                    .into(),
+            ),
             // `loopsmith --web run loop.yaml` is a contradiction, not a
             // shorthand. Refusing beats silently picking one.
-            (true, Some(_)) => Err(
+            (true, false, Some(_)) => Err(
                 "`--web` starts the browser UI and takes no subcommand. \
                  Use `loopsmith web`, or drop `--web`."
                     .into(),
             ),
-            (false, Some(c)) => Ok(c),
-            (false, None) => Err(
-                "no command given. `loopsmith --help` lists them; `loopsmith web` \
-                 opens the browser UI if you would rather click than type."
+            (false, true, Some(_)) => Err(
+                "`--guided` starts the terminal wizard and takes no subcommand. \
+                 Use `loopsmith guided`, or drop `--guided`."
+                    .into(),
+            ),
+            (false, false, Some(c)) => Ok(c),
+            (false, false, None) => Err(
+                "no command given. `loopsmith --help` lists them; `loopsmith guided` \
+                 builds a loop by asking questions in the terminal, and `loopsmith web` \
+                 does the same in a browser."
                     .into(),
             ),
         }
@@ -195,6 +217,23 @@ pub enum Command {
     Mcp {
         #[arg(long, default_value = "state")]
         state: PathBuf,
+    },
+    /// Build a loop by answering questions in the terminal. Same as `--guided`.
+    ///
+    /// Every section of the A–J config, asked one field at a time, each with
+    /// the explanation the field would carry in the web UI. Providers this
+    /// machine already has are offered as a numbered menu; everything else is a
+    /// prompt with the current value in `[brackets]` — press Enter to keep it.
+    /// `:back`, `:next`, `:help`, and `:quit` work at any prompt. Nothing is
+    /// written until the whole config validates.
+    Guided {
+        /// Directory for the new loop. Omit and the wizard asks for it.
+        #[arg(value_name = "DIR")]
+        path: Option<PathBuf>,
+        /// Load an existing config and walk through changing it, instead of
+        /// starting from the defaults. The wizard writes the result back out.
+        #[arg(long, value_name = "FILE")]
+        edit: Option<PathBuf>,
     },
     /// Build, run, and watch loops from a browser. Same thing as `--web`.
     ///

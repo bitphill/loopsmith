@@ -281,7 +281,9 @@ pub fn find(id: &str) -> Option<&'static Known> {
 }
 
 /// API keys worth reporting on. Presence only: a value is never read here, and
-/// [`crate::web::secrets`] is the only module that writes one.
+/// [`crate::web::secrets`] is the only module that writes one. Only the web UI
+/// consults this, so a `--no-default-features` build carries it unused.
+#[cfg_attr(not(feature = "web"), allow(dead_code))]
 pub const ENV_KEYS: &[(&str, &str)] = &[
     ("ANTHROPIC_API_KEY", "Claude, when used through the API rather than `claude login`"),
     ("OPENAI_API_KEY", "OpenAI and Codex CLI"),

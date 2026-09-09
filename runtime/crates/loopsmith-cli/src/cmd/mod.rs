@@ -182,6 +182,7 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
         Command::Proposals { config, run_id } => proposals::execute(&config, &run_id),
         Command::Prune { config } => prune::execute(&config),
         Command::Mcp { state } => mcp::execute(state),
+        Command::Guided { path, edit } => crate::guided::execute(path, edit),
         #[cfg(feature = "web")]
         Command::Web { port, no_open } => web::execute(port, no_open),
         // Built without the `web` feature: say which flag brings it back

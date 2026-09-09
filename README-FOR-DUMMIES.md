@@ -177,6 +177,37 @@ If port 3000 is already busy it quietly uses 3001, and tells you which one.
 
 ---
 
+## No browser? Answer questions in the terminal instead
+
+If you're on a server with no browser — or you just prefer the keyboard — there's
+a second easy way that asks you the same things, one question at a time, right in
+the terminal:
+
+```bash
+loopsmith --guided
+```
+
+It types a question, waits for your answer, and moves on. Where there's a choice,
+it prints a numbered list and you just type the number. Most questions already
+have a sensible answer shown in `[square brackets]` — press Enter to take it.
+
+The AI tools you already have installed show up as a numbered menu, so picking one
+is a single keypress — no command line to remember.
+
+Four words help you at any moment. Type them at any question:
+
+- `:back` — go back and change your last answer
+- `:next` — keep the suggested answer and carry on
+- `:help` — explain this question again
+- `:quit` — stop; it offers to save your progress so you can pick up later
+
+It won't create anything until every answer checks out, and it points at exactly
+what to fix if something's off. When it's ready it makes the loop for you and
+offers a **practice run** that spends no money. Same result as the browser, no
+browser required.
+
+---
+
 ## The whole idea in one picture
 
 ```
