@@ -4,6 +4,35 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-09-09
+
+### Added
+
+- **`loopsmith --guided` (also `loopsmith guided`) — a terminal wizard that
+  builds a loop by asking one question at a time.** A third front end onto the
+  same A–J config that `new` hands you as a file and `--web` paints in a
+  browser, for a machine with no browser and a person who would rather not open
+  an editor. It walks every section with the field's own explanation in place,
+  shows each default in `[brackets]`, and writes nothing until the finished
+  config passes the same `loopsmith validate` a hand-written file would.
+
+  - Agent CLIs already on `PATH` are offered as a numbered menu, pre-filled with
+    a working argv, the right model list, and the environment they need — so a
+    provider is usually one keystroke, not a remembered command line.
+  - `:back`, `:next`, `:help`, and `:quit` work at every prompt; `:quit` offers
+    to save a resumable draft. Choices are numbered and accept the number or the
+    option's name.
+  - Lists — goals, validations, providers — carry an Add / Edit / Remove / Done
+    menu, so nothing has to be right the first time.
+  - `loopsmith guided --edit <file>` loads an existing loop, shows every current
+    value as the default, and writes the result back.
+  - Works in a `--no-default-features` build: the provider catalog moved to
+    `src/catalog.rs` (plain data, no async) so the wizard needs nothing from the
+    `web` feature, and detection is a synchronous `PATH` scan.
+
+  New dependency `ctrlc` handles Ctrl-C identically across macOS, Linux, and
+  Windows.
+
 ## [0.2.2] — 2026-08-27
 
 Release plumbing. No change to the binary's behaviour.

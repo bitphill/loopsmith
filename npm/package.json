@@ -1,6 +1,6 @@
 {
   "name": "@bitphill/loopsmith",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Self-evolving agent loops behind a deterministic verification gate. Installs the prebuilt Rust binary as `loopsmith`.",
   "license": "MIT",
   "author": "Vaibhav Agarwal <bitphill@duck.com>",

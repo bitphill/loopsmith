@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.2.2/assets/loopsmith-logo-256.png" alt="loopsmith" width="180" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.3.0/assets/loopsmith-logo-256.png" alt="loopsmith" width="180" />
   <h1>loopsmith</h1>
   <p><em>Self-evolving agent loops. The gate is code, so "done" cannot be argued.</em></p>
 </div>
@@ -32,7 +32,7 @@ file, you can run a loop. And if you would rather not open a text file at all,
 two front ends build one for you: `loopsmith --web` in a browser, or
 `loopsmith --guided` as a terminal wizard that asks one question at a time.
 
-### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.2.2/README-FOR-DUMMIES.md)
+### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.3.0/README-FOR-DUMMIES.md)
 
 A plain-English guide: one install line, thirteen ready-made loops to copy, the
 six settings you actually edit, and how to leave it running on a schedule.
