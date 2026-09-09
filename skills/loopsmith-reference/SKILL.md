@@ -13,7 +13,11 @@ description: >
 # Loop design reference
 
 The distilled version of what makes iterative agent systems work. Applies to
-any loop; `loopsmith` is one implementation.
+any loop; `loopsmith` is one implementation. It lets you write the definition
+three ways — a config file (`loopsmith new`), a one-field-at-a-time terminal
+wizard (`loopsmith --guided`), or a local browser UI (`loopsmith --web`) — but
+the front end is a convenience; the design below is what any of them has to get
+right. For the commands that run and inspect a loop, see the `loopsmith` skill.
 
 ## Is a loop even warranted?
 
@@ -83,6 +87,14 @@ Layer all of them; any one alone is insufficient:
 - **Budget ceiling** — tokens, cost, or wall-clock.
 - **No progress** — halt when recent iterations change nothing measurable.
 
+**Try something different before you quit.** A no-progress counter that only
+halts throws away the run at the first sign of a rut. Perturb *before* the halt
+point instead: vary the method — reorder work within a wave, force an untried
+sub-agent, or run non-judge nodes one tier stronger — for a bounded number of
+stalled iterations, then halt if it still does not move. The seed is recorded so
+the run replays. Perturbation delays giving up; it does not prevent it, and the
+no-progress gate still fires.
+
 Write them as hard logic. "Stop when it's good enough" inside a prompt is a
 suggestion the model will eventually talk itself past. Loops do not crash when
 they fail; they bill you in silence.
@@ -107,6 +119,14 @@ that can only promote is a burndown chart with extra steps.
 **The one question:** on every "and then", does the next step actually read the
 previous one's output? Yes keeps the order. No was never an edge — run them
 together. Cut a false edge rather than adding a worker.
+
+**Method order is not a data edge.** *Gather before you draft; land the tests
+before you refactor* are orderings about method, not about one step reading
+another's output. Forcing them into the dependency graph makes the critical path
+meaningless, because half its edges are not real work dependencies. Keep them in
+a separate layer — named phases a node opts into — so the graph stays a map of
+data flow and the phase list stays a map of method. A node with no phase is
+always eligible; unstaged work is not gated by an order it never joined.
 
 ## Amdahl sizing
 

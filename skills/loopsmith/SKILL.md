@@ -1,7 +1,7 @@
 ---
 name: loopsmith
-description: Create and run self-evolving agent loops. Use when the user wants to build a loop, scaffold a new purpose-specific loop, run or resume one, check why a loop stopped, or inspect its gate rulings and ledger.
-argument-hint: "new --path <dir> | run <config> | plan <config> | status <config> <run-id>"
+description: Create and run self-evolving agent loops. Use when the user wants to build a loop — by hand, with the `--guided` terminal wizard, or the `--web` browser UI — scaffold a new purpose-specific loop, run or resume one, check why a loop stopped, or inspect its gate rulings and ledger.
+argument-hint: "--guided | --web | new --path <dir> | run <config> | plan <config> | status <config> <run-id>"
 allowed-tools: Bash Read Write Edit Glob Grep
 disable-model-invocation: true
 ---
@@ -13,20 +13,50 @@ budget-spending thing and starting one should be a decision, not an inference.
 
 For the concepts behind any of this, see the `loopsmith-reference` skill.
 
+## Build the config — three front ends
+
+Same A–J config, three ways in. All three converge on the same validator, and
+none can do anything `loopsmith --help` does not list.
+
+```bash
+loopsmith new --path ./loops/<purpose> --purpose "…"   # a starter file to edit by hand
+loopsmith --guided                                     # a terminal wizard, one field at a time
+loopsmith --web                                        # a local browser UI
+```
+
+- **`--guided`** (identical: `loopsmith guided [DIR] [--edit FILE]`) walks every
+  section one field at a time, each explained in place, defaults shown in
+  `[brackets]`. Installed provider CLIs are offered as a numbered menu, prefilled
+  with a working argv. `:back`, `:next`, `:help`, and `:quit` work at every
+  prompt, and nothing is written until the config passes `loopsmith validate`.
+  `--edit <file>` revises an existing loop instead of starting fresh. It needs no
+  browser, so it is the one to reach for over SSH or in a bare terminal.
+- **`--web`** (identical: `loopsmith web [--port N] [--no-open]`) serves a
+  localhost UI that fills the same fields with live validation, cost, and plan,
+  and can run the buttons against the real binary. Loopback only.
+- **`new`** scaffolds the directory and a starter config to edit yourself — the
+  path below.
+
 ## Create a loop
 
 `--path` / `-p` is **mandatory**. Every loop owns a sled ledger, checkpoints,
 and a quarantine directory, and needs a home of its own.
 
 ```bash
-loopsmith new --path ./loops/<purpose> --purpose "one line on what it is for"
+loopsmith new --path ./loops/<purpose> --purpose "one line on what it is for" --git
 ```
 
-That writes `loop.yaml`, `.gitignore`, `README.md`, and the `state/`, `out/`,
-`proposals/`, `generated-skills/` directories.
+That writes the config (`loop.yaml`, or Markdown), `run.sh` / `resume.sh` and
+their `.cmd` twins, an MCP definition, a permission template, and the `state/`,
+`out/`, `proposals/`, `logs/`, `generated-skills/` directories. `--git` also
+inits a repository with one commit, which is what lets `isolated: true` nodes
+have a worktree each — without it they share one directory and say so.
 
-Then edit `loop.yaml`. The sections are A–H; `LOOP-TEMPLATE.md` documents each
-one with an example and the reason it exists.
+Then edit the config. The sections are **A–J** (information, pre-execution,
+goals, validations, success, stop gates, schedules, constraints, execution
+guidelines, default skills); `LOOP-TEMPLATE.md` documents each one with an
+example and the reason it exists. `loopsmith convert <config>` translates the
+config between YAML and Markdown — the same model either way.
 
 ## The order that works
 
@@ -69,7 +99,8 @@ sleeping forever.
 
 ```bash
 loopsmith skills search <terms...>            # claudemarketplaces.com + skills.sh
-loopsmith skills acquire <config> <name>      # into quarantine
+loopsmith skills acquire <config> <name>      # one sub-agent into quarantine
+loopsmith skills install <config>             # every section-J default_skill
 loopsmith skills list <config>                # what this loop can see
 loopsmith skills scores <config>              # ranked by gate outcomes
 loopsmith proposals <config> <run-id>         # what it wants changed
@@ -116,10 +147,21 @@ burndown chart with extra steps.
 
 ```bash
 loopsmith providers <path>/loop.yaml
+loopsmith doctor    [<path>/loop.yaml]   # what this machine is, and what that stops you doing
 ```
 
-Reports each provider as available or not, and why not — missing binary,
-missing environment key. Key **names** only; values are never read.
+`providers` reports each provider as available or not, and why not — missing
+binary, missing environment key. Key **names** only; values are never read.
+`doctor` reports the machine itself (OS, shells, schedulers, agent CLIs found);
+pass a config and it also checks what that config needs the machine may lack. It
+never exits non-zero — reporting a constraint is not the machine being unusable.
+
+## Housekeeping
+
+```bash
+loopsmith convert <config> [--out f] [--to-yaml]   # YAML <-> Markdown, same model
+loopsmith prune   <config>                          # remove the git worktrees this loop created
+```
 
 ## Expose the control plane over MCP
 
