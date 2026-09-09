@@ -303,7 +303,14 @@ jobs:
           echo "tarball is $size bytes"
           gzip -t src.tar.gz || { echo "::error::not valid gzip — probably an error page"; exit 1; }
           [ "$size" -ge 500000 ] || { echo "::error::$size bytes is too small to be the source tarball"; exit 1; }
-          tar tzf src.tar.gz | head -1 | grep -q . || { echo "::error::tarball is empty"; exit 1; }
+          # Count entries by consuming the whole listing. `tar tzf | head -1`
+          # looks tidier but deadlocks against `set -o pipefail`: head closes the
+          # pipe after one line, tar takes SIGPIPE and exits non-zero, and
+          # pipefail then fails a pipeline whose tarball was perfectly good. That
+          # is what sank the first real 0.3.0 tap push — a 2.5 MB valid gzip
+          # reported "empty". `wc -l` reads every entry, so tar never sees a
+          # broken pipe.
+          [ "$(tar tzf src.tar.gz | wc -l)" -gt 0 ] || { echo "::error::tarball is empty"; exit 1; }
 
           sha=$(sha256sum src.tar.gz | cut -d' ' -f1)
           previous=$(grep -oE '^  sha256 "[0-9a-f]{64}"' Formula/loopsmith.rb | grep -oE '[0-9a-f]{64}')
