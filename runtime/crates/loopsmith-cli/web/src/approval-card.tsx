@@ -10,8 +10,9 @@
  * swapped: beautifului's own tokens/atoms (`ink`/`canvas`/`hover`, its cva
  * Button) are replaced with Forge tokens and the `.btn` classes from styles.css.
  *
- * Nothing wires this into the app yet; it is a standalone skeleton kept ready
- * for the guided-mode work in `loopsmith --web`.
+ * Kept as a reference implementation. Its sub-components — GlideMenu
+ * (glide-menu.tsx) and RollingDigits (rolling-digits.tsx) — are extracted
+ * and actively used by the guided wizard cards.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import GlideMenu from "./glide-menu";
