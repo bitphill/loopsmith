@@ -4,6 +4,66 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-09-10
+
+### Added
+
+- **The guided walk-through now runs in the browser too.** `loopsmith --web`
+  opens by asking which kind of smith you are and remembers the answer: an
+  experienced one goes straight to the six-step editor, a new one gets the
+  explanation, a list of working examples to start from, and then the same
+  one-question-at-a-time flow `--guided` runs in a terminal, drawn as cards.
+
+  - Sections are asked in `guided/mod.rs::stages()` order — identity, providers,
+    goals, validations, stop gates, then every advanced section (A–J) behind its
+    own opt-in card, exactly as the terminal gates them.
+  - One field per card, carrying that field's own explanation. A repeating
+    section collects entries in a single card behind a `+` and stays there until
+    "This part is done", which is the browser's shape of the terminal's
+    Add / Edit / Remove / Done menu.
+  - A choice is a row of options rather than a numbered list: circles for one
+    answer, squares for several, a dropdown once a list is too long to scan.
+  - Providers are the machine scan the browser already had — the CLIs actually
+    on `PATH`, pre-filled, with the **Test** button still there.
+  - Loading an example fills the answers in without skipping the questions.
+  - The wizard and the six-step editor are two views of one draft: **Expert
+    editor** hands the half-filled config to the form, `⌘K` switches back, and
+    the review rail watches either way. Create stays gated on the real
+    validator reporting no errors.
+
+  This is a frontend change. The web backend already exposed everything it
+  needs, and the field list is a declarative mirror of `guided/sections.rs`
+  rather than a second implementation of it.
+
+### Fixed
+
+- **The step panel never unmounted the step you had just left.** `MorphPanel`
+  drove its transition with `AnimatePresence`, whose exit phase never completes
+  under React 19's StrictMode with the pinned `motion` release. Under
+  `mode="popLayout"` that left every step ever visited mounted on top of each
+  other — duplicate form controls, duplicate element ids, and stale cards still
+  able to catch a click — and the failure was invisible because the newest step
+  was drawn last. It now keys the view and lets React do the swap, so exactly
+  one step is mounted at a time. This affected the existing six-step editor as
+  well as the new wizard, and is asserted in the end-to-end suite.
+
+### Changed
+
+- **One card treatment across the whole UI.** Cards are a hairline ring and a
+  soft drop rather than a hard border, on the 10px corner rather than the 14px
+  one, with `--card-spacing` owning the inset of a card's header, content and
+  footer in one place. Because the ring is a shadow it costs no layout, so a
+  card nested against another edge shows one continuous line instead of two
+  abutting borders.
+
+- CI rebuilds the web UI and fails if the committed `src/web/dist` is not what
+  the sources produce. That directory is compiled into the binary with
+  `include_str!`, so before this a frontend change that was not rebuilt shipped
+  the previous UI with nothing anywhere failing.
+
+- `README-DETAIL.md` said 240 tests in its badge and 148 in its body; both now
+  say 415, which is what the suite actually runs.
+
 ## [0.3.0] — 2026-09-09
 
 ### Added

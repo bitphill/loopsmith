@@ -6,7 +6,7 @@
   <p><a href="https://bitphill.github.io/loopsmith/wiki/#overview">Browse the generated code wiki</a> — a page-per-subsystem tour of the crates, the execution engine, the gate, and the provider layer.</p>
   <p>
     <img alt="rust" src="https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white" />
-    <img alt="tests" src="https://img.shields.io/badge/tests-240%20passing-2A5A8A" />
+    <img alt="tests" src="https://img.shields.io/badge/tests-415%20passing-2A5A8A" />
     <img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" />
     <img alt="platforms" src="https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A" />
   </p>
@@ -151,6 +151,13 @@ machine already has, pre-filled with a working argv. The catalog is plain data
 
 ### The guided wizard, step by step
 
+The order below is the wizard's, and it has two front ends. `guided/mod.rs::stages()`
+is the source of it in the terminal; the browser walks the same list from a
+declarative mirror of `guided/sections.rs` (`web/src/guided/spec.ts`), so a field
+added to one is a field the other is expected to grow too. There is deliberately
+no second field list with its own opinions — the terminal's labels, defaults,
+validators and gates are what the browser asks with.
+
 <div align="center"><img src="assets/guided-flow.png" alt="the guided wizard flow" width="620" /></div>
 
 ```mermaid
@@ -191,6 +198,76 @@ Plain-text fallback for a terminal with no image or mermaid support:
 Nothing is written until the finished config passes `loopsmith_core::validate`,
 the same check `loopsmith validate` runs on a file — so the wizard is never
 trusted further than a hand-written config is.
+
+### The way into the browser UI
+
+`--web` asks which kind of smith you are before it shows anything else, and
+remembers the answer. The two doors lead to the two modes, which are two views of
+one draft rather than two drafts:
+
+<div align="center"><img src="assets/web-guided-flow.png" alt="the two ways into the browser UI" width="560" /></div>
+
+```mermaid
+flowchart TD
+    S{"Which kind of smith?"}:::red
+    E["experienced"]:::blue
+    N["new"]:::blue
+    ED["Six-step editor<br/><i>Place · Power · Intent · Proof · Work · Ship</i>"]:::ink
+    T["What a loop is<br/><i>the explanation</i>"]:::blue
+    X["Load an existing loop<br/><i>examples, or start empty</i>"]:::blue
+    WZ["Guided cards<br/><i>one field at a time, stages() order</i>"]:::ink
+    RV{"Review:<br/>validate"}:::red
+    CR["Create loop"]:::ink
+    S --> E --> ED
+    S --> N --> T --> X --> WZ --> RV
+    RV -- errors --> WZ
+    RV -- ok --> CR
+    ED <-. "Expert editor / ⌘K<br/>same draft" .-> WZ
+    classDef red stroke:#C1272D,stroke-width:2px,fill:#fdf3f3;
+    classDef blue stroke:#2A5A8A,stroke-width:2px,fill:#f7f8fa;
+    classDef ink stroke:#222,stroke-width:2px,fill:#eef;
+```
+
+Plain-text fallback:
+
+```text
+                        ┌─────────────────────────┐
+                        │ Which kind of smith?    │
+                        └───────┬─────────┬───────┘
+              experienced       │         │        new
+                    ┌───────────┘         └───────────┐
+                    ▼                                 ▼
+        ┌───────────────────────┐          ┌────────────────────┐
+        │  Six-step editor      │          │  What a loop is    │
+        │  Place · Power ·      │          └─────────┬──────────┘
+        │  Intent · Proof ·     │                    ▼
+        │  Work · Ship          │          ┌────────────────────┐
+        └───────────┬───────────┘          │ Load an existing   │
+                    │                      │ loop, or start     │
+                    │                      │ empty              │
+                    │                      └─────────┬──────────┘
+                    │                                ▼
+                    │                      ┌────────────────────┐
+                    │  Expert editor / ⌘K  │  Guided cards      │
+                    └◀────same draft──────▶│  one field a card  │
+                                           └─────────┬──────────┘
+                                                     ▼
+                                        ┌────────────────────────┐  errors
+                                        │   Review: validate     │─────────┐
+                                        └───────────┬────────────┘         │
+                                                    │ ok                   │
+                                                    ▼                      │
+                                          ┌──────────────────┐             │
+                                          │   Create loop    │   ◀─────────┘
+                                          └──────────────────┘   (back to the card)
+```
+
+The wizard's own card is the same shape at every step: the section as a chip, the
+question as the heading, the field's explanation under it, and a footer carrying
+where you are, how to go back, and the one primary action — **Continue**, or
+**This part is done** where the step collects a list, or **Create loop** at the
+end. Leaving is never destructive: **Expert editor** hands the half-filled config
+to the six-step form.
 
 ---
 
@@ -508,7 +585,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd runtime && cargo test --workspace
 ```
 
-148 tests, no warnings. The ones worth knowing about:
+415 tests, no warnings. The ones worth knowing about:
 
 - `the_gate_can_take_done_back` — satisfied flips to unsatisfied when the artifact disappears
 - `judge_on_the_builders_provider_is_refused` — self-judgment cannot satisfy the gate

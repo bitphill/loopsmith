@@ -69,3 +69,10 @@ docs/
 .idea/
 .vscode/
 *.swp
+
+# ── Playwright ────────────────────────────────────────────────────
+# Traces and screenshots from a failed e2e run. Useful locally, never
+# something to commit.
+runtime/test-results/
+runtime/crates/loopsmith-cli/web/test-results/
+runtime/crates/loopsmith-cli/web/playwright-report/

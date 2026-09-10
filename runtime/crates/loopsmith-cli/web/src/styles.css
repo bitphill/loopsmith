@@ -58,6 +58,24 @@
   --r-lg: 14px;
   --r-full: 999px;
 
+  /* Cards sit on the 10px step, not the 14px one. A card is a surface, not a
+     window, and the tighter corner is what keeps a dense panel of them from
+     reading as a pile of lozenges. */
+  --r-card: 10px;
+
+  /* The inset of a card's parts and the gap between them, in one place. Set it
+     on a single card (`style="--card-spacing: 16px"`) to loosen that one
+     without touching the rest. */
+  --card-spacing: 12px;
+
+  /* Elevation is a hairline ring plus a soft drop, never a hard border: the
+     ring paints over the surface behind it, so nested cards keep one
+     continuous edge instead of stacking two 1px lines into a 2px seam. */
+  --ring: 0 0 0 1px var(--line);
+  --ring-strong: 0 0 0 1px var(--line-strong);
+  --shadow-card: var(--ring), 0 1px 2px rgb(60 40 20 / 0.04), 0 2px 6px -2px rgb(60 40 20 / 0.08);
+  --shadow-raised: var(--ring), 0 2px 6px rgb(60 40 20 / 0.06), 0 10px 24px -12px rgb(60 40 20 / 0.16);
+
   --sans: "Archivo", ui-sans-serif, "Segoe UI", Roboto, system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
@@ -98,6 +116,14 @@
     --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px -12px rgb(0 0 0 / 0.7);
     --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.6), 0 18px 40px -16px rgb(0 0 0 / 0.8);
 
+    /* On a dark ground the ring goes light: a low-alpha white edge dissolves
+       into the drop shadow as one continuous stroke, where a darker-than-the-
+       surface line just disappears. */
+    --ring: 0 0 0 1px rgb(255 255 255 / 0.10);
+    --ring-strong: 0 0 0 1px rgb(255 255 255 / 0.16);
+    --shadow-card: var(--ring), 0 1px 2px rgb(0 0 0 / 0.35), 0 2px 6px -2px rgb(0 0 0 / 0.45);
+    --shadow-raised: var(--ring), 0 2px 8px rgb(0 0 0 / 0.4), 0 12px 28px -12px rgb(0 0 0 / 0.6);
+
     color-scheme: dark;
   }
 }
@@ -134,6 +160,11 @@
 
   --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px -12px rgb(0 0 0 / 0.7);
   --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.6), 0 18px 40px -16px rgb(0 0 0 / 0.8);
+
+  --ring: 0 0 0 1px rgb(255 255 255 / 0.10);
+  --ring-strong: 0 0 0 1px rgb(255 255 255 / 0.16);
+  --shadow-card: var(--ring), 0 1px 2px rgb(0 0 0 / 0.35), 0 2px 6px -2px rgb(0 0 0 / 0.45);
+  --shadow-raised: var(--ring), 0 2px 8px rgb(0 0 0 / 0.4), 0 12px 28px -12px rgb(0 0 0 / 0.6);
 
   color-scheme: dark;
 }
@@ -251,12 +282,69 @@ h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
    Components
    -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+   Cards
+   ---------------------------------------------------------------------------
+   One surface treatment, used by every card in the app: a hairline ring and a
+   soft drop rather than a hard border. The ring is a shadow, so it costs no
+   layout and a card nested against another edge shows one continuous line
+   instead of two abutting borders.
+
+   The parts below are optional. A card that is only a container still works as
+   `.card` alone; `.card-header` / `.card-content` / `.card-footer` exist so
+   that when a card does have parts, they share one inset and line up down the
+   left edge. That inset is `--card-spacing`, which can be overridden on a
+   single card without touching the rest.
+   -------------------------------------------------------------------------- */
+
 .card {
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
 }
+
+/* For the one or two surfaces that genuinely float above the page. */
+.card-raised { box-shadow: var(--shadow-raised); }
+
+.card-header {
+  display: grid;
+  gap: 3px;
+  padding: var(--card-spacing);
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.card-description {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* Sits under a header, so it only pays for its own bottom inset. */
+.card-content { padding: 0 var(--card-spacing) var(--card-spacing); }
+
+/* A footer is where the actions live, so it is separated and slightly sunken
+   rather than floating in the same plane as the content. */
+.card-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--card-spacing) - 2px) var(--card-spacing);
+  border-top: 1px solid var(--line);
+  background: color-mix(in oklab, var(--raised) 55%, transparent);
+  border-end-start-radius: var(--r-card);
+  border-end-end-radius: var(--r-card);
+}
+
+/* Edge-to-edge content inside a card: cancels the inset while staying aligned
+   to it, the negative-margin trick the shadcn card documents. */
+.card-bleed { margin-inline: calc(var(--card-spacing) * -1); }
 
 .rule { border: 0; border-top: 1px solid var(--line); margin: 0; }
 
