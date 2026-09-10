@@ -42,6 +42,29 @@ class Loopsmith < Formula
     end
   end
 
+  # Homebrew prints this once, straight after the install. It is the only place a
+  # tap can say anything to someone who has just arrived, so it spends that space
+  # on the two commands that ask you what you want rather than expecting you to
+  # already know the config format.
+  def caveats
+    <<~EOS
+      Two guided ways to build your first loop, both of which ask one question at
+      a time and explain every field as they go:
+
+        loopsmith --web        in your browser; offers a walk-through if you are new
+        loopsmith --guided     the same questions in this terminal, no browser needed
+
+      Neither runs anything or spends anything while you answer.
+
+      Plain-English guide:
+        https://github.com/bitphill/loopsmith/blob/main/README-FOR-DUMMIES.md
+
+      Code wiki, the same pages on two surfaces:
+        https://bitphill.github.io/loopsmith/wiki/#overview
+        https://github.com/bitphill/loopsmith/wiki
+    EOS
+  end
+
   test do
     assert_match "loopsmith #{version}", shell_output("#{bin}/loopsmith --version")
 

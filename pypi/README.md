@@ -32,15 +32,29 @@ a goal that stops being true stops being satisfied.
 
 **Not a developer?** Marketing, sales, research, ops — if you can edit a text
 file, you can run a loop. And if you would rather not open a text file at all,
-`loopsmith --web` builds one for you in a browser.
+two guided front ends build one *for* you by asking questions, one at a time,
+with every answer explained as you go:
+
+- **`loopsmith --web`** — in your browser. It asks whether you are new to this
+  first; say yes and it walks you through the whole thing, starting from a
+  ready-made loop if you want one.
+- **`loopsmith --guided`** — the same questions in the terminal, for a machine
+  with no browser.
+
+Neither one runs anything or spends anything while you answer. You are writing a
+description; nothing happens until you press a button.
 
 ### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.3.1/README-FOR-DUMMIES.md)
 
 A plain-English guide: one install line, thirteen ready-made loops to copy, the
 six settings you actually edit, and how to leave it running on a schedule.
 
-There is also a generated [code wiki](https://bitphill.github.io/loopsmith/wiki/#overview) mapping the crates,
-the execution engine, the gate, and the provider layer.
+There is also a generated **code wiki** mapping the crates, the execution engine,
+the gate, and the provider layer — the same pages on two surfaces, whichever you
+prefer to read in:
+
+- [Browsable viewer](https://bitphill.github.io/loopsmith/wiki/#overview) — searchable, with the module map
+- [GitHub Wiki](https://github.com/bitphill/loopsmith/wiki) — the same pages in the repository's Wiki tab
 
 ## What it is
 
@@ -56,6 +70,26 @@ One rule holds the whole design up:
 `goal_satisfied` is written by a deterministic Rust gate and by nothing else, and
 the gate can **revoke**: delete a required artifact and a satisfied goal flips
 back. A system that can only promote is a burndown chart with extra steps.
+
+## Guided setup, in the terminal
+
+```bash
+loopsmith --guided        # or: loopsmith guided
+```
+
+The same config the browser paints, built by answering one question at a time —
+no browser needed, so it works over SSH and in any bare terminal. Each field
+explains itself and shows its default in `[brackets]`, so pressing Enter all the
+way through gives you something that works. Choices are numbered: you type the
+number, or the name. The agent CLIs already installed on your machine are offered
+as a menu, pre-filled, so a provider is one keystroke rather than a remembered
+command line.
+
+Four commands work at every prompt: `:back` to change the last answer, `:next` to
+keep the default, `:help` to explain the field again, and `:quit` to leave with a
+draft you can resume. Nothing is written until the finished config passes the same
+check `loopsmith validate` runs on a hand-written file, and
+`loopsmith guided --edit <file>` walks through changing a loop you already have.
 
 ## The browser UI
 

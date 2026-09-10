@@ -37,8 +37,12 @@ two front ends build one for you: `loopsmith --web` in a browser, or
 A plain-English guide: one install line, thirteen ready-made loops to copy, the
 six settings you actually edit, and how to leave it running on a schedule.
 
-There is also a generated [code wiki](https://bitphill.github.io/loopsmith/wiki/#overview) mapping the crates,
-the execution engine, the gate, and the provider layer.
+There is also a generated **code wiki** mapping the crates, the execution engine,
+the gate, and the provider layer — the same pages on two surfaces, whichever you
+prefer to read in:
+
+- [Browsable viewer](https://bitphill.github.io/loopsmith/wiki/#overview) — searchable, with the module map
+- [GitHub Wiki](https://github.com/bitphill/loopsmith/wiki) — the same pages in the repository's Wiki tab
 
 ---
 
