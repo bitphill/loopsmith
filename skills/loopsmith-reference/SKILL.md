@@ -14,9 +14,10 @@ description: >
 
 The distilled version of what makes iterative agent systems work. Applies to
 any loop; `loopsmith` is one implementation. It lets you write the definition
-three ways — a config file (`loopsmith new`), a one-field-at-a-time terminal
-wizard (`loopsmith --guided`), or a local browser UI (`loopsmith --web`) — but
-the front end is a convenience; the design below is what any of them has to get
+three ways — a config file (`loopsmith new`), a one-field-at-a-time wizard in
+either a terminal (`loopsmith --guided`) or a browser (`loopsmith --web`, which
+asks the same questions as cards), or the browser's six-step editor — but the
+front end is a convenience; the design below is what any of them has to get
 right. For the commands that run and inspect a loop, see the `loopsmith` skill.
 
 ## Is a loop even warranted?

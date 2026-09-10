@@ -29,6 +29,9 @@ import { Location, Secrets, Preflight } from "./setup";
 import { Information, PreExecution, Goals, Validations, Success, StopGatesSection } from "./sections-core";
 import { Schedules, ConstraintsSection, Guidelines, Skills, Graph, Providers, Context } from "./sections-run";
 import { Tour } from "./tour";
+import { SmithGate, type Smith } from "./smith-gate";
+import { ExamplesPicker } from "./examples-picker";
+import { Guided } from "./guided/guided";
 import type {
   LoopConfig, Detection, Help, SectionHelp, Review, ExampleCard, LibraryEntry,
   Format, PathFacts, JobSummary, ProviderSpec, Meta,
@@ -141,7 +144,25 @@ export default function App() {
 
   const [theme, setTheme] = useState<ThemeChoice>(
     () => (localStorage.getItem("loopsmith-theme") as ThemeChoice) || "system");
-  const [tourDone, setTourDone] = useState(() => localStorage.getItem("loopsmith-tour") === "done");
+
+  /**
+   * Which door was taken on the way in. Remembered, because the answer does not
+   * change from one launch to the next and asking again would be noise.
+   */
+  const [smith, setSmith] = useState<Smith | null>(
+    () => (localStorage.getItem("loopsmith-smith") as Smith | null) || null);
+  /** Where a new smith is in the walk-through: the explanation, then the examples. */
+  const [onboarding, setOnboarding] = useState<"tour" | "examples" | "done">("done");
+  /**
+   * The guided wizard and the six-step editor are two views of the same draft.
+   * Remembered, so a reload halfway through the walk-through comes back to the
+   * walk-through rather than dropping someone into the form they were being
+   * walked through in the first place.
+   */
+  const [mode, setMode] = useState<"expert" | "guided">(
+    () => (localStorage.getItem("loopsmith-mode") as "expert" | "guided") || "expert");
+  /** The tour is only ever opened deliberately — from onboarding, or the header. */
+  const [tourOpen, setTourOpen] = useState(false);
 
   const { shake, shakeKey, shakeProps } = useShake();
 
@@ -163,6 +184,8 @@ export default function App() {
     else root.setAttribute("data-theme", theme);
     localStorage.setItem("loopsmith-theme", theme);
   }, [theme]);
+
+  useEffect(() => { localStorage.setItem("loopsmith-mode", mode); }, [mode]);
 
   useEffect(() => {
     api.help().then(setHelp).catch(() => {});
@@ -267,6 +290,34 @@ export default function App() {
     if (!parent.trim()) setParent("~/loops");
     goStep("place");
     setToast({ tone: "good", text: `Loaded ${config.name}. Nothing is on disk yet — walk the steps and press Create loop.` });
+  };
+
+  const pickSmith = (s: Smith) => {
+    localStorage.setItem("loopsmith-smith", s);
+    setSmith(s);
+    // A new smith gets the explanation and then a working loop to start from.
+    // An experienced one is dropped straight into the editor, which is what
+    // they came for.
+    if (s === "new") setOnboarding("tour");
+  };
+
+  /** Leave the examples picker for the wizard, with or without a loaded example. */
+  const startGuided = async (id: string | null) => {
+    if (id) {
+      setLoadingId(id);
+      try {
+        const { config } = await api.example(id);
+        setCfg(config);
+        setCreated(false);
+      } catch (e) {
+        setToast({ tone: "bad", text: (e as Error).message });
+      } finally {
+        setLoadingId(null);
+      }
+    }
+    if (!parent.trim()) setParent("~/loops");
+    setOnboarding("done");
+    setMode("guided");
   };
 
   const openLoop = async (p: string) => {
@@ -391,9 +442,15 @@ export default function App() {
       run: () => loadExample(e.id),
     })),
     { id: "theme", group: "View", label: "Switch theme", run: () => setTheme(theme === "dark" ? "light" : "dark") },
-    { id: "tour", group: "View", label: "How this works", run: () => setTourDone(false) },
+    { id: "tour", group: "View", label: "How this works", run: () => setTourOpen(true) },
+    {
+      id: "mode",
+      group: "View",
+      label: mode === "guided" ? "Switch to the expert editor" : "Walk me through it, one field at a time",
+      run: () => setMode(mode === "guided" ? "expert" : "guided"),
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [help.sections, examples, blocked, theme, problemsByStep, cfg, path, created]);
+  ], [help.sections, examples, blocked, theme, problemsByStep, cfg, path, created, mode]);
 
   return (
     <PaletteProvider commands={commands}>
@@ -401,7 +458,7 @@ export default function App() {
         <div className="grid h-screen grid-rows-[auto_1fr] overflow-hidden">
           <Header
             meta={meta} island={island} theme={theme} setTheme={setTheme}
-            onTour={() => setTourDone(false)}
+            onTour={() => setTourOpen(true)}
             onRail={() => setRailOpen((v) => !v)} railOpen={railOpen}
           />
 
@@ -414,6 +471,26 @@ export default function App() {
               />
             </div>
 
+            {mode === "guided" ? (
+              <div className="grid min-h-0">
+                <Guided
+                  cfg={cfg} patch={patch} review={review}
+                  detection={detection} scanning={scanning}
+                  onRescan={(deep) => {
+                    setScanning(true);
+                    api.detect(deep).then(setDetection).catch(() => {}).finally(() => setScanning(false));
+                  }}
+                  onTest={testProvider} testing={testing} testResults={testResults}
+                  parent={parent} setParent={setParent} loopPath={path}
+                  initGit={initGit} setInitGit={setInitGit}
+                  format={format} setFormat={setFormat} facts={facts}
+                  onExit={() => setMode("expert")}
+                  onCreate={() => run("create")}
+                  createDisabled={blocked || !path.trim() || (!!facts && !facts.writable)}
+                  onJump={(field) => { setMode("expert"); jump(field); }}
+                />
+              </div>
+            ) : (
             <div className="grid min-h-0 grid-rows-[auto_1fr_auto]">
               <div className="flex flex-wrap items-center gap-3 border-b bg-surface px-4 py-2">
                 <StepBar steps={STEPS} active={step} onPick={goStep} />
@@ -467,6 +544,7 @@ export default function App() {
                 toast={toast} onDismissToast={() => setToast(null)}
               />
             </div>
+            )}
 
             {railOpen && (
               <div className="hidden min-h-0 lg:block">
@@ -522,7 +600,26 @@ export default function App() {
           </Dialog>
         )}
 
-        {!tourDone && <Tour onClose={() => { setTourDone(true); localStorage.setItem("loopsmith-tour", "done"); }} />}
+        {/* The way in: pick a door, then (for a new smith) the explanation and
+            a working loop to start from. Each is shown once and remembered. */}
+        {smith === null && <SmithGate onPick={pickSmith} />}
+
+        {(tourOpen || onboarding === "tour") && (
+          <Tour
+            onClose={() => {
+              setTourOpen(false);
+              if (onboarding === "tour") setOnboarding("examples");
+            }}
+          />
+        )}
+
+        {smith !== null && onboarding === "examples" && (
+          <ExamplesPicker
+            examples={examples}
+            loading={loadingId !== null}
+            onGo={startGuided}
+          />
+        )}
       </HelpProvider>
     </PaletteProvider>
   );

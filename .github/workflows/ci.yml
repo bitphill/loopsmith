@@ -149,6 +149,47 @@ jobs:
           [ "$code" -eq 2 ] || { echo "::error::the resume launcher exited $code, expected 2"; exit 1; }
           echo "both launchers present; resume exited 2 as designed"
 
+  # The web UI is compiled into the binary with `include_str!` from a committed
+  # `src/web/dist/`. That is what makes `loopsmith --web` work with no Node on
+  # the machine, and it is also a trap: a frontend change that is not rebuilt
+  # leaves `dist/` holding the previous UI, the binary serves it, and nothing
+  # anywhere fails. The only way that gets caught is by rebuilding it here and
+  # asserting the committed output is what the sources produce.
+  web:
+    name: web UI is built from its sources
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runtime/crates/loopsmith-cli/web
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node ships on the runner image, so this downloads no action. Same
+      # reasoning as the toolchain step above: an action that cannot be fetched
+      # fails the job before anything has been proved.
+      - name: What is this machine
+        run: node --version && npm --version
+
+      # `npm ci`, not `npm install`: the lockfile is the input, and a resolution
+      # that drifts here would make the check assert the wrong thing.
+      - name: Install
+        run: npm ci
+
+      # Typechecks first (`npm run build` runs `tsc --noEmit` before vite), then
+      # writes into ../src/web/dist.
+      - name: Build
+        run: npm run build
+
+      - name: The committed dist matches the sources
+        working-directory: .
+        run: |
+          if ! git diff --quiet -- runtime/crates/loopsmith-cli/src/web/dist; then
+            echo "::error::src/web/dist is stale — run 'npm run build' in runtime/crates/loopsmith-cli/web and commit the result"
+            git diff --stat -- runtime/crates/loopsmith-cli/src/web/dist
+            exit 1
+          fi
+          echo "dist is current"
+
   # Deliberately separate and non-blocking. An advisory audit that can fail the
   # merge queue on somebody else's CVE disclosure teaches people to ignore it.
   audit:

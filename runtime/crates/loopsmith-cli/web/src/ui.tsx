@@ -324,7 +324,10 @@ export function Card({
   const [open, setOpen] = useState(defaultOpen);
   return (
     <section className="card overflow-hidden" id={`section-${letter ?? title}`}>
-      <header className="flex items-start gap-3 p-4">
+      {/* `card-header` carries the inset; the flex utilities win over its own
+          grid display, which is what lets one class own spacing everywhere
+          without dictating layout. */}
+      <header className="card-header flex items-start gap-3">
         <button
           type="button"
           className="btn-ghost mt-0.5 shrink-0 rounded p-1"
@@ -357,7 +360,7 @@ export function Card({
         </div>
         {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
       </header>
-      {open && <div className="px-4 pb-4">{children}</div>}
+      {open && <div className="card-content">{children}</div>}
     </section>
   );
 }
@@ -431,7 +434,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="card rise w-full p-5"
+        className="card card-raised rise w-full p-5"
         style={{ maxWidth: width }}
         onMouseDown={(e) => e.stopPropagation()}
       >

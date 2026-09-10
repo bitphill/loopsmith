@@ -33,7 +33,13 @@ loopsmith --web                                        # a local browser UI
   browser, so it is the one to reach for over SSH or in a bare terminal.
 - **`--web`** (identical: `loopsmith web [--port N] [--no-open]`) serves a
   localhost UI that fills the same fields with live validation, cost, and plan,
-  and can run the buttons against the real binary. Loopback only.
+  and can run the buttons against the real binary. Loopback only. It opens by
+  asking which kind of smith you are: an experienced one lands in the six-step
+  editor, a new one gets the explanation, the examples to start from, and then
+  the **same one-field-at-a-time walk-through `--guided` runs**, drawn as cards
+  and asked in the same `stages()` order. Both are two views of one draft —
+  "Expert editor" on any card, or `⌘K`, switches between them without losing
+  anything.
 - **`new`** scaffolds the directory and a starter config to edit yourself — the
   path below.
 

@@ -102,20 +102,28 @@ export function MorphPanel({
       transition={SPRING_SOFT}
       style={{ overflow: "hidden" }}
     >
-      <AnimatePresence initial={false} mode="popLayout" custom={direction}>
-        <motion.div
-          key={view}
-          ref={box}
-          custom={direction}
-          initial={{ opacity: 0, x: direction * 26, filter: "blur(4px)" }}
-          animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-          exit={{ opacity: 0, x: direction * -26, filter: "blur(4px)", position: "absolute" }}
-          transition={EASE}
-          style={{ width: "100%" }}
-        >
-          {children}
-        </motion.div>
-      </AnimatePresence>
+      {/* Deliberately no AnimatePresence here.
+          Its exit phase never completes under React 19's StrictMode with this
+          version of `motion`, and the failure is silent in the worst way: with
+          `mode="popLayout"` the outgoing view was never unmounted, so every
+          step ever visited stayed in the DOM — duplicate form controls,
+          duplicate element ids, and stale cards left behind to catch a click.
+          With `mode="wait"` the same stall meant the incoming view never
+          mounted and the stepper simply stopped moving.
+
+          Keying the child on `view` makes React do the swap: the old subtree
+          unmounts, the new one mounts and animates in. Only the entry is
+          animated, which is the half you actually see. */}
+      <motion.div
+        key={view}
+        ref={box}
+        initial={{ opacity: 0, x: direction * 26, filter: "blur(4px)" }}
+        animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
+        transition={EASE}
+        style={{ width: "100%" }}
+      >
+        {children}
+      </motion.div>
     </motion.div>
   );
 }

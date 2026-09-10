@@ -135,6 +135,25 @@ Serves `http://127.0.0.1:3000`, stepping up a port at a time if that is busy, an
 opens a browser tab. `--no-open` prints the URL instead; `--port` picks a
 starting port.
 
+### Two ways in
+
+Before anything else it asks which kind of smith you are, and remembers the
+answer:
+
+- **experienced** — straight to the six-step editor (Place, Power, Intent, Proof,
+  Work, Ship), every section reachable at once.
+- **new** — the explanation, then the shipped examples to start from or an empty
+  config, then the **same walk-through `--guided` runs in a terminal**, drawn as
+  cards: one field per card, in `stages()` order, each advanced section (A–J)
+  behind its own opt-in card, and a repeating section collecting entries behind a
+  `+` until you say "This part is done".
+
+The two are views of one draft, not two drafts. **Expert editor** on any card
+hands what is filled in so far to the six-step form, `⌘K` switches back, and the
+review rail runs the real validator across both. Create stays gated on that
+validator reporting no errors, which is the same gate the terminal wizard applies
+before it writes a file.
+
 ### What it is, structurally
 
 Three properties hold, and each is load-bearing:

@@ -190,6 +190,29 @@ Six steps rather than one long form — Place, Power, Intent, Proof, Work, Ship 
 with only the actions that make sense on the step you are on, and `⌘K` to reach
 any step, section, action, or example directly.
 
+### Two ways in
+
+The first thing `--web` asks is which kind of smith you are, and it remembers the
+answer:
+
+- **an experienced smith** goes straight to the six-step editor above;
+- **a new smith** gets the explanation, then the working examples to start from —
+  or an empty config — and then the **same one-question-at-a-time walk-through
+  `--guided` runs in the terminal**, drawn as cards.
+
+The walk-through asks the sections in the order `--guided` asks them: identity,
+providers, goals, validations, stop gates, then each advanced section (A–J)
+behind its own opt-in card. One field per card, with that field's explanation in
+place. A repeating section — goals, validations, nodes — collects entries in a
+single card with a `+`, and stays there until you say **This part is done**. A
+choice is a row of options you can see all of at once rather than a numbered
+list. Loading an example fills the answers in without skipping the questions.
+
+Both modes are two views of one draft: **Expert editor** on any card hands the
+half-filled config to the six-step form, `⌘K` switches back, and the review panel
+watches either way. Nothing is created until the real validator reports no
+errors.
+
 It probes the machine first, so nothing has to be typed from memory: agent CLIs
 on `PATH`, the Ollama models actually pulled, MCP servers already configured by
 your editor or desktop app, which API keys are set, and which sub-agents are
