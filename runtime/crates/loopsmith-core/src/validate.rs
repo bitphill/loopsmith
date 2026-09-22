@@ -76,7 +76,7 @@ pub fn validate(cfg: &LoopConfig) -> ValidationReport {
     }
     if cfg.intent.goals.is_empty() {
         r.issues
-            .push(Issue::err("goals", "a loop needs at least one goal"));
+            .push(Issue::err("intent.goals", "a loop needs at least one goal"));
     }
 
     let goal_names: BTreeSet<&str> = cfg.intent.goals.iter().map(|g| g.name.as_str()).collect();
@@ -101,17 +101,17 @@ fn check_execution_guidelines(cfg: &LoopConfig, r: &mut ValidationReport) {
     for (i, item) in g.items.iter().enumerate() {
         if item.name.trim().is_empty() {
             r.issues
-                .push(Issue::err(format!("execution_guidelines.items[{i}].name"), "must not be empty"));
+                .push(Issue::err(format!("execution.phases.items[{i}].name"), "must not be empty"));
         }
         if !seen.insert(item.name.as_str()) {
             r.issues.push(Issue::err(
-                format!("execution_guidelines.items[{i}].name"),
+                format!("execution.phases.items[{i}].name"),
                 format!("duplicate guideline name `{}`", item.name),
             ));
         }
         if item.guideline.trim().len() < 12 {
             r.issues.push(Issue::warn(
-                format!("execution_guidelines.items[{i}].guideline"),
+                format!("execution.phases.items[{i}].guideline"),
                 "too short to steer a node; say what this phase is for and what it must not do",
             ));
         }
@@ -119,7 +119,7 @@ fn check_execution_guidelines(cfg: &LoopConfig, r: &mut ValidationReport) {
 
     if !g.dependency.is_empty() && g.items.is_empty() {
         r.issues.push(Issue::err(
-            "execution_guidelines.dependency",
+            "execution.phases.dependency",
             "orders guidelines that do not exist; `items` is empty",
         ));
         return;
@@ -128,7 +128,7 @@ fn check_execution_guidelines(cfg: &LoopConfig, r: &mut ValidationReport) {
     let edges = match g.edges() {
         Ok(e) => e,
         Err(msg) => {
-            r.issues.push(Issue::err("execution_guidelines.dependency", msg));
+            r.issues.push(Issue::err("execution.phases.dependency", msg));
             return;
         }
     };
@@ -136,14 +136,14 @@ fn check_execution_guidelines(cfg: &LoopConfig, r: &mut ValidationReport) {
         for name in [from, to] {
             if !seen.contains(name.as_str()) {
                 r.issues.push(Issue::err(
-                    "execution_guidelines.dependency",
+                    "execution.phases.dependency",
                     format!("`{name}` is ordered but is not one of: {}", g.names().join(", ")),
                 ));
             }
         }
         if from == to {
             r.issues.push(Issue::err(
-                "execution_guidelines.dependency",
+                "execution.phases.dependency",
                 format!("`{from}` cannot come before itself"),
             ));
         }
@@ -153,7 +153,7 @@ fn check_execution_guidelines(cfg: &LoopConfig, r: &mut ValidationReport) {
     // writing a second traversal is the point of the `DagNode` trait.
     if let Ok(phases) = g.phases() {
         if let Err(e) = topo_order(&phases) {
-            r.issues.push(Issue::err("execution_guidelines.dependency", e));
+            r.issues.push(Issue::err("execution.phases.dependency", e));
         }
     }
 
@@ -162,7 +162,7 @@ fn check_execution_guidelines(cfg: &LoopConfig, r: &mut ValidationReport) {
         if let Some(stage) = &n.stage {
             if !seen.contains(stage.as_str()) {
                 r.issues.push(Issue::err(
-                    format!("graph.nodes[{i}].stage"),
+                    format!("execution.graph.nodes[{i}].stage"),
                     format!(
                         "`{stage}` is not a guideline in `execution_guidelines.items`; \
                          this node would never be dispatched"
@@ -223,7 +223,7 @@ fn topo_order(phases: &[crate::Phase]) -> Result<(), String> {
 fn check_goals(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationReport) {
     let mut seen = BTreeSet::new();
     for (i, g) in cfg.intent.goals.iter().enumerate() {
-        let f = format!("goals[{i}]");
+        let f = format!("intent.goals[{i}]");
         if g.name.trim().is_empty() {
             r.issues.push(Issue::err(format!("{f}.name"), "must not be empty"));
         }
@@ -263,7 +263,7 @@ fn check_goals(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationRepor
 fn check_pre_execution(cfg: &LoopConfig, r: &mut ValidationReport) {
     if cfg.intent.prerequisites.is_empty() {
         r.issues.push(Issue::warn(
-            "pre_execution",
+            "intent.prerequisites",
             "empty. The corpus rule is to do the task manually first — the manual runs are the spec",
         ));
         return;
@@ -277,7 +277,7 @@ fn check_pre_execution(cfg: &LoopConfig, r: &mut ValidationReport) {
         .collect();
     if !undone.is_empty() {
         r.issues.push(Issue::err(
-            "pre_execution",
+            "intent.prerequisites",
             format!(
                 "{} step(s) not marked done: {}. Automating before understanding produces fast, confident garbage",
                 undone.len(),
@@ -314,7 +314,7 @@ fn check_validations(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut Validatio
     let artifacts = available_artifacts(cfg);
     let mut covered: BTreeMap<&str, usize> = BTreeMap::new();
     for (i, v) in cfg.safety.checks.iter().enumerate() {
-        let f = format!("validations[{i}]");
+        let f = format!("safety.checks[{i}]");
         if v.target != OVERALL && !names.contains(v.target.as_str()) {
             r.issues.push(Issue::err(
                 format!("{f}.target"),
@@ -392,7 +392,7 @@ fn check_validations(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut Validatio
 
 fn check_success(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationReport) {
     for (i, s) in cfg.intent.success.iter().enumerate() {
-        let f = format!("success[{i}]");
+        let f = format!("intent.success[{i}]");
         if s.target != OVERALL && !names.contains(s.target.as_str()) {
             r.issues.push(Issue::err(
                 format!("{f}.target"),
@@ -417,22 +417,22 @@ fn check_stop_gates(cfg: &LoopConfig, r: &mut ValidationReport) {
     let g = &cfg.safety.gates.stop;
     if g.max_iterations == 0 {
         r.issues
-            .push(Issue::err("stop_gates.max_iterations", "must be at least 1"));
+            .push(Issue::err("safety.gates.stop.max_iterations", "must be at least 1"));
     }
     if g.max_iterations > 100 {
         r.issues.push(Issue::warn(
-            "stop_gates.max_iterations",
+            "safety.gates.stop.max_iterations",
             "very high; a loop that cannot converge in 100 iterations usually has a miscalibrated verifier",
         ));
     }
     if g.no_progress_iterations == 0 {
         r.issues.push(Issue::warn(
-            "stop_gates.no_progress_iterations",
+            "safety.gates.stop.no_progress_iterations",
             "disabled; the loop can spin without changing anything",
         ));
     }
     if let Some(rand_at) = g.no_progress_iterations_randomness {
-        let field = "stop_gates.no_progress_iterations_randomness";
+        let field = "safety.gates.stop.no_progress_iterations_randomness";
         if rand_at == 0 {
             r.issues.push(Issue::err(
                 field,
@@ -466,7 +466,7 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
     let ids: BTreeSet<&str> = cfg.execution.graph.nodes.iter().map(|n| n.id.as_str()).collect();
     if cfg.execution.graph.nodes.is_empty() {
         r.issues.push(Issue::warn(
-            "graph.nodes",
+            "execution.graph.nodes",
             "no nodes; the loop will run a single implicit builder per goal",
         ));
         return;
@@ -474,7 +474,7 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
     let mut seen = BTreeSet::new();
     let mut has_judge = false;
     for (i, n) in cfg.execution.graph.nodes.iter().enumerate() {
-        let f = format!("graph.nodes[{i}]");
+        let f = format!("execution.graph.nodes[{i}]");
         if !seen.insert(n.id.as_str()) {
             r.issues
                 .push(Issue::err(format!("{f}.id"), format!("duplicate node id `{}`", n.id)));
@@ -519,14 +519,14 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
     }
     if !has_judge {
         r.issues.push(Issue::warn(
-            "graph.nodes",
+            "execution.graph.nodes",
             "no judge node; verification will fall back to detectors only",
         ));
     }
     if let Concurrency::Fixed { max_parallel } = cfg.execution.graph.concurrency {
         if max_parallel == 0 {
             r.issues.push(Issue::err(
-                "graph.concurrency.max_parallel",
+                "execution.graph.concurrency.max_parallel",
                 "must be at least 1",
             ));
         }
@@ -551,7 +551,7 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
         }
         for (wave, ids) in by_wave.iter().filter(|(_, ids)| ids.len() > 1) {
             r.issues.push(Issue::warn(
-                "graph.nodes[].isolated",
+                "execution.graph.nodes[].isolated",
                 format!(
                     "{} builder nodes run together in wave {} without worktree isolation: {}",
                     ids.len(),
@@ -600,14 +600,14 @@ fn wave_levels(nodes: &[NodeSpec]) -> BTreeMap<&str, usize> {
 fn check_providers(cfg: &LoopConfig, r: &mut ValidationReport) {
     if cfg.execution.providers.providers.is_empty() {
         r.issues.push(Issue::warn(
-            "providers.providers",
+            "execution.providers.providers",
             "none declared; nodes cannot be dispatched until at least one exists",
         ));
         return;
     }
     let mut seen = BTreeSet::new();
     for (i, p) in cfg.execution.providers.providers.iter().enumerate() {
-        let f = format!("providers.providers[{i}]");
+        let f = format!("execution.providers.providers[{i}]");
         if !seen.insert(p.id.as_str()) {
             r.issues
                 .push(Issue::err(format!("{f}.id"), format!("duplicate provider id `{}`", p.id)));

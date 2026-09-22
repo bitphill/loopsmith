@@ -90,7 +90,41 @@ pub fn migrate(doc: &Value) -> (Value, Vec<Moved>) {
     repair_nodes(&mut out);
     repair_triggers(&mut out);
 
-    (Value::Mapping(out), moved)
+    (Value::Mapping(reorder(out)), moved)
+}
+
+/// The order a config's top-level keys are written in.
+///
+/// A mapping keeps insertion order, and relocating a key appends it — so a
+/// migrated file came out with `safety` above `intent` purely because
+/// `validations` happened to be removed before `information` was. Nobody would
+/// write it that way, and `migrate --write` produces a file people then read.
+const KEY_ORDER: &[&str] = &[
+    "name",
+    "version",
+    "description",
+    "environment",
+    "features",
+    "intent",
+    "execution",
+    "safety",
+    "evolution",
+];
+
+/// Sort top-level keys into [`KEY_ORDER`], keeping anything unrecognised at the
+/// end in the order it arrived.
+fn reorder(map: Mapping) -> Mapping {
+    let mut out = Mapping::new();
+    let mut rest = map;
+    for key in KEY_ORDER {
+        if let Some(v) = rest.remove(Value::from(*key)) {
+            out.insert(Value::from(*key), v);
+        }
+    }
+    for (k, v) in rest {
+        out.insert(k, v);
+    }
+    out
 }
 
 /// Follow a dotted path to a mutable value, if every segment exists.
@@ -283,6 +317,34 @@ mod tests {
         let (out, moved) = migrate(&doc);
         assert_eq!(at(&out, "safety.checks.0.new"), Some(1.into()));
         assert!(moved.iter().any(|m| m.from == "validations"));
+    }
+
+    #[test]
+    fn a_migrated_document_is_ordered_the_way_a_person_would_write_it() {
+        // Relocation appends, so without the reorder the bundle that happened
+        // to be created first wins — which put `safety` above `intent` purely
+        // because `validations` sorts before `information` in the move table.
+        let doc = yaml("validations: []\ngoals: []\nname: t\ngraph: {}\n");
+        let (out, _) = migrate(&doc);
+        let keys: Vec<&str> = out
+            .as_mapping()
+            .unwrap()
+            .keys()
+            .filter_map(|k| k.as_str())
+            .collect();
+        assert_eq!(keys, vec!["name", "intent", "execution", "safety"]);
+    }
+
+    #[test]
+    fn a_key_the_order_does_not_know_about_survives_at_the_end() {
+        let doc = yaml("goals: []\nname: t\nsomething_new: 1\n");
+        let (out, _) = migrate(&doc);
+        let m = out.as_mapping().unwrap();
+        assert_eq!(m.get("something_new"), Some(&Value::from(1)));
+        assert_eq!(
+            m.keys().filter_map(|k| k.as_str()).last(),
+            Some("something_new")
+        );
     }
 
     #[test]

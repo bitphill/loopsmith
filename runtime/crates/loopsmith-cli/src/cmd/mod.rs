@@ -24,7 +24,8 @@ pub mod run;
 pub mod schedule;
 pub mod skills;
 pub mod status;
-pub mod validate;
+pub mod migrate;
+mod validate;
 pub mod watch;
 #[cfg(feature = "web")]
 pub mod web;
@@ -130,6 +131,7 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
             git,
         }),
         Command::Validate { config, strict } => validate::execute(&config, strict),
+        Command::Migrate { config, check, write } => migrate::execute(&config, check, write),
         Command::Convert {
             config,
             out,

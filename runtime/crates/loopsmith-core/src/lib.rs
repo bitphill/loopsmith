@@ -21,7 +21,7 @@ pub mod md;
 pub mod validate;
 
 pub use config::*;
-pub use md::{parse_md, render_md};
+pub use md::{parse_md, parse_md_reporting, render_md};
 pub use validate::{validate, Issue, Severity, ValidationReport};
 
 use std::path::Path;

@@ -112,12 +112,25 @@ pub enum Command {
         #[arg(long)]
         git: bool,
     },
-    /// Check a config against the A–H model.
+    /// Check a config against the model.
     Validate {
         config: PathBuf,
         /// Treat warnings as errors.
         #[arg(long)]
         strict: bool,
+    },
+    /// Rewrite a 0.3 config into the 1.0 shape.
+    ///
+    /// Optional: a 0.3 config still loads. This makes the file say what the
+    /// loader already understands, which stops the deprecation notices.
+    Migrate {
+        config: PathBuf,
+        /// Report what would change and exit non-zero. Writes nothing.
+        #[arg(long)]
+        check: bool,
+        /// Replace the file. Without this the result goes to stdout.
+        #[arg(long)]
+        write: bool,
     },
     /// Translate a config between YAML and Markdown. Both are the same model.
     Convert {
