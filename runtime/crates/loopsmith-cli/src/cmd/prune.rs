@@ -1,7 +1,7 @@
 //! `loopsmith prune` — remove the git worktrees this loop created.
 
 use super::config_dir;
-use crate::worktree;
+use loopsmith_run::worktree;
 use std::path::Path;
 use std::process::ExitCode;
 

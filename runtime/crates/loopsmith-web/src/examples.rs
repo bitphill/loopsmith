@@ -28,19 +28,19 @@ use std::path::PathBuf;
 /// `tools/sync-examples.sh`. The test at the bottom of this file is what
 /// stops the copies from drifting.
 const EMBEDDED: &[(&str, &str)] = &[
-    ("account-watch-loop.yaml", include_str!("../../templates/examples/account-watch-loop.yaml")),
-    ("blogger-loop.yaml", include_str!("../../templates/examples/blogger-loop.yaml")),
-    ("cold-outreach-loop.yaml", include_str!("../../templates/examples/cold-outreach-loop.yaml")),
-    ("idea-radar-loop.yaml", include_str!("../../templates/examples/idea-radar-loop.yaml")),
-    ("landing-page-loop.yaml", include_str!("../../templates/examples/landing-page-loop.yaml")),
-    ("marketing-automation-loop.yaml", include_str!("../../templates/examples/marketing-automation-loop.yaml")),
-    ("refactor-loop.yaml", include_str!("../../templates/examples/refactor-loop.yaml")),
-    ("research-loop.yaml", include_str!("../../templates/examples/research-loop.yaml")),
-    ("sales-leads-loop.yaml", include_str!("../../templates/examples/sales-leads-loop.yaml")),
-    ("traffic-loop.yaml", include_str!("../../templates/examples/traffic-loop.yaml")),
-    ("trend-radar-loop.yaml", include_str!("../../templates/examples/trend-radar-loop.yaml")),
-    ("viral-game-loop.yaml", include_str!("../../templates/examples/viral-game-loop.yaml")),
-    ("x402-agent-loop.yaml", include_str!("../../templates/examples/x402-agent-loop.yaml")),
+    ("account-watch-loop.yaml", include_str!("../templates/examples/account-watch-loop.yaml")),
+    ("blogger-loop.yaml", include_str!("../templates/examples/blogger-loop.yaml")),
+    ("cold-outreach-loop.yaml", include_str!("../templates/examples/cold-outreach-loop.yaml")),
+    ("idea-radar-loop.yaml", include_str!("../templates/examples/idea-radar-loop.yaml")),
+    ("landing-page-loop.yaml", include_str!("../templates/examples/landing-page-loop.yaml")),
+    ("marketing-automation-loop.yaml", include_str!("../templates/examples/marketing-automation-loop.yaml")),
+    ("refactor-loop.yaml", include_str!("../templates/examples/refactor-loop.yaml")),
+    ("research-loop.yaml", include_str!("../templates/examples/research-loop.yaml")),
+    ("sales-leads-loop.yaml", include_str!("../templates/examples/sales-leads-loop.yaml")),
+    ("traffic-loop.yaml", include_str!("../templates/examples/traffic-loop.yaml")),
+    ("trend-radar-loop.yaml", include_str!("../templates/examples/trend-radar-loop.yaml")),
+    ("viral-game-loop.yaml", include_str!("../templates/examples/viral-game-loop.yaml")),
+    ("x402-agent-loop.yaml", include_str!("../templates/examples/x402-agent-loop.yaml")),
 ];
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,7 +100,7 @@ fn sources() -> Vec<(String, String, &'static str)> {
     let mut out: Vec<(String, String, &'static str)> = Vec::new();
 
     let mut dirs: Vec<(PathBuf, &'static str)> = Vec::new();
-    if let Some(home) = crate::web::detect::home_dir() {
+    if let Some(home) = crate::detect::home_dir() {
         dirs.push((home.join(".loopsmith/examples"), "user"));
     }
     dirs.push((PathBuf::from("config/examples"), "repo"));
@@ -141,7 +141,7 @@ fn card_for(id: &str, text: &str, origin: &'static str) -> Option<ExampleCard> {
     Some(ExampleCard {
         id: id.to_string(),
         name: cfg.name.clone(),
-        blurb: crate::web::detect::truncate(&cfg.description, 180),
+        blurb: crate::detect::truncate(&cfg.description, 180),
         origin: origin.to_string(),
         goals: cfg.intent.goals.len(),
         validations: cfg.safety.checks.len(),

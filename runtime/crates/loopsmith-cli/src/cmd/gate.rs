@@ -8,7 +8,7 @@ pub fn execute(config: &Path, target: &str, workdir: &Path) -> Result<ExitCode, 
     // A one-shot gate check has no judge run behind it, so subjective checks
     // correctly report that no judgment was recorded.
     let ev =
-        crate::run::collect_evidence(&cfg, workdir, Some(&workdir.join("metrics.json")), vec![]);
+        loopsmith_run::collect_evidence(&cfg, workdir, Some(&workdir.join("metrics.json")), vec![]);
     let v = loopsmith_gate::evaluate(&cfg, target, &ev);
     println!(
         "{}: {}",

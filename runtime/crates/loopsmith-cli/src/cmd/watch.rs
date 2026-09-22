@@ -3,8 +3,8 @@
 //! This is what makes a loop live for weeks rather than for one invocation.
 
 use super::{config_dir, config_file_name, open_store, report_outcome};
-use crate::run::RunOptions;
-use crate::schedule;
+use loopsmith_run::RunOptions;
+use loopsmith_run::schedule;
 use loopsmith_memory::Store;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -69,7 +69,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
             let run_id = format!("run-{}", loopsmith_memory::now_ms());
             println!("\n[{}] {} — starting {run_id}", runs + 1, why.join("; "));
 
-            match crate::run::execute(
+            match loopsmith_run::execute(
                 &cfg,
                 &store,
                 &RunOptions {

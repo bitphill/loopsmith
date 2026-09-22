@@ -35,25 +35,30 @@ scheduler costs more than it saves.
 ## Where it sits
 
 ```
-loopsmith  (the CLI binary)
-└── loopsmith-mcp ── loopsmith-gate ─┐
-    loopsmith-skills ────────────────┤
-    loopsmith-provider ──────────────┼── loopsmith-core ── loopsmith-util
-    loopsmith-graph ─────────────────┤        (config)      (primitives)
-    loopsmith-memory ────────────────┘
+loopsmith  (the CLI binary: arguments, dispatch, scaffolding)
+├── loopsmith-web ─────── loopsmith-wizard ──┐
+├── loopsmith-run ──┬──── loopsmith-gate ────┤
+│   (the engine)    ├──── loopsmith-skills ──┤
+│                   ├──── loopsmith-provider ┼── loopsmith-core ── loopsmith-util
+│                   ├──── loopsmith-graph ───┤      (config)        (primitives)
+│                   └──── loopsmith-memory ──┘
+└── loopsmith-mcp  (gate, memory, and graph over stdio)
 ```
 
 | Crate | Purpose |
 |---|---|
 | [`loopsmith`](https://crates.io/crates/loopsmith) | the CLI binary |
 | [`loopsmith-util`](https://crates.io/crates/loopsmith-util) | PATH lookup, wall clock, runtime platform detection |
-| [`loopsmith-core`](https://crates.io/crates/loopsmith-core) | the A–J config model and its validation |
+| [`loopsmith-core`](https://crates.io/crates/loopsmith-core) | the config model — intent, execution, safety, evolution — and its validation |
 | [`loopsmith-memory`](https://crates.io/crates/loopsmith-memory) | `sled`-backed episodes, goal state, ledger, checkpoints |
 | [`loopsmith-graph`](https://crates.io/crates/loopsmith-graph) | DAG scheduling, critical path, Amdahl-driven concurrency |
 | [`loopsmith-gate`](https://crates.io/crates/loopsmith-gate) | the deterministic verification gate |
 | [`loopsmith-provider`](https://crates.io/crates/loopsmith-provider) | provider routing and the tier cascade |
 | [`loopsmith-skills`](https://crates.io/crates/loopsmith-skills) | sub-agent acquisition, quarantine, outcome ranking |
 | [`loopsmith-mcp`](https://crates.io/crates/loopsmith-mcp) | local stdio MCP server over memory, gate, and graph |
+| [`loopsmith-run`](https://crates.io/crates/loopsmith-run) | the run engine: iteration state machine, dispatch, isolation, recovery, triggers |
+| [`loopsmith-wizard`](https://crates.io/crates/loopsmith-wizard) | the guided wizard: known-CLI catalog, machine detection, the terminal interview |
+| [`loopsmith-web`](https://crates.io/crates/loopsmith-web) | the loopback-only browser UI |
 
 ## The one rule the whole design rests on
 

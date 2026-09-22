@@ -1,10 +1,10 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.3.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
-  <h1>loopsmith-provider</h1>
-  <p><em>Provider routing for loopsmith: Claude Code, Ollama, Grok, OpenAI, Gemini, Hermes, MCP, and any BYOK command.</em></p>
+  <h1>loopsmith-web</h1>
+  <p><em>The browser UI — everything the loopsmith CLI does, done by clicking.</em></p>
 </div>
 
-[![crates.io](https://img.shields.io/crates/v/loopsmith-provider?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-provider)
+[![crates.io](https://img.shields.io/crates/v/loopsmith-web?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-web)
 [![license](https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
 ![rust](https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white)
 
@@ -23,19 +23,20 @@ agent loops behind a deterministic verification gate.
 
 ## What this crate is
 
-Every provider is a command template. That single decision is what makes
-bring-your-own-key free: Claude Code, Ollama, a Grok CLI, an OpenAI-compatible
-endpoint driven by `curl`, an MCP server over stdio — all of them are "a program
-you run with a prompt". Adding one is a config edit, never a rebuild.
+A loopback-only `axum` server with the frontend compiled in, so a machine with
+no checkout and no Node still has a working UI. Three properties hold, and each
+is load-bearing:
 
-Nodes ask for a *tier* (`cheap`, `standard`, `strong`) and a cascade decides
-which provider actually serves the call, falling through on failure or timeout.
-Judge independence can be enforced, so a judge never runs on the same provider
-as the builder whose work it is checking.
+- **Localhost only.** The listener binds `127.0.0.1`, and a host-header guard
+  refuses anything that is not loopback.
+- **No new behaviour.** Every action shells out to the same `loopsmith` binary.
+  The browser cannot do anything `loopsmith --help` does not list.
+- **Self-contained.** The UI, the example library, and the mark are embedded
+  with `include_str!` / `include_bytes!`.
 
-**Secrets never enter the process.** `requires_env` names variables that must
-exist; their values are never read, substituted into arguments, or written to the
-ledger. The command expands them itself, as `curl` does.
+The binary enables this crate through its default `web` feature;
+`cargo install loopsmith --no-default-features` leaves it, and the async
+runtime, out entirely.
 
 ## Where it sits
 

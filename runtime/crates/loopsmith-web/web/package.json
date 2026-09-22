@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Frontend for `loopsmith web`. Built into ../src/web/dist and compiled into the binary.",
+  "description": "Frontend for `loopsmith web`. Built into ../src/dist and compiled into the binary.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

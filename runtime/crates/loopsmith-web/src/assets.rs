@@ -27,7 +27,7 @@ const APP_CSS: &str = include_str!("dist/app.css");
 /// The copy has an alpha channel the one in `assets/` does not. The published
 /// logo is RGB on a flat near-white field, which is right for a README on
 /// GitHub and wrong for a dark UI, where it renders as a white tile.
-const MARK_PNG: &[u8] = include_bytes!("../../templates/loopsmith-mark.png");
+const MARK_PNG: &[u8] = include_bytes!("../templates/loopsmith-mark.png");
 
 pub fn router() -> Router {
     Router::new()
@@ -113,7 +113,7 @@ mod tests {
         assert!(
             APP_JS.len() > 20_000,
             "app.js is {} bytes — the frontend was not built. \
-             Run `npm --prefix runtime/crates/loopsmith-cli/web run build`.",
+             Run `npm --prefix runtime/crates/loopsmith-web/web run build`.",
             APP_JS.len()
         );
         assert!(

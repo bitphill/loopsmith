@@ -27,12 +27,16 @@ use std::time::Instant;
 pub mod dispatch;
 pub mod evolve;
 pub mod export;
+pub mod judgment;
+pub mod logging;
 pub mod perturb;
 pub mod phases;
 pub mod prompts;
 pub mod publish;
+pub mod schedule;
 pub mod stop;
 pub mod summary;
+pub mod worktree;
 
 pub use stop::StopReason;
 
@@ -1324,7 +1328,7 @@ providers:
         // has a path to the one function that could hand a model the verdict.
         for file in ["perturb.rs", "summary.rs"] {
             let src = std::fs::read_to_string(format!(
-                "{}/src/run/{file}",
+                "{}/src/{file}",
                 env!("CARGO_MANIFEST_DIR")
             ))
             .unwrap_or_else(|e| panic!("{file} is readable: {e}"));

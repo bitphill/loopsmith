@@ -9,7 +9,7 @@
 //! Everything in this module is in-process and instant. Validation, planning,
 //! permissions, and cost all answer in under a millisecond, which is what lets
 //! the right-hand rail update on every keystroke. The buttons that spend money
-//! or write files spawn the real CLI instead — see [`crate::web::exec`].
+//! or write files spawn the real CLI instead — see [`crate::exec`].
 
 use loopsmith_core::{LoopConfig, Severity};
 use serde::{Deserialize, Serialize};
@@ -126,7 +126,7 @@ pub fn review_config(cfg: &LoopConfig) -> Review {
         warning_count: issues.iter().filter(|i| i.severity == "warning").count(),
         issues,
         plan: plan_view(cfg),
-        permissions: crate::permissions::required(cfg),
+        permissions: loopsmith_core::permissions::required(cfg),
         cost: cost_view(cfg),
         notes: notes(cfg),
     }
@@ -320,7 +320,7 @@ pub fn write_scratch(text: &str, format: Format) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     let path = dir.join(format!(
         "draft-{}.{}",
-        crate::web::detect::now_ms(),
+        crate::detect::now_ms(),
         format.extension()
     ));
     std::fs::write(&path, text).map_err(|e| format!("could not write {}: {e}", path.display()))?;
@@ -347,7 +347,7 @@ pub struct LibraryEntry {
 }
 
 fn library_path() -> Option<PathBuf> {
-    crate::web::detect::home_dir().map(|h| h.join(".loopsmith/loops.json"))
+    crate::detect::home_dir().map(|h| h.join(".loopsmith/loops.json"))
 }
 
 pub fn library() -> Vec<LibraryEntry> {

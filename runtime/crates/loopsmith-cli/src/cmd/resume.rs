@@ -1,7 +1,7 @@
 //! `loopsmith resume` — continue a run from its last checkpoint.
 
 use super::config_dir;
-use crate::run::RunOptions;
+use loopsmith_run::RunOptions;
 use std::path::Path;
 use std::process::ExitCode;
 

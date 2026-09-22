@@ -1,34 +1,86 @@
-//! `loopsmith guided` / `loopsmith --guided` — build a loop by answering
-//! questions in the terminal, one field at a time.
+//! The guided wizard: build a loop config by answering questions.
 //!
-//! This is the third front end onto the exact same A–J config that `loopsmith
-//! new` hands you as a file and `loopsmith web` paints in a browser. It exists
-//! for the machine with no browser and the person who would rather not open a
-//! text editor: over SSH, in a bare TTY, it walks every section with the field's
-//! own explanation in place, offers the agent CLIs it already found, and writes
-//! nothing until the whole thing passes `loopsmith_core::validate`.
+//! Two front ends ask the same questions — the terminal (`loopsmith guided`)
+//! and the browser (`loopsmith web`) — and this crate is what they share: the
+//! table of agent CLIs loopsmith knows how to drive ([`catalog`]), what is
+//! actually installed on this machine ([`detect`]), and the terminal interview
+//! itself ([`interview`]).
+//!
+//! The interview's interface is deliberately one call. It walks every section,
+//! lets `:back` and `:quit` move between them, runs the real validator, asks
+//! for a grammar, and hands back rendered text — or says the user left. What
+//! happens to that text (overwrite a file, scaffold a directory, start a run)
+//! is the caller's business, because those are the parts that differ between
+//! "edit this file" and "make me a new loop".
 //!
 //! The pieces:
 //!
 //!  - [`io`] — the terminal: reading, colour, and the four `:commands`.
-//!  - [`form`] — a driver turning an ordered field list into answers, where
+//!  - `form` — a driver turning an ordered field list into answers, where
 //!    `:back` moves a cursor rather than losing progress.
-//!  - [`sections`] — one walker per config section, plus the answer→struct step.
-//!  - [`detect`] — a synchronous `PATH` scan for the known CLIs (no async, so it
-//!    works in a `--no-default-features` build with no `web`).
+//!  - `sections` — one walker per config section, plus the answer→struct step.
 //!
 //! Nothing here blocks a script: a piped stdin is consumed as an answer stream,
 //! which is also how the tests drive the whole wizard end to end.
 
-mod detect;
+pub mod catalog;
+pub mod detect;
 mod form;
-mod io;
+pub mod io;
 mod sections;
 
-use io::{Choice, Io, Nav};
+pub use io::{Choice, Io, Nav};
 use loopsmith_core::LoopConfig;
 use std::path::PathBuf;
-use std::process::ExitCode;
+
+/// How an interview ended.
+pub enum Outcome {
+    /// A config the user asked to have written, already rendered in the
+    /// grammar they picked.
+    Ready {
+        cfg: Box<LoopConfig>,
+        text: String,
+        markdown: bool,
+    },
+    /// The user left mid-way. `saved` is the draft they asked to keep, if any.
+    Quit { saved: Option<PathBuf> },
+    /// The user reached the end and chose not to write anything.
+    Declined,
+}
+
+/// Run the whole interview, starting from `start` (an existing config to
+/// revise) or from an empty [`skeleton`].
+///
+/// Nothing is written except a draft the user explicitly asks for at `:quit`.
+/// The config is validated before it is returned; a `Ready` config with errors
+/// is one the user knowingly chose to write anyway.
+pub fn interview(io: &mut Io, start: Option<LoopConfig>) -> Result<Outcome, String> {
+    let editing = start.is_some();
+    let mut cfg = start.unwrap_or_else(skeleton);
+
+    intro(io, editing);
+
+    if let Flow::Quit { saved } = run_wizard(io, &mut cfg)? {
+        return Ok(Outcome::Quit { saved });
+    }
+
+    // Final gate: the same check `loopsmith validate` prints. Nothing is
+    // returned for writing until this passes or the user knowingly overrides it.
+    if !final_review(io, &mut cfg)? {
+        return Ok(Outcome::Declined);
+    }
+
+    let Some(markdown) = ask_format(io)? else {
+        io.note("cancelled — nothing written");
+        return Ok(Outcome::Declined);
+    };
+    let text = render(&cfg, markdown)?;
+    Ok(Outcome::Ready {
+        cfg: Box::new(cfg),
+        text,
+        markdown,
+    })
+}
 
 /// A section of the wizard: a title, an optional yes/no gate (advanced sections
 /// are opt-in, per the design), and the walker that fills it in.
@@ -39,60 +91,6 @@ struct Stage {
     run: fn(&mut Io, &mut LoopConfig) -> Result<(), Nav>,
 }
 
-/// Entry point from `cmd::dispatch`.
-pub fn execute(path: Option<PathBuf>, edit: Option<PathBuf>) -> Result<ExitCode, String> {
-    let mut io = Io::new();
-
-    // Starting point: an existing config to revise, or a blank skeleton.
-    let (mut cfg, edit_target) = match &edit {
-        Some(file) => {
-            let cfg = loopsmith_core::load(file).map_err(|e| {
-                format!("could not read {} to edit: {e}", file.display())
-            })?;
-            (cfg, Some(file.clone()))
-        }
-        None => (skeleton(), None),
-    };
-
-    intro(&io, edit_target.is_some());
-
-    match run_wizard(&mut io, &mut cfg)? {
-        Flow::Completed => {}
-        Flow::Quit { saved } => {
-            if let Some(p) = saved {
-                println!("\nDraft saved to {}. Resume with:\n  loopsmith guided --edit {}", p.display(), p.display());
-            } else {
-                println!("\nNothing written.");
-            }
-            return Ok(ExitCode::SUCCESS);
-        }
-    }
-
-    // Final gate: the same check `loopsmith validate` prints. Nothing is written
-    // until this passes or the user knowingly overrides it.
-    if !final_review(&mut io, &mut cfg)? {
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    // Grammar, then write.
-    let markdown = match ask_format(&mut io)? {
-        Some(m) => m,
-        None => return Ok(cancelled(&io)),
-    };
-    let text = render(&cfg, markdown)?;
-
-    match edit_target {
-        Some(file) => write_back(&mut io, &file, &text),
-        None => create_loop(&mut io, &cfg, path, text, markdown),
-    }
-}
-
-/// A `:quit` at one of the final prompts, after the config is assembled but
-/// before it is on disk. Nothing is written; this is a clean exit, not an error.
-fn cancelled(io: &Io) -> ExitCode {
-    io.note("cancelled — nothing written");
-    ExitCode::SUCCESS
-}
 
 enum Flow {
     Completed,
@@ -182,7 +180,7 @@ fn save_draft(cfg: &LoopConfig) -> Result<PathBuf, String> {
 /// Every bundle is its own `Default`, so a section the author skips is the same
 /// as a section they never saw — which is what makes `:back` and an early
 /// `:quit` produce a coherent partial draft rather than a half-typed struct.
-fn skeleton() -> LoopConfig {
+pub fn skeleton() -> LoopConfig {
     LoopConfig {
         name: String::new(),
         version: "0.1.0".into(),
@@ -294,7 +292,7 @@ fn ask_format(io: &mut Io) -> Result<Option<bool>, String> {
     }
 }
 
-fn render(cfg: &LoopConfig, markdown: bool) -> Result<String, String> {
+pub fn render(cfg: &LoopConfig, markdown: bool) -> Result<String, String> {
     if markdown {
         Ok(loopsmith_core::render_md(cfg))
     } else {
@@ -302,156 +300,9 @@ fn render(cfg: &LoopConfig, markdown: bool) -> Result<String, String> {
     }
 }
 
-/// Overwrite the file that was loaded with `--edit`.
-fn write_back(io: &mut Io, file: &std::path::Path, text: &str) -> Result<ExitCode, String> {
-    io.heading("Save");
-    if io.is_interactive() {
-        // A `:quit` at the overwrite prompt leaves the original untouched.
-        let ok = io.ask_bool(&format!("Overwrite {}?", file.display()), &[], true).unwrap_or(false);
-        if !ok {
-            io.note("Left the original file untouched.");
-            return Ok(ExitCode::SUCCESS);
-        }
-    }
-    std::fs::write(file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
-    io.success(&format!("wrote {}", file.display()));
-    println!("\nCheck it:\n  loopsmith validate {}", file.display());
-    Ok(ExitCode::SUCCESS)
-}
-
-/// Scaffold a brand-new loop directory from the assembled config.
-fn create_loop(
-    io: &mut Io,
-    cfg: &LoopConfig,
-    path_arg: Option<PathBuf>,
-    text: String,
-    markdown: bool,
-) -> Result<ExitCode, String> {
-    io.heading("Where to create it");
-    // A parent directory; the loop nests under its own name, so several loops
-    // can share a workspace without colliding.
-    let parent = match path_arg {
-        Some(p) => p,
-        None => match io.ask_text(
-            "Parent directory",
-            &["The loop is created in a sub-directory named after it."],
-            Some("."),
-            &|_| Ok(()),
-        ) {
-            Ok(d) => PathBuf::from(d),
-            Err(_) => return Ok(cancelled(io)),
-        },
-    };
-    let dir_name = sanitize(&cfg.name);
-    let root = parent.join(&dir_name);
-
-    let force = if root.exists() && dir_nonempty(&root) {
-        io.note(&format!("{} already exists and is not empty.", root.display()));
-        match io.ask_bool("Write into it anyway?", &[], false) {
-            Ok(b) => b,
-            Err(_) => return Ok(cancelled(io)),
-        }
-    } else {
-        false
-    };
-
-    // Isolated nodes need a repository to get a worktree each; default the git
-    // question to yes exactly when the config has one.
-    let wants_git_default = cfg.execution.graph.nodes.iter().any(|n| n.isolation.needs_worktree());
-    let git = match io.ask_bool(
-        "Initialise a git repository in the loop?",
-        &[if wants_git_default {
-            "This config has isolated nodes, which need a repo for their worktrees."
-        } else {
-            "Lets isolated nodes get a worktree each. Safe to say yes."
-        }],
-        wants_git_default,
-    ) {
-        Ok(b) => b,
-        Err(_) => return Ok(cancelled(io)),
-    };
-
-    let purpose = if cfg.description.is_empty() {
-        "a loopsmith loop".to_string()
-    } else {
-        cfg.description.clone()
-    };
-
-    let s = crate::scaffold::scaffold(&crate::scaffold::NewLoopArgs {
-        path: root.clone(),
-        name: cfg.name.clone(),
-        purpose,
-        force,
-        config: Some(crate::scaffold::ProvidedConfig { text, markdown }),
-        git,
-    })
-    .map_err(|e| e.to_string())?;
-
-    let config_path = root.join(&s.config_file);
-    io.success(&format!("created loop `{}` at {}", cfg.name, root.display()));
-    if let Some(Err(why)) = &s.git {
-        io.note(&format!("git init failed: {why} — isolated nodes will share one directory."));
-    }
-    println!("\n  config: {}", config_path.display());
-    println!("  check:  loopsmith validate {}", config_path.display());
-    println!("  plan:   loopsmith plan {}", config_path.display());
-
-    offer_run(io, &config_path)
-}
-
-/// Offer to run the loop now (Q20). Defaults to no; if yes, offers a dry run
-/// first so a first pass costs nothing.
-fn offer_run(io: &mut Io, config_path: &std::path::Path) -> Result<ExitCode, String> {
-    io.heading("Run");
-    // The loop is already written, so a `:quit` (or EOF) here just means "don't
-    // run now" — a clean success, never an error.
-    let run_now = io
-        .ask_bool("Run the loop now?", &["Or do it later with the command above."], false)
-        .unwrap_or(false);
-    if !run_now {
-        return Ok(ExitCode::SUCCESS);
-    }
-    let dry = io
-        .ask_bool(
-            "Dry run first (plan and log, spend nothing)?",
-            &["Recommended for a first pass — it invokes no provider."],
-            true,
-        )
-        .unwrap_or(true);
-    crate::cmd::run::execute(config_path, None, dry, false, false)
-}
-
-// -- small helpers ----------------------------------------------------------
-
-fn dir_nonempty(p: &std::path::Path) -> bool {
-    std::fs::read_dir(p).map(|mut d| d.next().is_some()).unwrap_or(false)
-}
-
-/// A filesystem-safe directory name from a loop name.
-fn sanitize(name: &str) -> String {
-    let cleaned: String = name
-        .trim()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
-        .collect();
-    let cleaned = cleaned.trim_matches('-').to_string();
-    if cleaned.is_empty() {
-        "loop".into()
-    } else {
-        cleaned
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_name_becomes_a_safe_directory() {
-        assert_eq!(sanitize("Weekly Competitor Brief!"), "Weekly-Competitor-Brief");
-        assert_eq!(sanitize("  --edge--  "), "edge");
-        assert_eq!(sanitize("///"), "loop");
-    }
 
     #[test]
     fn the_skeleton_is_a_valid_struct_even_when_incomplete() {

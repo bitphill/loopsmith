@@ -1,7 +1,7 @@
 //! `loopsmith run` — one supervised pass of the loop.
 
 use super::{config_dir, config_file_name, open_store, report_outcome};
-use crate::run::{RunOptions, RunOutcome};
+use loopsmith_run::{RunOptions, RunOutcome};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -33,7 +33,7 @@ pub fn execute(
 pub fn start(config: &Path, opts: RunOptions) -> Result<RunOutcome, String> {
     let cfg = loopsmith_core::load_validated(config).map_err(|e| e.to_string())?;
     let store = open_store(config)?;
-    let out = crate::run::execute(&cfg, &store, &opts)?;
+    let out = loopsmith_run::execute(&cfg, &store, &opts)?;
     report_outcome(&out);
     Ok(out)
 }

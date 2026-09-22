@@ -18,6 +18,7 @@
 
 pub mod config;
 pub mod md;
+pub mod permissions;
 pub mod validate;
 
 pub use config::*;

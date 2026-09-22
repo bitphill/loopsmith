@@ -71,6 +71,12 @@ pub struct Io {
     interrupted: Arc<AtomicBool>,
 }
 
+impl Default for Io {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Io {
     /// Build the terminal, wiring up the Ctrl-C handler.
     ///

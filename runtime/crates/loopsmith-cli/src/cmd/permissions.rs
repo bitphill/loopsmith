@@ -5,11 +5,11 @@ use std::process::ExitCode;
 
 pub fn execute(config: &Path, write: Option<&Path>) -> Result<ExitCode, String> {
     let cfg = loopsmith_core::load(config).map_err(|e| e.to_string())?;
-    let grant = crate::permissions::required(&cfg);
+    let grant = loopsmith_core::permissions::required(&cfg);
     match write {
         Some(path) => {
             let merged =
-                crate::permissions::merge_into(path, &grant).map_err(|e| e.to_string())?;
+                loopsmith_core::permissions::merge_into(path, &grant).map_err(|e| e.to_string())?;
             println!(
                 "wrote {} permission rule(s) to {}",
                 grant.len(),
@@ -17,7 +17,7 @@ pub fn execute(config: &Path, write: Option<&Path>) -> Result<ExitCode, String> 
             );
             println!("{merged}");
         }
-        None => println!("{}", crate::permissions::render(&grant)),
+        None => println!("{}", loopsmith_core::permissions::render(&grant)),
     }
     Ok(ExitCode::SUCCESS)
 }

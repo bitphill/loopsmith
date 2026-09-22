@@ -1,21 +1,15 @@
 //! `loopsmith` — the control plane for self-evolving agent loops.
 //!
 //! This file is the entry point and nothing more. The argument grammar lives in
-//! [`cli`], and each subcommand body lives in its own module under [`cmd`].
+//! [`cli`], and each subcommand body lives in its own module under [`cmd`]. The
+//! engine, the wizard, and the browser UI are their own crates —
+//! `loopsmith-run`, `loopsmith-wizard`, and `loopsmith-web` — so this one is
+//! only the front door.
 
-mod catalog;
 mod cli;
 mod cmd;
 mod guided;
-mod judgment;
-mod logging;
-mod permissions;
-mod run;
 mod scaffold;
-mod schedule;
-#[cfg(feature = "web")]
-mod web;
-mod worktree;
 
 use clap::Parser;
 use std::process::ExitCode;

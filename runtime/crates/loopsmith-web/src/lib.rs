@@ -19,12 +19,10 @@
 pub mod api;
 pub mod assemble;
 pub mod assets;
-// Moved up to `crate::catalog` so the guided terminal wizard can share the
-// same provider table without pulling in the whole `web` feature (this module
-// and everything under it is `#[cfg(feature = "web")]`). Re-exported here so
-// the existing `crate::web::catalog::…` call sites keep resolving.
-pub(crate) use crate::catalog;
-pub mod detect;
+// The provider table and machine detection live in `loopsmith-wizard`, because
+// the terminal wizard asks the same two questions. Re-exported so every
+// `crate::catalog` / `crate::detect` call site here reads as local.
+pub(crate) use loopsmith_wizard::{catalog, detect};
 pub mod examples;
 pub mod exec;
 pub mod guard;

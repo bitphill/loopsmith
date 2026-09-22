@@ -9,6 +9,9 @@ members = [
     "crates/loopsmith-provider",
     "crates/loopsmith-skills",
     "crates/loopsmith-mcp",
+    "crates/loopsmith-run",
+    "crates/loopsmith-wizard",
+    "crates/loopsmith-web",
     "crates/loopsmith-cli",
 ]
 
@@ -36,6 +39,9 @@ loopsmith-gate = { path = "crates/loopsmith-gate", version = "0.3.1" }
 loopsmith-provider = { path = "crates/loopsmith-provider", version = "0.3.1" }
 loopsmith-skills = { path = "crates/loopsmith-skills", version = "0.3.1" }
 loopsmith-mcp = { path = "crates/loopsmith-mcp", version = "0.3.1" }
+loopsmith-run = { path = "crates/loopsmith-run", version = "0.3.1" }
+loopsmith-wizard = { path = "crates/loopsmith-wizard", version = "0.3.1" }
+loopsmith-web = { path = "crates/loopsmith-web", version = "0.3.1" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

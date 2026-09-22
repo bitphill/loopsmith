@@ -62,7 +62,7 @@ pub struct SecretStatus {
 /// whose login shell was zsh, and nothing ever read it. So the file is chosen
 /// by `$SHELL`, and `.profile` is only the fallback for shells that do read it.
 pub fn profile_path() -> Option<PathBuf> {
-    let home = crate::web::detect::home_dir()?;
+    let home = crate::detect::home_dir()?;
     let shell = std::env::var("SHELL").unwrap_or_default();
     let name = if shell.ends_with("zsh") {
         ".zshrc"
@@ -156,7 +156,7 @@ pub fn set(name: &str, value: Option<&str>, store: Store) -> Result<(), String> 
 /// afterwards is theirs.
 ///
 /// Nothing here is a credential, so refusing them costs a legitimate user
-/// nothing. This is defence in depth behind [`crate::web::guard`] — that stops
+/// nothing. This is defence in depth behind [`crate::guard`] — that stops
 /// a hostile page reaching this code at all, and this stops the damage if some
 /// other path ever does.
 const NEVER_WRITABLE: &[&str] = &[

@@ -1,0 +1,30 @@
+[package]
+name = "loopsmith-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+# `src/dist/` holds the compiled web UI and `templates/` the example library
+# and the mark, all compiled in with `include_str!`/`include_bytes!`. The
+# frontend source under `web/` is not needed to build and does not travel.
+include = ["/src/**/*", "/templates/**/*", "/README.md"]
+description = "The loopsmith browser UI: a loopback-only axum server over the same config the CLI reads"
+
+[dependencies]
+loopsmith-util = { workspace = true }
+loopsmith-core = { workspace = true }
+loopsmith-graph = { workspace = true }
+loopsmith-wizard = { workspace = true, features = ["probe"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+loopsmith-util = { workspace = true, features = ["testing"] }

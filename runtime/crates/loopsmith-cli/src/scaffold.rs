@@ -742,9 +742,9 @@ pub fn scaffold(args: &NewLoopArgs) -> std::io::Result<Scaffold> {
         &mut written,
     )?;
 
-    let grant = crate::permissions::required(&cfg);
-    let settings = crate::permissions::merge_into(&root.join(".claude/settings.local.json"), &grant)
-        .unwrap_or_else(|_| crate::permissions::render(&grant));
+    let grant = loopsmith_core::permissions::required(&cfg);
+    let settings = loopsmith_core::permissions::merge_into(&root.join(".claude/settings.local.json"), &grant)
+        .unwrap_or_else(|_| loopsmith_core::permissions::render(&grant));
     write_file(
         root.join(".claude/settings.local.json"),
         &settings,

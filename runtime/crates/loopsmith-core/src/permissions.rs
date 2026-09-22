@@ -8,7 +8,7 @@
 //! Rules are derived from the config rather than guessed, so a loop that only
 //! reads files never asks for write access.
 
-use loopsmith_core::{Detector, LoopConfig};
+use crate::{AcquisitionSource, Detector, LoopConfig};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -35,7 +35,7 @@ pub fn required(cfg: &LoopConfig) -> Vec<String> {
         .skills
         .acquisition_order
         .iter()
-        .any(|a| matches!(a, loopsmith_core::AcquisitionSource::Marketplace))
+        .any(|a| matches!(a, AcquisitionSource::Marketplace))
     {
         set.insert("Bash(npx skills:*)".into());
         set.insert("WebFetch(domain:claudemarketplaces.com)".into());
@@ -136,7 +136,7 @@ providers:
 {extra}
 "#
         );
-        loopsmith_core::parse_str(&text, "test").unwrap()
+        crate::parse_str(&text, "test").unwrap()
     }
 
     #[test]
@@ -152,7 +152,7 @@ providers:
         assert!(with.iter().any(|g| g.contains("claudemarketplaces.com")));
 
         let mut c = cfg("");
-        c.execution.skills.acquisition_order = vec![loopsmith_core::AcquisitionSource::Installed];
+        c.execution.skills.acquisition_order = vec![AcquisitionSource::Installed];
         let without = required(&c);
         assert!(!without.iter().any(|g| g.contains("claudemarketplaces.com")));
         assert!(!without.iter().any(|g| g.contains("npx skills")));

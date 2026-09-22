@@ -123,7 +123,7 @@ impl Jobs {
             ));
         }
 
-        let id = format!("job-{}-{}", crate::web::detect::now_ms(), next(&self.seq));
+        let id = format!("job-{}-{}", crate::detect::now_ms(), next(&self.seq));
         let (tx, _rx) = broadcast::channel(512);
 
         let summary = JobSummary {
@@ -135,7 +135,7 @@ impl Jobs {
             cwd: cwd.display().to_string(),
             state: JobState::Running,
             exit_code: None,
-            started_ms: crate::web::detect::now_ms(),
+            started_ms: crate::detect::now_ms(),
             finished_ms: None,
         };
 
@@ -282,7 +282,7 @@ impl Jobs {
                 job.summary.state = state;
             }
             job.summary.exit_code = code;
-            job.summary.finished_ms = Some(crate::web::detect::now_ms());
+            job.summary.finished_ms = Some(crate::detect::now_ms());
             job.child = None;
         }
     }

@@ -1,10 +1,10 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.3.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
-  <h1>loopsmith-provider</h1>
-  <p><em>Provider routing for loopsmith: Claude Code, Ollama, Grok, OpenAI, Gemini, Hermes, MCP, and any BYOK command.</em></p>
+  <h1>loopsmith-wizard</h1>
+  <p><em>The guided wizard — the questions both loopsmith front ends ask.</em></p>
 </div>
 
-[![crates.io](https://img.shields.io/crates/v/loopsmith-provider?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-provider)
+[![crates.io](https://img.shields.io/crates/v/loopsmith-wizard?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-wizard)
 [![license](https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
 ![rust](https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white)
 
@@ -23,19 +23,25 @@ agent loops behind a deterministic verification gate.
 
 ## What this crate is
 
-Every provider is a command template. That single decision is what makes
-bring-your-own-key free: Claude Code, Ollama, a Grok CLI, an OpenAI-compatible
-endpoint driven by `curl`, an MCP server over stdio — all of them are "a program
-you run with a prompt". Adding one is a config edit, never a rebuild.
+`loopsmith guided` in a terminal and `loopsmith web` in a browser build the same
+config by asking the same questions. This crate is what they share:
 
-Nodes ask for a *tier* (`cheap`, `standard`, `strong`) and a cascade decides
-which provider actually serves the call, falling through on failure or timeout.
-Judge independence can be enforced, so a judge never runs on the same provider
-as the builder whose work it is checking.
+- **`catalog`** — the agent CLIs loopsmith knows how to drive, each with the
+  argv that works, the environment it needs, and the models it accepts. Adding
+  a CLI is a data change.
+- **`detect`** — what is actually installed here. The synchronous half (which
+  CLIs are on `PATH`, which API keys are set, which MCP servers and skills are
+  configured) is instant and needs no runtime. The `probe` feature adds the
+  half that runs subprocesses: `--version` with a timeout, `ollama list`, and
+  the opt-in handshake that proves a provider answers.
+- **`interview`** — the terminal wizard, one call from start to a rendered
+  config, with `:back`, `:quit`, and a draft save that never loses an answer.
 
-**Secrets never enter the process.** `requires_env` names variables that must
-exist; their values are never read, substituted into arguments, or written to the
-ledger. The command expands them itself, as `curl` does.
+### Features
+
+| Feature | Default | Adds |
+|---|---|---|
+| `probe` | off | the async half of `detect` (pulls in `tokio`) |
 
 ## Where it sits
 

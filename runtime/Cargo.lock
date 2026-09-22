@@ -570,27 +570,28 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 name = "loopsmith"
 version = "0.3.1"
 dependencies = [
- "axum",
  "clap",
- "ctrlc",
  "loopsmith-core",
  "loopsmith-gate",
  "loopsmith-graph",
  "loopsmith-mcp",
  "loopsmith-memory",
  "loopsmith-provider",
+ "loopsmith-run",
  "loopsmith-skills",
  "loopsmith-util",
+ "loopsmith-web",
+ "loopsmith-wizard",
  "serde",
  "serde_json",
  "serde_yaml_ng",
- "tokio",
 ]
 
 [[package]]
 name = "loopsmith-core"
 version = "0.3.1"
 dependencies = [
+ "loopsmith-util",
  "schemars",
  "serde",
  "serde_json",
@@ -658,6 +659,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "loopsmith-run"
+version = "0.3.1"
+dependencies = [
+ "loopsmith-core",
+ "loopsmith-gate",
+ "loopsmith-graph",
+ "loopsmith-memory",
+ "loopsmith-provider",
+ "loopsmith-skills",
+ "loopsmith-util",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+]
+
+[[package]]
 name = "loopsmith-skills"
 version = "0.3.1"
 dependencies = [
@@ -672,6 +689,34 @@ dependencies = [
 [[package]]
 name = "loopsmith-util"
 version = "0.3.1"
+
+[[package]]
+name = "loopsmith-web"
+version = "0.3.1"
+dependencies = [
+ "axum",
+ "loopsmith-core",
+ "loopsmith-graph",
+ "loopsmith-util",
+ "loopsmith-wizard",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tokio",
+]
+
+[[package]]
+name = "loopsmith-wizard"
+version = "0.3.1"
+dependencies = [
+ "ctrlc",
+ "loopsmith-core",
+ "loopsmith-util",
+ "serde",
+ "serde_json",
+ "serde_yaml_ng",
+ "tokio",
+]
 
 [[package]]
 name = "matchit"

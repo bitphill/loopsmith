@@ -72,7 +72,7 @@ pub fn providers(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.note("A provider is one command template loopsmith can route work to.");
     io.note("Ones already on this machine are marked ✓ and come pre-filled.");
 
-    let found = detect::scan();
+    let found = detect::installed();
     let installed = found.iter().filter(|f| f.present).count();
     if installed == 0 {
         io.note("None of the known CLIs were found on PATH — you can still add one by hand.");

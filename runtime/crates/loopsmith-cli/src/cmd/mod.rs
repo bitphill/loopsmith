@@ -4,7 +4,7 @@
 //! command is testable and the exit code is decided in one place.
 
 use crate::cli::{Command, SkillsAction};
-use crate::run::RunOutcome;
+use loopsmith_run::RunOutcome;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 

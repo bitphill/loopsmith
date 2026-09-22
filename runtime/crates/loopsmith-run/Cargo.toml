@@ -1,5 +1,5 @@
 [package]
-name = "loopsmith-core"
+name = "loopsmith-run"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,18 +9,20 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-# Only `src/` travels. The integration tests read `config/examples/` and
-# `config/loop.schema.json` from the repository root, which no crate tarball can
-# contain, so shipping them would hand a published crate tests that cannot pass.
 include = ["/src/**/*", "/README.md"]
-description = "Config model and validation for loopsmith loops"
+description = "The loopsmith run engine: the iteration state machine, dispatch, isolation, recovery, and triggers"
 
 [dependencies]
+loopsmith-util = { workspace = true }
+loopsmith-core = { workspace = true }
+loopsmith-memory = { workspace = true }
+loopsmith-graph = { workspace = true }
+loopsmith-gate = { workspace = true }
+loopsmith-provider = { workspace = true }
+loopsmith-skills = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-thiserror = { workspace = true }
-schemars = { workspace = true }
 
 [dev-dependencies]
 loopsmith-util = { workspace = true, features = ["testing"] }

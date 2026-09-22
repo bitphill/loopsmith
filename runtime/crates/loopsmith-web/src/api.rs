@@ -8,11 +8,11 @@
 //!   output. These are the ones that write files and spend money.
 //!
 //! Nothing here reimplements a command. The browser names a verb from a closed
-//! list in [`crate::web::exec::Action`]; this module turns it into an argv and
+//! list in [`crate::exec::Action`]; this module turns it into an argv and
 //! hands it to the job runner. A browser cannot name a program to run, which
 //! is the difference between a control panel and a remote shell.
 
-use crate::web::{assemble, detect, examples, exec, help, picker, secrets};
+use crate::{assemble, detect, examples, exec, help, picker, secrets};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -138,10 +138,10 @@ struct HandshakeBody {
 /// detection. The command must be one detection actually found: a browser that
 /// could name any executable here would have a remote shell.
 async fn handshake(Json(b): Json<HandshakeBody>) -> ApiResult<detect::HandshakeResult> {
-    let known = crate::web::catalog::KNOWN
+    let known = crate::catalog::KNOWN
         .iter()
         .find(|k| k.bin == b.command)
-        .or_else(|| crate::web::catalog::find(&b.command));
+        .or_else(|| crate::catalog::find(&b.command));
     let Some(known) = known else {
         return Err(ApiError(
             StatusCode::BAD_REQUEST,
@@ -297,7 +297,7 @@ async fn list_secrets() -> ApiResult<Vec<secrets::SecretStatus>> {
     // One `security`/`secret-tool` spawn per key, so a dozen subprocesses.
     Ok(Json(
         blocking(|| {
-            crate::web::catalog::ENV_KEYS
+            crate::catalog::ENV_KEYS
                 .iter()
                 .map(|(name, _)| secrets::status(name))
                 .collect()
@@ -440,7 +440,7 @@ async fn job_stream(
     Path(id): Path<String>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    ws.on_upgrade(move |socket| crate::web::ws::pump(socket, s.jobs, id))
+    ws.on_upgrade(move |socket| crate::ws::pump(socket, s.jobs, id))
 }
 
 /// `~/loops/thing` is what people type. Nothing else expands it for them.

@@ -219,7 +219,7 @@ the rule that section already had.
 All thirteen `config/examples/*.yaml` are compiled in with `include_str!`, since
 `include_str!` cannot reach above the package root and `config/` is excluded from
 the published tarball. `tools/sync-examples.sh` copies them into
-`runtime/crates/loopsmith-cli/templates/examples/`, and a test fails if the two
+`runtime/crates/loopsmith-web/templates/examples/`, and a test fails if the two
 have drifted — so a stale copy is caught by `cargo test`, not by a user.
 
 A user's own `~/.loopsmith/examples/*.yaml` take priority, and a checkout's
@@ -232,8 +232,8 @@ The frontend is React 19 + Vite + Tailwind v4, emitted to fixed filenames
 `include_str!` literal.
 
 ```bash
-npm --prefix runtime/crates/loopsmith-cli/web install
-npm --prefix runtime/crates/loopsmith-cli/web run build   # writes src/web/dist/
+npm --prefix runtime/crates/loopsmith-web/web install
+npm --prefix runtime/crates/loopsmith-web/web run build   # writes src/dist/
 cargo build -p loopsmith --release
 ```
 

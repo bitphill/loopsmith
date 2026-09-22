@@ -9,7 +9,7 @@ import tailwind from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwind()],
   build: {
-    outDir: "../src/web/dist",
+    outDir: "../src/dist",
     emptyOutDir: true,
     // One stylesheet, not one per chunk, so there are exactly three files to
     // compile in and no manifest to interpret at run time.

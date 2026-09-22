@@ -8,7 +8,7 @@
 //! cron is a instruction that silently does nothing.
 
 use super::config_dir;
-use crate::schedule;
+use loopsmith_run::schedule;
 use loopsmith_util::platform::Platform;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -88,7 +88,7 @@ fn launchd(
 /// than writing anything. Creating a scheduled task is a persistent change to
 /// the user's machine, the same reason `launchctl load` is left to them.
 fn schtasks(label: &str, exe: &Path, abs: &Path, install: bool) {
-    println!("{}", crate::schedule::schtasks_command(label, exe, abs));
+    println!("{}", loopsmith_run::schedule::schtasks_command(label, exe, abs));
     println!();
     println!("# Run that in an elevated-or-not shell to register the task.");
     println!("# It keeps `loopsmith watch` alive; the watcher evaluates the triggers in");

@@ -76,6 +76,17 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # `--no-default-features` drops the browser UI and with it the whole async
+      # tree. That promise now crosses a crate seam — the wizard's `probe`
+      # feature is what keeps tokio out — so a workspace build, which unifies
+      # features, cannot see it break. This build can.
+      - name: Clippy, minimal build (no web, no async runtime)
+        run: |
+          cargo clippy -p loopsmith --no-default-features --all-targets -- -D warnings
+          if cargo tree -p loopsmith --no-default-features -e normal | grep -q ' tokio '; then
+            echo "::error::a --no-default-features build pulls in tokio"; exit 1
+          fi
+
       - name: Test
         run: cargo test --workspace
 
@@ -150,7 +161,7 @@ jobs:
           echo "both launchers present; resume exited 2 as designed"
 
   # The web UI is compiled into the binary with `include_str!` from a committed
-  # `src/web/dist/`. That is what makes `loopsmith --web` work with no Node on
+  # `src/dist/`. That is what makes `loopsmith --web` work with no Node on
   # the machine, and it is also a trap: a frontend change that is not rebuilt
   # leaves `dist/` holding the previous UI, the binary serves it, and nothing
   # anywhere fails. The only way that gets caught is by rebuilding it here and
@@ -160,7 +171,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: runtime/crates/loopsmith-cli/web
+        working-directory: runtime/crates/loopsmith-web/web
     steps:
       - uses: actions/checkout@v4
 
@@ -176,16 +187,16 @@ jobs:
         run: npm ci
 
       # Typechecks first (`npm run build` runs `tsc --noEmit` before vite), then
-      # writes into ../src/web/dist.
+      # writes into ../src/dist.
       - name: Build
         run: npm run build
 
       - name: The committed dist matches the sources
         working-directory: .
         run: |
-          if ! git diff --quiet -- runtime/crates/loopsmith-cli/src/web/dist; then
-            echo "::error::src/web/dist is stale — run 'npm run build' in runtime/crates/loopsmith-cli/web and commit the result"
-            git diff --stat -- runtime/crates/loopsmith-cli/src/web/dist
+          if ! git diff --quiet -- runtime/crates/loopsmith-web/src/dist; then
+            echo "::error::src/dist is stale — run 'npm run build' in runtime/crates/loopsmith-web/web and commit the result"
+            git diff --stat -- runtime/crates/loopsmith-web/src/dist
             exit 1
           fi
           echo "dist is current"

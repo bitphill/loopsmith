@@ -1,10 +1,10 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.3.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
-  <h1>loopsmith-provider</h1>
-  <p><em>Provider routing for loopsmith: Claude Code, Ollama, Grok, OpenAI, Gemini, Hermes, MCP, and any BYOK command.</em></p>
+  <h1>loopsmith-run</h1>
+  <p><em>The run engine — the iteration state machine behind every loopsmith run.</em></p>
 </div>
 
-[![crates.io](https://img.shields.io/crates/v/loopsmith-provider?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-provider)
+[![crates.io](https://img.shields.io/crates/v/loopsmith-run?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-run)
 [![license](https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
 ![rust](https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white)
 
@@ -23,19 +23,25 @@ agent loops behind a deterministic verification gate.
 
 ## What this crate is
 
-Every provider is a command template. That single decision is what makes
-bring-your-own-key free: Claude Code, Ollama, a Grok CLI, an OpenAI-compatible
-endpoint driven by `curl`, an MCP server over stdio — all of them are "a program
-you run with a prompt". Adding one is a config edit, never a rebuild.
+Everything that happens between "start this loop" and "here is why it
+stopped". Each iteration acquires any missing sub-agents, dispatches the
+execution graph wave by wave (in parallel, in isolated git worktrees where a
+node asks for one), collects evidence, asks the gate for a ruling, records what
+each skill was worth, and then asks the stop gates whether to go on.
 
-Nodes ask for a *tier* (`cheap`, `standard`, `strong`) and a cascade decides
-which provider actually serves the call, falling through on failure or timeout.
-Judge independence can be enforced, so a judge never runs on the same provider
-as the builder whose work it is checking.
+Two properties are structural rather than advisory:
 
-**Secrets never enter the process.** `requires_env` names variables that must
-exist; their values are never read, substituted into arguments, or written to the
-ledger. The command expands them itself, as `curl` does.
+- **The gate decides, the engine obeys.** The engine never writes
+  `goal_satisfied`; it hands evidence to
+  [`loopsmith-gate`](https://crates.io/crates/loopsmith-gate) and records the
+  ruling.
+- **The stop check is mechanical.** It runs after the gate and reads only
+  counters and ceilings, so no amount of confident model output can extend a
+  run past its budget.
+
+The same crate holds the pieces a run leans on: worktree isolation, the
+plain-text run log that mirrors the ledger, judge-verdict parsing, and the
+trigger watcher behind `loopsmith watch` and `loopsmith schedule`.
 
 ## Where it sits
 

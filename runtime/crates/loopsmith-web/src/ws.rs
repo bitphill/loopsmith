@@ -9,7 +9,7 @@
 //! The transport is `axum::extract::ws`, which is RFC6455 over the server this
 //! process already runs. The browser side is a plain `new WebSocket(...)`.
 
-use crate::web::exec::{JobState, Jobs};
+use crate::exec::{JobState, Jobs};
 use axum::extract::ws::{Message, WebSocket};
 use serde_json::json;
 
