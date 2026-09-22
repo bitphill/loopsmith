@@ -59,6 +59,7 @@ pub fn report_outcome(out: &RunOutcome) {
         "\nrun {} finished after {} iteration(s)",
         out.run_id, out.iterations
     );
+    println!("outcome:     {}", out.state);
     println!("stop reason: {}", out.stop.describe());
     if out.tokens_used > 0 || out.cost_usd > 0.0 {
         println!(

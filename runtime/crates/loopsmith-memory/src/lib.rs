@@ -138,6 +138,16 @@ pub enum LedgerKind {
     ProposalWritten,
     StopGateTriggered,
     RunFinished,
+    /// The run moved from one lifecycle state to another.
+    StateChanged,
+    /// A failure was classified and answered: a retry, a revision, a halt.
+    Recovered,
+    /// A question was put to a human.
+    Escalated,
+    /// A metric crossed a configured alert threshold.
+    AlertRaised,
+    /// An entry, approval, or rollback gate rule was evaluated.
+    RuleEvaluated,
 }
 
 /// One observation of "did this skill help?".
@@ -288,6 +298,22 @@ pub struct Checkpoint {
     /// everything is new.
     #[serde(default)]
     pub verdicts_json: Option<String>,
+    /// Where the run is in its lifecycle, by the name the engine's state
+    /// machine gives it (`running`, `paused`, `closed`, …).
+    ///
+    /// Text for the same reason as `verdicts_json`: the machine lives in the
+    /// engine crate, which depends on this one. `None` means the checkpoint
+    /// was written before runs had states, and every such run was closed.
+    #[serde(default)]
+    pub state: Option<String>,
+    /// The state the run closed from — its outcome — once it has closed.
+    #[serde(default)]
+    pub outcome: Option<String>,
+    /// Questions this run has put to a human and nobody has answered yet: a
+    /// node that ran out of revisions, a gate that said a person must decide.
+    /// Carried across a resume so an escalation is not forgotten by pausing.
+    #[serde(default)]
+    pub escalations: Vec<String>,
 }
 
 impl Checkpoint {
@@ -305,6 +331,9 @@ impl Checkpoint {
             stale_iterations: 0,
             last_signature: String::new(),
             verdicts_json: None,
+            state: None,
+            outcome: None,
+            escalations: Vec::new(),
         }
     }
 }
