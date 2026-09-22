@@ -140,7 +140,7 @@ impl TargetVerdict {
 
 /// Evaluate every validation aimed at `target`.
 pub fn evaluate(cfg: &LoopConfig, target: &str, ev: &Evidence) -> TargetVerdict {
-    let vals: Vec<&Validation> = cfg.validations.iter().filter(|v| v.target == target).collect();
+    let vals: Vec<&Validation> = cfg.safety.checks.iter().filter(|v| v.target == target).collect();
 
     let mut checks = Vec::new();
     for v in &vals {
@@ -204,7 +204,7 @@ pub fn evaluate(cfg: &LoopConfig, target: &str, ev: &Evidence) -> TargetVerdict 
 /// Evaluate every goal plus `overall`.
 pub fn evaluate_all(cfg: &LoopConfig, ev: &Evidence) -> BTreeMap<String, TargetVerdict> {
     let mut out = BTreeMap::new();
-    for g in &cfg.goals {
+    for g in &cfg.intent.goals {
         out.insert(g.name.clone(), evaluate(cfg, &g.name, ev));
     }
     out.insert(OVERALL.to_string(), evaluate(cfg, OVERALL, ev));
@@ -225,6 +225,7 @@ pub fn success_met(s: &SuccessScenario, verdict: &TargetVerdict) -> bool {
 /// Are all `overall` success scenarios met? Used by the stop gates.
 pub fn overall_success(cfg: &LoopConfig, verdicts: &BTreeMap<String, TargetVerdict>) -> bool {
     let scenarios: Vec<&SuccessScenario> = cfg
+        .intent
         .success
         .iter()
         .filter(|s| s.target == OVERALL)
@@ -327,7 +328,7 @@ fn run_detector(
             }
             // Independence check first: a judgment from the builder's own
             // provider is refused outright rather than counted.
-            if cfg.providers.enforce_judge_independence {
+            if cfg.execution.providers.enforce_judge_independence {
                 if let Some(bad) = judgments
                     .iter()
                     .find(|j| j.provider_id == j.builder_provider_id)

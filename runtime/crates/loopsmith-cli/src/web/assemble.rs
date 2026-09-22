@@ -73,7 +73,14 @@ pub struct CostView {
 
 /// Parse, validate, plan, and price a config the browser is holding.
 pub fn review(value: &serde_json::Value) -> Review {
-    let cfg: LoopConfig = match serde_json::from_value(value.clone()) {
+    // Through the same legacy transform the file loader uses. The browser can
+    // post a config it loaded from an example or pasted from an older loop, and
+    // refusing those here would make the review panel disagree with
+    // `loopsmith validate` on the very file it is previewing.
+    let cfg: LoopConfig = match serde_json::to_string(value)
+        .map_err(|e| e.to_string())
+        .and_then(|text| loopsmith_core::parse_str(&text, "browser").map_err(|e| e.to_string()))
+    {
         Ok(c) => c,
         Err(e) => {
             return Review {
@@ -126,14 +133,14 @@ pub fn review_config(cfg: &LoopConfig) -> Review {
 }
 
 fn plan_view(cfg: &LoopConfig) -> Option<PlanView> {
-    if cfg.graph.nodes.is_empty() {
+    if cfg.execution.graph.nodes.is_empty() {
         return None;
     }
-    match loopsmith_graph::plan(&cfg.graph) {
+    match loopsmith_graph::plan(&cfg.execution.graph) {
         Ok(p) => Some(PlanView {
             waves: p.waves.iter().map(|w| w.nodes.clone()).collect(),
             unisolated_parallel_writers: loopsmith_graph::unisolated_parallel_writers(
-                &cfg.graph, &p.waves,
+                &cfg.execution.graph, &p.waves,
             ),
             critical_path: p.critical_path,
             concurrency: p.concurrency,
@@ -158,9 +165,10 @@ fn plan_view(cfg: &LoopConfig) -> Option<PlanView> {
 }
 
 fn cost_view(cfg: &LoopConfig) -> CostView {
-    let ceiling = cfg.stop_gates.max_cost_usd;
+    let ceiling = cfg.safety.gates.stop.max_cost_usd;
 
     let priciest = cfg
+        .execution
         .providers
         .providers
         .iter()
@@ -168,15 +176,16 @@ fn cost_view(cfg: &LoopConfig) -> CostView {
         .fold(None::<f64>, |acc, c| Some(acc.map_or(c, |a| a.max(c))));
 
     let per_node_tokens = cfg
-        .constraints
+        .safety
+        .limits
         .global
         .max_tokens
-        .or(cfg.stop_gates.max_tokens);
+        .or(cfg.safety.gates.stop.max_tokens);
 
     let worst = match (priciest, per_node_tokens) {
         (Some(rate), Some(tokens)) if rate > 0.0 => {
-            let nodes = cfg.graph.nodes.len().max(1) as f64;
-            let iterations = cfg.stop_gates.max_iterations.max(1) as f64;
+            let nodes = cfg.execution.graph.nodes.len().max(1) as f64;
+            let iterations = cfg.safety.gates.stop.max_iterations.max(1) as f64;
             Some(rate * (tokens as f64 / 1000.0) * nodes * iterations)
         }
         _ => None,
@@ -209,11 +218,12 @@ fn notes(cfg: &LoopConfig) -> Vec<String> {
     let mut out = Vec::new();
 
     let judged = cfg
-        .validations
+        .safety
+        .checks
         .iter()
         .filter(|v| v.blocking && matches!(v.detector, loopsmith_core::Detector::Judge { .. }))
         .count();
-    let blocking = cfg.validations.iter().filter(|v| v.blocking).count();
+    let blocking = cfg.safety.checks.iter().filter(|v| v.blocking).count();
     if blocking > 0 && judged == blocking {
         out.push(
             "Every blocking validation is decided by a model. The gate can still only be \
@@ -223,7 +233,7 @@ fn notes(cfg: &LoopConfig) -> Vec<String> {
         );
     }
 
-    if cfg.stop_gates.max_cost_usd.is_none() && cfg.stop_gates.max_wall_clock_seconds.is_none() {
+    if cfg.safety.gates.stop.max_cost_usd.is_none() && cfg.safety.gates.stop.max_wall_clock_seconds.is_none() {
         out.push(
             "Neither a cost ceiling nor a wall-clock ceiling is set. The iteration limit is \
              the only thing standing between this loop and an unbounded bill."
@@ -231,8 +241,8 @@ fn notes(cfg: &LoopConfig) -> Vec<String> {
         );
     }
 
-    if cfg.schedules.iter().any(|t| {
-        matches!(t, loopsmith_core::Trigger::Interval { seconds } if *seconds < 300)
+    if cfg.execution.triggers.triggers.iter().any(|t| {
+        matches!(&t.trigger, loopsmith_core::Trigger::Interval { seconds } if *seconds < 300)
     }) {
         out.push(
             "A trigger fires more often than every five minutes. Confirm that a run finishes \
@@ -241,8 +251,8 @@ fn notes(cfg: &LoopConfig) -> Vec<String> {
         );
     }
 
-    if cfg.pre_execution.iter().any(|w| !w.done) {
-        let pending = cfg.pre_execution.iter().filter(|w| !w.done).count();
+    if cfg.intent.prerequisites.iter().any(|w| !w.done) {
+        let pending = cfg.intent.prerequisites.iter().filter(|w| !w.done).count();
         out.push(format!(
             "{pending} pre-execution step(s) are not marked done. Section B is the work you \
              must do by hand before automating it — a loop built on an unproven manual \
@@ -250,7 +260,7 @@ fn notes(cfg: &LoopConfig) -> Vec<String> {
         ));
     }
 
-    if cfg.providers.providers.len() < 2 && cfg.providers.enforce_judge_independence {
+    if cfg.execution.providers.providers.len() < 2 && cfg.execution.providers.enforce_judge_independence {
         out.push(
             "Judge independence is on but only one provider is configured, so any judge node \
              would have to grade its own family's work. Add a second provider, or the judge \
@@ -488,9 +498,9 @@ mod tests {
 
     #[test]
     fn both_grammars_round_trip_through_render() {
-        let cfg: LoopConfig = serde_json::from_value(minimal()).unwrap();
+        let cfg = loopsmith_core::parse_str(&minimal().to_string(), "t").unwrap();
         let yaml = render(&cfg, Format::Yaml).unwrap();
-        assert_eq!(serde_yaml::from_str::<LoopConfig>(&yaml).unwrap().name, "t");
+        assert_eq!(loopsmith_core::parse_str(&yaml, "t").unwrap().name, "t");
 
         let md = render(&cfg, Format::Markdown).unwrap();
         assert_eq!(

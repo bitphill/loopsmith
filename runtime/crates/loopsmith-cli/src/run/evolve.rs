@@ -33,10 +33,11 @@ pub struct RanNode {
 /// works". A candidate is trialled until it has `min_trials` behind it, then
 /// the recommendation logic decides whether it earns a proposal.
 pub fn next_candidate(cfg: &LoopConfig, trials: &[SkillTrial]) -> Option<String> {
-    if !cfg.skills.explore || cfg.skills.explore_candidates.is_empty() {
+    if !cfg.execution.skills.explore || cfg.execution.skills.explore_candidates.is_empty() {
         return None;
     }
     let configured: BTreeSet<&str> = cfg
+        .execution
         .graph
         .nodes
         .iter()
@@ -49,11 +50,11 @@ pub fn next_candidate(cfg: &LoopConfig, trials: &[SkillTrial]) -> Option<String>
     }
     // Least-tried candidate first, so evidence accumulates evenly instead of
     // piling onto whichever name happens to sort first.
-    cfg.skills
+    cfg.execution.skills
         .explore_candidates
         .iter()
         .filter(|c| !configured.contains(c.as_str()))
-        .filter(|c| counts.get(c.as_str()).copied().unwrap_or(0) < cfg.skills.min_trials)
+        .filter(|c| counts.get(c.as_str()).copied().unwrap_or(0) < cfg.execution.skills.min_trials)
         .min_by_key(|c| counts.get(c.as_str()).copied().unwrap_or(0))
         .cloned()
 }
@@ -71,7 +72,7 @@ pub fn harvest_judgments<S: Store>(
 
     let mut out = Vec::new();
     for ep in &this {
-        let Some(node) = cfg.graph.nodes.iter().find(|n| n.id == ep.node_id) else {
+        let Some(node) = cfg.execution.graph.nodes.iter().find(|n| n.id == ep.node_id) else {
             continue;
         };
         if node.role != Role::Judge {
@@ -209,7 +210,7 @@ impl<S: Store> Desk<'_, S> {
 fn propose_reshape<S: Store>(cfg: &LoopConfig, desk: &Desk<'_, S>, exhausted: &[String]) -> usize {
     let mut written = 0;
     for node_id in exhausted {
-        let Some(node) = cfg.graph.nodes.iter().find(|n| &n.id == node_id) else {
+        let Some(node) = cfg.execution.graph.nodes.iter().find(|n| &n.id == node_id) else {
             continue;
         };
         let goals = node.goals.join(", ");
@@ -221,7 +222,7 @@ fn propose_reshape<S: Store>(cfg: &LoopConfig, desk: &Desk<'_, S>, exhausted: &[
                  Repeating the same single step is not going to close them; consider splitting it, \
                  giving it a dependency that prepares its input, or adding a judge that says what \
                  is missing",
-                cfg.stop_gates.max_revisions_per_node
+                cfg.safety.gates.stop.max_revisions_per_node
             ),
             Some(format!(
                 "graph:\n  nodes:\n    - id: {node_id}-prepare\n      role: researcher\n      \
@@ -274,19 +275,21 @@ fn propose_try_skill<S: Store>(
     desk: &Desk<'_, S>,
     verdicts: &BTreeMap<String, TargetVerdict>,
 ) -> usize {
-    if cfg.skills.explore || cfg.skills.explore_candidates.is_empty() {
+    if cfg.execution.skills.explore || cfg.execution.skills.explore_candidates.is_empty() {
         return 0;
     }
     if verdicts.values().all(|v| v.satisfied) {
         return 0;
     }
     let configured: BTreeSet<&str> = cfg
+        .execution
         .graph
         .nodes
         .iter()
         .flat_map(|n| n.skills.iter().map(|s| s.as_str()))
         .collect();
     let Some(candidate) = cfg
+        .execution
         .skills
         .explore_candidates
         .iter()
@@ -345,6 +348,7 @@ fn skill_proposals<S: Store>(cfg: &LoopConfig, desk: &Desk<'_, S>) -> usize {
         return 0;
     }
     let configured: Vec<String> = cfg
+        .execution
         .graph
         .nodes
         .iter()
@@ -352,7 +356,7 @@ fn skill_proposals<S: Store>(cfg: &LoopConfig, desk: &Desk<'_, S>) -> usize {
         .collect();
 
     let advice =
-        loopsmith_skills::recommend(&configured, &trials, cfg.skills.min_trials, 0.8, 0.2);
+        loopsmith_skills::recommend(&configured, &trials, cfg.execution.skills.min_trials, 0.8, 0.2);
     let mut written = 0;
 
     let scored = score_skills(&trials);

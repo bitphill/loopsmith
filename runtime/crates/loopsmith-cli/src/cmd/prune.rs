@@ -9,7 +9,7 @@ pub fn execute(config: &Path) -> Result<ExitCode, String> {
     let cfg = loopsmith_core::load(config).map_err(|e| e.to_string())?;
     let root = config_dir(config);
     let mut removed = 0;
-    for node in cfg.graph.nodes.iter().filter(|n| n.isolated) {
+    for node in cfg.execution.graph.nodes.iter().filter(|n| n.isolation.needs_worktree()) {
         let iso = worktree::create(&root, &node.id, "prune");
         if matches!(iso, worktree::Isolation::Worktree { .. }) {
             worktree::remove(&root, &iso);

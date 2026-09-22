@@ -128,7 +128,7 @@ fn config_notes(path: &Path) -> Vec<String> {
     let root = super::config_dir(path);
     let mut out = Vec::new();
 
-    for v in &cfg.validations {
+    for v in &cfg.safety.checks {
         let loopsmith_core::Detector::Script { command, .. } = &v.detector else {
             continue;
         };
@@ -164,10 +164,10 @@ fn config_notes(path: &Path) -> Vec<String> {
         }
     }
 
-    if !cfg.default_skills.is_empty() && loopsmith_util::which("git").is_none() {
+    if !cfg.execution.default_skills.is_empty() && loopsmith_util::which("git").is_none() {
         out.push(format!(
             "{} section J sub-agent(s) declared, and git is not on PATH to fetch them",
-            cfg.default_skills.len()
+            cfg.execution.default_skills.len()
         ));
     }
     out

@@ -215,7 +215,7 @@ async fn list_examples() -> ApiResult<Vec<examples::ExampleCard>> {
 async fn load_example(Path(id): Path<String>) -> ApiResult<Value> {
     let text = examples::raw(&id)
         .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, format!("no example called `{id}`")))?;
-    let cfg: loopsmith_core::LoopConfig = serde_yaml::from_str(&text)
+    let cfg = loopsmith_core::parse_str(&text, &id)
         .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok(Json(json!({ "id": id, "yaml": text, "config": cfg })))
 }

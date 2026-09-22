@@ -15,9 +15,9 @@ use loopsmith_core::{ConstraintSet, LoopConfig, NodeSpec, Role};
 pub fn build_system_prompt(cfg: &LoopConfig, c: &ConstraintSet) -> String {
     let mut s = String::new();
     s.push_str(&format!("You are a node in the `{}` loop.\n\n", cfg.name));
-    if !cfg.information.is_empty() {
+    if !cfg.intent.background.is_empty() {
         s.push_str("Context:\n");
-        for i in &cfg.information {
+        for i in &cfg.intent.background {
             s.push_str(&format!("- {}: {}\n", i.key, i.value));
         }
         s.push('\n');
@@ -69,7 +69,7 @@ pub fn build_node_prompt(cfg: &LoopConfig, node: &NodeSpec, ctx: &NodeContext) -
     if !node.goals.is_empty() {
         s.push_str("## Goals you advance\n");
         for gname in &node.goals {
-            if let Some(g) = cfg.goals.iter().find(|g| &g.name == gname) {
+            if let Some(g) = cfg.intent.goals.iter().find(|g| &g.name == gname) {
                 s.push_str(&format!("- **{}** — {}\n", g.name, g.description));
             }
             // The bar is stated up front: a node that does not know how it

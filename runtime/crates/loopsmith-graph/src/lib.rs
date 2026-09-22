@@ -295,7 +295,7 @@ pub fn unisolated_parallel_writers(spec: &GraphSpec, waves: &[Wave]) -> Vec<Stri
             .nodes
             .iter()
             .filter_map(|id| by_id.get(id.as_str()).copied())
-            .filter(|n| n.role == Role::Builder && !n.isolated)
+            .filter(|n| n.role == Role::Builder && !n.isolation.needs_worktree())
             .map(|n| n.id.as_str())
             .collect();
         if writers.len() > 1 {
@@ -322,7 +322,7 @@ mod tests {
             stage: None,
             skills: vec![],
             weight,
-            isolated: false,
+            isolation: Default::default(),
         }
     }
 
@@ -405,6 +405,7 @@ mod tests {
                 cap: 16,
                 min_marginal_gain: 0.5,
             },
+            ..Default::default()
         };
         let p = plan(&spec).unwrap();
         // 16 independent nodes: one wave, high p, but a large min gain should
@@ -418,6 +419,7 @@ mod tests {
         let spec = GraphSpec {
             nodes: vec![node("a", &[], 1.0), node("b", &[], 1.0)],
             concurrency: Concurrency::Sequential,
+            ..Default::default()
         };
         let p = plan(&spec).unwrap();
         assert_eq!(p.concurrency, 1);
@@ -428,6 +430,7 @@ mod tests {
         let spec = GraphSpec {
             nodes: vec![node("a", &[], 1.0), node("b", &[], 1.0)],
             concurrency: Concurrency::Fixed { max_parallel: 32 },
+            ..Default::default()
         };
         let p = plan(&spec).unwrap();
         assert_eq!(p.concurrency, 2);
@@ -438,6 +441,7 @@ mod tests {
         let spec = GraphSpec {
             nodes: vec![node("a", &[], 1.0), node("b", &[], 1.0)],
             concurrency: Concurrency::default(),
+            ..Default::default()
         };
         let w = waves(&spec.nodes).unwrap();
         let flagged = unisolated_parallel_writers(&spec, &w);

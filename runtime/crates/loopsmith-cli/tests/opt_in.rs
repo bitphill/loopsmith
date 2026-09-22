@@ -200,12 +200,12 @@ fn the_simplest_example_runs_against_a_real_provider() {
         .expect("the example is readable");
     let mut cfg =
         loopsmith_core::parse_str(&text, "opt-in").expect("the example parses");
-    for step in &mut cfg.pre_execution {
+    for step in &mut cfg.intent.prerequisites {
         step.done = true;
     }
-    cfg.stop_gates.max_iterations = 1;
-    cfg.stop_gates.no_progress_iterations = 0;
-    cfg.stop_gates.max_cost_usd = Some(1.0);
+    cfg.safety.gates.stop.max_iterations = 1;
+    cfg.safety.gates.stop.no_progress_iterations = 0;
+    cfg.safety.gates.stop.max_cost_usd = Some(1.0);
 
     let dir = loopsmith_util::testing::temp_dir("real-provider");
     std::fs::write(
@@ -260,13 +260,13 @@ fn the_randomness_agent_keeps_to_the_menu_with_a_real_model() {
     let text = std::fs::read_to_string(harness::examples_dir().join("research-loop.yaml"))
         .expect("the example is readable");
     let mut cfg = loopsmith_core::parse_str(&text, "opt-in").expect("the example parses");
-    for step in &mut cfg.pre_execution {
+    for step in &mut cfg.intent.prerequisites {
         step.done = true;
     }
-    cfg.stop_gates.max_iterations = 3;
-    cfg.stop_gates.no_progress_iterations = 2;
-    cfg.stop_gates.no_progress_iterations_randomness = Some(1);
-    cfg.stop_gates.max_cost_usd = Some(1.0);
+    cfg.safety.gates.stop.max_iterations = 3;
+    cfg.safety.gates.stop.no_progress_iterations = 2;
+    cfg.safety.gates.stop.no_progress_iterations_randomness = Some(1);
+    cfg.safety.gates.stop.max_cost_usd = Some(1.0);
 
     let dir = loopsmith_util::testing::temp_dir("real-perturb");
     std::fs::write(

@@ -26,7 +26,7 @@ pub struct Phases {
 impl Phases {
     /// Build the phase graph, or fail the run before anything is dispatched.
     pub fn new(cfg: &LoopConfig) -> Result<Self, String> {
-        let phases = cfg.execution_guidelines.phases()?;
+        let phases = cfg.execution.phases.phases()?;
         // Reuse the scheduler purely for its cycle and unknown-name checks: a
         // phase graph that cannot be ordered must not start.
         if !phases.is_empty() {
@@ -39,7 +39,7 @@ impl Phases {
             members.entry(p.name.clone()).or_default();
             goals.entry(p.name.clone()).or_default();
         }
-        for n in &cfg.graph.nodes {
+        for n in &cfg.execution.graph.nodes {
             if let Some(stage) = &n.stage {
                 members.entry(stage.clone()).or_default().push(n.id.clone());
                 goals
@@ -206,7 +206,7 @@ graph:
     }
 
     fn node<'a>(cfg: &'a LoopConfig, id: &str) -> &'a NodeSpec {
-        cfg.graph.nodes.iter().find(|n| n.id == id).unwrap()
+        cfg.execution.graph.nodes.iter().find(|n| n.id == id).unwrap()
     }
 
     #[test]

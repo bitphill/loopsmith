@@ -114,7 +114,7 @@ pub fn collect_evidence(
 /// regex naming anything else is reported by validation rather than failing
 /// silently at runtime.
 fn artifact_paths(cfg: &LoopConfig) -> Vec<String> {
-    cfg.validations
+    cfg.safety.checks
         .iter()
         .filter_map(|v| match &v.detector {
             loopsmith_core::Detector::FileExists { path, .. } => Some(path.clone()),
@@ -152,8 +152,8 @@ fn failing_checks(
 /// not broken, and finding that out from the ledger beats finding it out from
 /// a stack trace at 4am.
 pub fn install_default_skills<S: Store>(cfg: &LoopConfig, root: &Path, rec: &Recorder<S>) {
-    for spec in &cfg.default_skills {
-        match loopsmith_skills::install_default(spec, &cfg.skills, root) {
+    for spec in &cfg.execution.default_skills {
+        match loopsmith_skills::install_default(spec, &cfg.execution.skills, root) {
             Ok(r) => rec.entry(
                 0,
                 LedgerKind::SkillAcquired,
@@ -191,7 +191,7 @@ pub fn execute<S: Store>(
     store: &S,
     opts: &RunOptions,
 ) -> Result<RunOutcome, String> {
-    let plan = loopsmith_graph::plan(&cfg.graph).map_err(|e| e.to_string())?;
+    let plan = loopsmith_graph::plan(&cfg.execution.graph).map_err(|e| e.to_string())?;
     // Section I is resolved before anything is dispatched: an unschedulable
     // phase graph is a config bug, and finding it after the first provider call
     // means paying for the discovery.
@@ -222,7 +222,7 @@ pub fn execute<S: Store>(
         LedgerKind::RunStarted,
         format!(
             "{} nodes in {} waves, concurrency {}, predicted speedup {:.2}x (ceiling {:.2}x)",
-            cfg.graph.nodes.len(),
+            cfg.execution.graph.nodes.len(),
             plan.waves.len(),
             plan.concurrency,
             plan.predicted_speedup,
@@ -260,7 +260,7 @@ pub fn execute<S: Store>(
     // it. Carried across iterations so a worktree created later — or reused
     // from an earlier one — can be seeded with what its upstream produced.
     let mut published_paths: BTreeMap<String, String> = BTreeMap::new();
-    let gates = &cfg.stop_gates;
+    let gates = &cfg.safety.gates.stop;
     let width = plan.concurrency.max(1);
 
     // The loop yields both the reason it stopped and the verdicts that were
@@ -280,7 +280,7 @@ pub fn execute<S: Store>(
         // Scratchpad notes are read once per iteration and shared with every
         // node, so a thread never touches the store mid-dispatch.
         let mut scratch: BTreeMap<String, String> = BTreeMap::new();
-        for g in &cfg.goals {
+        for g in &cfg.intent.goals {
             if let Ok(Some(pad)) = store.scratchpad(&opts.run_id, &g.name) {
                 if !pad.trim().is_empty() {
                     scratch.insert(g.name.clone(), pad);
@@ -352,7 +352,7 @@ pub fn execute<S: Store>(
         // `explore` normally requires opting in. A stall is the one case where
         // trying an untried sub-agent is worth the money without being asked.
         if matches!(&perturbation, Some(perturb::Perturbation::Explore)) && explore_now.is_none() {
-            explore_now = cfg.skills.explore_candidates.first().cloned();
+            explore_now = cfg.execution.skills.explore_candidates.first().cloned();
             if explore_now.is_none() {
                 rec.entry(
                     it,
@@ -374,7 +374,7 @@ pub fn execute<S: Store>(
             for chunk in wave_nodes.chunks(width) {
                 let mut nodes: Vec<&NodeSpec> = Vec::new();
                 for id in chunk {
-                    let Some(n) = cfg.graph.nodes.iter().find(|n| &n.id == id) else {
+                    let Some(n) = cfg.execution.graph.nodes.iter().find(|n| &n.id == id) else {
                         continue;
                     };
                     if !phases.eligible(n) {
@@ -429,7 +429,7 @@ pub fn execute<S: Store>(
                             match loopsmith_skills::acquire(
                                 &cand,
                                 &n.instruction,
-                                &cfg.skills,
+                                &cfg.execution.skills,
                                 root,
                             ) {
                                 Ok(r) => {
@@ -524,6 +524,7 @@ pub fn execute<S: Store>(
                     checkpoint.cost_usd += o.cost_usd.unwrap_or(0.0);
 
                     let node_goals: Vec<String> = cfg
+                        .execution
                         .graph
                         .nodes
                         .iter()
@@ -881,7 +882,7 @@ providers:
         let (s, d) = store("tokens");
         let mut c = cfg("stop_gates:\n  max_iterations: 50\n  no_progress_iterations: 0\n  max_tokens: 1\n");
         // Make success impossible so the token ceiling is what stops it.
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
@@ -897,8 +898,8 @@ providers:
     fn the_cost_ceiling_fires_when_a_rate_is_configured() {
         let (s, d) = store("cost");
         let mut c = cfg("stop_gates:\n  max_iterations: 50\n  no_progress_iterations: 0\n  max_cost_usd: 0.000001\n");
-        c.providers.providers[0].cost_per_1k_tokens = Some(1000.0);
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.execution.providers.providers[0].cost_per_1k_tokens = Some(1000.0);
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
@@ -1130,7 +1131,7 @@ providers:
         std::fs::write(sk.join("SKILL.md"), "---\nname: helper\n---\nbody").unwrap();
 
         let mut c = cfg("");
-        c.graph.nodes[0].skills = vec!["helper".into()];
+        c.execution.graph.nodes[0].skills = vec!["helper".into()];
         let mut o = opts("r7", &d);
         o.acquire_skills = true;
 
@@ -1157,7 +1158,7 @@ providers:
     fn resume_continues_from_the_saved_iteration() {
         let (s, d) = store("resume");
         let mut c = cfg("stop_gates:\n  max_iterations: 2\n  no_progress_iterations: 0\n");
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
@@ -1180,12 +1181,12 @@ providers:
         let (s, d) = store("revisions");
         let mut c = cfg("stop_gates:\n  max_iterations: 8\n  max_revisions_per_node: 2\n  no_progress_iterations: 0\n");
         // g1 can never be satisfied, so every dispatch of `build` is a revision.
-        c.validations[0].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[0].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
         };
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
@@ -1223,7 +1224,7 @@ providers:
         let (s, d) = store("nocap");
         let mut c = cfg("stop_gates:\n  max_iterations: 5\n  max_revisions_per_node: 2\n  no_progress_iterations: 0\n");
         // g1 passes every time; only `overall` fails, so the run keeps going.
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
@@ -1263,7 +1264,7 @@ providers:
         // produce one, and there is no flag that makes it.
         let (s, d) = store("export-none");
         let mut c = cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n");
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
@@ -1282,7 +1283,7 @@ providers:
         let mut c = cfg(
             "stop_gates:\n  max_iterations: 6\n  no_progress_iterations: 3\n  no_progress_iterations_randomness: 1\n",
         );
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
@@ -1343,7 +1344,7 @@ providers:
         // already failed. The digests changing is the proof it no longer does.
         let (s, d) = store("summaries");
         let mut c = cfg("stop_gates:\n  max_iterations: 3\n  no_progress_iterations: 0\n");
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),
@@ -1384,7 +1385,7 @@ providers:
         let mut c = cfg(
             "stop_gates:\n  max_iterations: 2\n  no_progress_iterations: 0\ncontext:\n  carry_summaries: 0\n",
         );
-        c.validations[1].detector = loopsmith_core::Detector::Script {
+        c.safety.checks[1].detector = loopsmith_core::Detector::Script {
             command: "false".into(),
             args: vec![],
             expect_exit: Some(0),

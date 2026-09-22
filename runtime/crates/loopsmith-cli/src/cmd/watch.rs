@@ -15,11 +15,13 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
     let root = config_dir(config);
     let store = open_store(config)?;
 
-    if cfg.schedules.is_empty()
+    if cfg.execution.triggers.triggers.is_empty()
         || cfg
-            .schedules
+            .execution
+            .triggers
+            .triggers
             .iter()
-            .all(|t| matches!(t, loopsmith_core::Trigger::Manual))
+            .all(|t| matches!(t.trigger, loopsmith_core::Trigger::Manual))
     {
         return Err(
             "this loop has no non-manual trigger, so `watch` would sleep forever. \n                     Add a cron, interval, file_change, or goal_satisfied trigger to `schedules`."
@@ -27,14 +29,14 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
         );
     }
 
-    let interval = schedule::poll_interval(&cfg.schedules);
+    let interval = schedule::poll_interval(&cfg.execution.triggers.triggers);
     println!(
         "watching `{}` — {} trigger(s), polling every {}s. Cron is evaluated in UTC.",
         cfg.name,
-        cfg.schedules.len(),
+        cfg.execution.triggers.triggers.len(),
         interval.as_secs()
     );
-    for t in &cfg.schedules {
+    for t in &cfg.execution.triggers.triggers {
         println!("  {t:?}");
     }
 
@@ -47,7 +49,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
     // meets its bar, so a `file_change` trigger on the root would see it and
     // start another run — which would write it again.
     let mut watcher = schedule::Watcher::ignoring(vec![format!("{}-success", cfg.name)]);
-    watcher.prime(&cfg.schedules, &root);
+    watcher.prime(&cfg.execution.triggers.triggers, &root);
     let mut runs = 0u32;
 
     loop {
@@ -61,7 +63,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
             .map(|m| m.into_iter().map(|(k, v)| (k, v.satisfied)).collect())
             .unwrap_or_default();
 
-        let fired = watcher.poll(&cfg.schedules, &root, schedule::now_unix(), &satisfied);
+        let fired = watcher.poll(&cfg.execution.triggers.triggers, &root, schedule::now_unix(), &satisfied);
         if !fired.is_empty() {
             let why: Vec<String> = fired.iter().map(|f| f.describe()).collect();
             let run_id = format!("run-{}", loopsmith_memory::now_ms());

@@ -5,11 +5,11 @@ use std::process::ExitCode;
 
 pub fn execute(config: &Path) -> Result<ExitCode, String> {
     let cfg = loopsmith_core::load(config).map_err(|e| e.to_string())?;
-    if cfg.providers.providers.is_empty() {
+    if cfg.execution.providers.providers.is_empty() {
         println!("no providers declared");
         return Ok(ExitCode::SUCCESS);
     }
-    for p in &cfg.providers.providers {
+    for p in &cfg.execution.providers.providers {
         let av = loopsmith_provider::availability(p);
         println!(
             "{:<12} {:<12} {}",

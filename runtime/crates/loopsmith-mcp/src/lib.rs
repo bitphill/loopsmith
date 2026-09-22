@@ -203,7 +203,7 @@ impl<S: Store> Server<S> {
     fn tool_plan(&self, args: &Value) -> Result<Value, String> {
         let path = str_arg(args, "config_path")?;
         let cfg = loopsmith_core::load(&path).map_err(|e| e.to_string())?;
-        let plan = loopsmith_graph::plan(&cfg.graph).map_err(|e| e.to_string())?;
+        let plan = loopsmith_graph::plan(&cfg.execution.graph).map_err(|e| e.to_string())?;
         Ok(json!({
             "waves": plan.waves.iter().map(|w| json!({ "index": w.index, "nodes": w.nodes })).collect::<Vec<_>>(),
             "critical_path": plan.critical_path,

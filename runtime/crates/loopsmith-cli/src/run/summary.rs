@@ -132,7 +132,7 @@ pub fn add_narrative(
     summary: &mut IterationSummary,
     outputs: &[(String, String)],
 ) {
-    let Some(provider_id) = cfg.context.summary_provider.as_deref() else {
+    let Some(provider_id) = cfg.execution.memory.summary_provider.as_deref() else {
         return;
     };
     if cfg.provider(provider_id).is_none() {
@@ -168,7 +168,7 @@ pub fn add_narrative(
     };
 
     if let Ok((resp, _)) = dispatch(cfg, &req, Some(provider_id)) {
-        let text = truncate(resp.output.trim(), cfg.context.max_summary_chars);
+        let text = truncate(resp.output.trim(), cfg.execution.memory.max_summary_chars);
         if !text.is_empty() {
             summary.narrative = Some(text);
         }
@@ -178,7 +178,7 @@ pub fn add_narrative(
 /// The last `carry` summaries, rendered for a prompt. Empty when carry-forward
 /// is switched off or nothing has happened yet.
 pub fn carry_forward(cfg: &LoopConfig, summaries: &[IterationSummary]) -> String {
-    let carry = cfg.context.carry_summaries;
+    let carry = cfg.execution.memory.carry_summaries;
     if carry == 0 || summaries.is_empty() {
         return String::new();
     }

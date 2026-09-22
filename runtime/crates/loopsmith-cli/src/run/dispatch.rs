@@ -51,7 +51,7 @@ pub fn ensure_skills<S: Store>(
         match loopsmith_skills::find_installed(name, root) {
             Some(found) => resolved.push((name.clone(), found.source.as_str().to_string())),
             None if acquire => {
-                match loopsmith_skills::acquire(name, &node.instruction, &cfg.skills, root) {
+                match loopsmith_skills::acquire(name, &node.instruction, &cfg.execution.skills, root) {
                     Ok(r) => {
                         rec.entry(
                             iteration,
@@ -117,7 +117,7 @@ pub fn run_node(
     run_id: &str,
     ctx: &NodeContext,
 ) -> NodeOutcome {
-    let iso = if node.isolated {
+    let iso = if node.isolation.needs_worktree() {
         worktree::create(root, &node.id, run_id)
     } else {
         Isolation::Shared {
@@ -128,8 +128,8 @@ pub fn run_node(
     let workdir = iso.workdir(root).to_path_buf();
 
     let constraints = loopsmith_core::ConstraintSet::merged(
-        &cfg.constraints.global,
-        cfg.constraints.per_node.get(&node.id),
+        &cfg.safety.limits.global,
+        cfg.safety.limits.per_node.get(&node.id),
     );
     let system = build_system_prompt(cfg, &constraints);
     let prompt = build_node_prompt(cfg, node, ctx);

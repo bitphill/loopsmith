@@ -159,7 +159,7 @@ success:
     ) -> StopInputs<'a> {
         StopInputs {
             cfg,
-            gates: &cfg.stop_gates,
+            gates: &cfg.safety.gates.stop,
             verdicts: v,
             iteration: 1,
             stale_iterations: 0,
@@ -183,7 +183,7 @@ success:
         let cfg = cfg_with(true);
         let v = verdicts(true);
         let mut inp = inputs(&cfg, &v);
-        inp.iteration = cfg.stop_gates.max_iterations;
+        inp.iteration = cfg.safety.gates.stop.max_iterations;
         assert_eq!(should_stop(&inp), Some(StopReason::OverallSuccess));
     }
 
@@ -192,20 +192,20 @@ success:
         let cfg = cfg_with(false);
         let v = verdicts(false);
         let mut inp = inputs(&cfg, &v);
-        inp.iteration = cfg.stop_gates.max_iterations;
+        inp.iteration = cfg.safety.gates.stop.max_iterations;
         assert_eq!(
             should_stop(&inp),
-            Some(StopReason::IterationCap(cfg.stop_gates.max_iterations))
+            Some(StopReason::IterationCap(cfg.safety.gates.stop.max_iterations))
         );
     }
 
     #[test]
     fn zero_disables_the_no_progress_gate() {
         let mut cfg = cfg_with(false);
-        cfg.stop_gates.no_progress_iterations = 0;
+        cfg.safety.gates.stop.no_progress_iterations = 0;
         let v = verdicts(false);
         let mut inp = inputs(&cfg, &v);
-        inp.gates = &cfg.stop_gates;
+        inp.gates = &cfg.safety.gates.stop;
         inp.stale_iterations = 9_999;
         assert_eq!(should_stop(&inp), None, "0 must mean disabled, not instant");
     }
@@ -216,23 +216,23 @@ success:
         let v = verdicts(false);
 
         let mut cfg = base.clone();
-        cfg.stop_gates.max_wall_clock_seconds = Some(60);
+        cfg.safety.gates.stop.max_wall_clock_seconds = Some(60);
         let mut inp = inputs(&cfg, &v);
-        inp.gates = &cfg.stop_gates;
+        inp.gates = &cfg.safety.gates.stop;
         inp.elapsed_seconds = 60;
         assert_eq!(should_stop(&inp), Some(StopReason::WallClock(60)));
 
         let mut cfg = base.clone();
-        cfg.stop_gates.max_tokens = Some(100);
+        cfg.safety.gates.stop.max_tokens = Some(100);
         let mut inp = inputs(&cfg, &v);
-        inp.gates = &cfg.stop_gates;
+        inp.gates = &cfg.safety.gates.stop;
         inp.tokens_used = 100;
         assert_eq!(should_stop(&inp), Some(StopReason::TokenBudget(100)));
 
         let mut cfg = base;
-        cfg.stop_gates.max_cost_usd = Some(1.5);
+        cfg.safety.gates.stop.max_cost_usd = Some(1.5);
         let mut inp = inputs(&cfg, &v);
-        inp.gates = &cfg.stop_gates;
+        inp.gates = &cfg.safety.gates.stop;
         inp.cost_usd = 1.5;
         assert_eq!(
             should_stop(&inp),

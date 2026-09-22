@@ -177,25 +177,22 @@ fn save_draft(cfg: &LoopConfig) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// An empty draft the wizard fills in section by section.
+///
+/// Every bundle is its own `Default`, so a section the author skips is the same
+/// as a section they never saw — which is what makes `:back` and an early
+/// `:quit` produce a coherent partial draft rather than a half-typed struct.
 fn skeleton() -> LoopConfig {
     LoopConfig {
         name: String::new(),
         version: "0.1.0".into(),
         description: String::new(),
-        information: Vec::new(),
-        pre_execution: Vec::new(),
-        goals: Vec::new(),
-        validations: Vec::new(),
-        success: Vec::new(),
-        stop_gates: Default::default(),
-        schedules: Vec::new(),
-        constraints: Default::default(),
-        execution_guidelines: Default::default(),
-        default_skills: Vec::new(),
-        graph: Default::default(),
-        providers: Default::default(),
-        skills: Default::default(),
-        context: Default::default(),
+        environment: Default::default(),
+        features: Default::default(),
+        intent: Default::default(),
+        execution: Default::default(),
+        safety: Default::default(),
+        evolution: Default::default(),
     }
 }
 
@@ -360,7 +357,7 @@ fn create_loop(
 
     // Isolated nodes need a repository to get a worktree each; default the git
     // question to yes exactly when the config has one.
-    let wants_git_default = cfg.graph.nodes.iter().any(|n| n.isolated);
+    let wants_git_default = cfg.execution.graph.nodes.iter().any(|n| n.isolation.needs_worktree());
     let git = match io.ask_bool(
         "Initialise a git repository in the loop?",
         &[if wants_git_default {

@@ -13,9 +13,9 @@ use super::detect;
 use super::form::{self, Answers, Step};
 use super::io::{Choice, Io, Nav};
 use loopsmith_core::{
-    CompareOp, Concurrency, ConstraintSet, Detector, Goal, Guideline, InfoItem, LoopConfig, Mode,
-    NodeSpec, ProviderKind, ProviderSpec, Role, SkillOrigin, StopGates, SuccessScenario, Tier,
-    Trigger, Validation, WorkItem,
+    CompareOp, Concurrency, ConstraintSet, Detector, Goal, Guideline, InfoItem, Isolation,
+    LoopConfig, Mode, NodeSpec, ProviderKind, ProviderSpec, Role, SkillOrigin, StopGates,
+    SuccessScenario, Tier, Trigger, Validation, WorkItem,
 };
 
 use super::detect::Found;
@@ -81,22 +81,22 @@ pub fn providers(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     manage_list(
         io,
         "provider",
-        &mut cfg.providers.providers,
+        &mut cfg.execution.providers.providers,
         1,
         |p| format!("{} ({})", p.id, kind_name(p.kind)),
         |io, existing| build_provider(io, &found, existing),
     )?;
 
-    if cfg.providers.providers.len() >= 2 {
+    if cfg.execution.providers.providers.len() >= 2 {
         // Only worth asking once there are two families to keep apart.
         io.heading("Judge independence");
-        cfg.providers.enforce_judge_independence = io.ask_bool(
+        cfg.execution.providers.enforce_judge_independence = io.ask_bool(
             "Refuse a judge that runs on the same provider as the work it grades?",
             &[
                 "A model grading its own family's output is not an independent check.",
                 "On is the safe default; turn it off only if you know you want it.",
             ],
-            cfg.providers.enforce_judge_independence,
+            cfg.execution.providers.enforce_judge_independence,
         )?;
     }
     Ok(())
@@ -269,7 +269,7 @@ pub fn goals(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     manage_list(
         io,
         "goal",
-        &mut cfg.goals,
+        &mut cfg.intent.goals,
         1,
         |g| format!("{} — {}", g.name, truncate(&g.description, 48)),
         build_goal,
@@ -317,7 +317,7 @@ pub fn validations(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     manage_list(
         io,
         "validation",
-        &mut cfg.validations,
+        &mut cfg.safety.checks,
         1,
         |v| format!("{} → {} [{}]", v.target, v.name, detector_name(&v.detector)),
         |io, existing| build_validation(io, &targets, existing),
@@ -470,7 +470,7 @@ fn detector_form(
 pub fn stop_gates(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Stop gates — the ceilings that end a run");
     io.note("At least one hard limit keeps an unattended loop from running away.");
-    let g = &cfg.stop_gates;
+    let g = &cfg.safety.gates.stop;
     let steps = vec![
         Step::text("max_iterations", "Max whole-loop iterations", g.max_iterations.to_string())
             .help(&["Hard ceiling on passes over the graph."])
@@ -492,7 +492,7 @@ pub fn stop_gates(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
         Step::boolean("stop_on_overall_success", "Stop as soon as every overall success is met?", g.stop_on_overall_success),
     ];
     let a = form::run(io, &steps)?;
-    cfg.stop_gates = StopGates {
+    cfg.safety.gates.stop = StopGates {
         max_iterations: a.s("max_iterations").parse().unwrap_or(10),
         max_revisions_per_node: a.s("max_revisions_per_node").parse().unwrap_or(3),
         max_wall_clock_seconds: a.opt("max_wall_clock_seconds").and_then(|s| s.parse().ok()),
@@ -512,7 +512,7 @@ pub fn stop_gates(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
 /// A — static context every node receives.
 pub fn information(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Information — static context every node receives (section A)");
-    manage_list(io, "info item", &mut cfg.information, 0, |i| format!("{} = {}", i.key, truncate(&i.value, 40)), |io, e| {
+    manage_list(io, "info item", &mut cfg.intent.background, 0, |i| format!("{} = {}", i.key, truncate(&i.value, 40)), |io, e| {
         let steps = vec![
             Step::text("key", "Key", e.map(|i: &InfoItem| i.key.clone()).unwrap_or_default()).validated(nonempty),
             Step::text("value", "Value", e.map(|i| i.value.clone()).unwrap_or_default()).validated(nonempty),
@@ -531,7 +531,7 @@ pub fn information(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
 pub fn pre_execution(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Pre-execution — the manual work to prove first (section B)");
     io.note("You cannot automate a process you cannot yet describe by hand.");
-    manage_list(io, "step", &mut cfg.pre_execution, 0, |w| format!("[{}] {}", if w.done { "x" } else { " " }, truncate(&w.step, 44)), |io, e| {
+    manage_list(io, "step", &mut cfg.intent.prerequisites, 0, |w| format!("[{}] {}", if w.done { "x" } else { " " }, truncate(&w.step, 44)), |io, e| {
         let steps = vec![
             Step::text("step", "Manual step", e.map(|w: &WorkItem| w.step.clone()).unwrap_or_default()).validated(nonempty),
             Step::boolean("done", "Have you actually done this by hand yet?", e.map(|w| w.done).unwrap_or(false)),
@@ -550,7 +550,7 @@ pub fn pre_execution(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
 pub fn success(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Success scenarios — what counts as done (section E)");
     let targets = goal_target_choices(cfg);
-    manage_list(io, "scenario", &mut cfg.success, 0, |s| format!("{} → {}", s.target, s.name), |io, e| {
+    manage_list(io, "scenario", &mut cfg.intent.success, 0, |s| format!("{} → {}", s.target, s.name), |io, e| {
         let td = e.and_then(|s: &SuccessScenario| targets.iter().position(|c| c.value == s.target)).unwrap_or(0);
         let modes = vec![
             Choice::new("objective", "objective"),
@@ -583,7 +583,7 @@ pub fn success(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
 /// G — triggers.
 pub fn schedules(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Schedules — when the loop fires on its own (section G)");
-    manage_list(io, "trigger", &mut cfg.schedules, 0, |t| trigger_name(t).to_string(), |io, _e| build_trigger(io))?;
+    manage_list(io, "trigger", &mut cfg.execution.triggers.triggers, 0, |t| trigger_name(&t.trigger).to_string(), |io, _e| build_trigger(io).map(|t| t.map(Into::into)))?;
     Ok(())
 }
 
@@ -622,7 +622,7 @@ fn build_trigger(io: &mut Io) -> Result<Option<Trigger>, Nav> {
 pub fn constraints(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Constraints — global rules applied to every node (section H)");
     io.note("Per-node overrides stay a file/web job; this sets the global set.");
-    let g = &cfg.constraints.global;
+    let g = &cfg.safety.limits.global;
     let steps = vec![
         Step::optional_text("rules", "Rules (one per line, use ; to separate)", g.rules.join("; "))
             .help(&["Literal instructions injected into every node's prompt."]),
@@ -634,7 +634,7 @@ pub fn constraints(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
             .help(&["Irreversible actions do not get made at machine speed."]),
     ];
     let a = form::run(io, &steps)?;
-    cfg.constraints.global = ConstraintSet {
+    cfg.safety.limits.global = ConstraintSet {
         rules: split_semis(&a.s("rules")),
         forbidden_paths: split_commas(&a.s("forbidden_paths")),
         forbidden_commands: split_commas(&a.s("forbidden_commands")),
@@ -649,7 +649,7 @@ pub fn constraints(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
 pub fn execution_guidelines(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Execution guidelines — named phases (section I)");
     io.note("A phase is a stretch of the run with a standing instruction; order them with arrows.");
-    manage_list(io, "phase", &mut cfg.execution_guidelines.items, 0, |g| g.name.clone(), |io, e| {
+    manage_list(io, "phase", &mut cfg.execution.phases.items, 0, |g| g.name.clone(), |io, e| {
         let steps = vec![
             Step::text("name", "Phase name", e.map(|g: &Guideline| g.name.clone()).unwrap_or_default()).validated(nonempty),
             Step::text("guideline", "Standing instruction", e.map(|g| g.guideline.clone()).unwrap_or_default()).validated(nonempty),
@@ -661,16 +661,16 @@ pub fn execution_guidelines(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav
             Err(Nav::Quit) => return Err(Nav::Quit),
         })
     })?;
-    let names: Vec<String> = cfg.execution_guidelines.items.iter().map(|g| g.name.clone()).collect();
+    let names: Vec<String> = cfg.execution.phases.items.iter().map(|g| g.name.clone()).collect();
     if names.len() >= 2 {
-        let existing = cfg.execution_guidelines.dependency.join("; ");
+        let existing = cfg.execution.phases.dependency.join("; ");
         let line = io.ask_text(
             "Ordering (e.g. `gather -> draft -> review`; ; separates chains)",
             &[&format!("Known phases: {}", names.join(", ")), "Blank leaves them all parallel."],
             Some(if existing.is_empty() { "" } else { &existing }),
             &|_| Ok(()),
         )?;
-        cfg.execution_guidelines.dependency = split_semis(&line);
+        cfg.execution.phases.dependency = split_semis(&line);
     }
     Ok(())
 }
@@ -678,7 +678,7 @@ pub fn execution_guidelines(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav
 /// J — default skills.
 pub fn default_skills(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Default skills — sub-agents installed before the loop starts (section J)");
-    manage_list(io, "skill", &mut cfg.default_skills, 0, |s| s.name.clone(), |io, e| {
+    manage_list(io, "skill", &mut cfg.execution.default_skills, 0, |s| s.name.clone(), |io, e| {
         let origins = vec![
             Choice::new("marketplace", "marketplace — claudemarketplaces.com / skills CLI"),
             Choice::new("github", "github — an https git repo"),
@@ -696,6 +696,11 @@ pub fn default_skills(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
         ];
         Ok(match form::run(io, &steps) {
             Ok(a) => Some(loopsmith_core::DefaultSkill {
+                // A wizard-authored skill is untrusted and unpinned until a
+                // human says otherwise, which is what the policy default then
+                // refuses to dispatch to.
+                trust_level: Default::default(),
+                checksum: None,
                 name: a.s("name"),
                 source: parse_origin(&a.s("source")),
                 url: a.opt("url"),
@@ -713,23 +718,23 @@ pub fn default_skills(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
 pub fn graph(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Execution graph — the units of work and their real dependencies");
     io.note("Nodes are steps; an edge means 'this node reads that node's output'.");
-    let providers: Vec<String> = cfg.providers.providers.iter().map(|p| p.id.clone()).collect();
-    let goals: Vec<String> = cfg.goals.iter().map(|g| g.name.clone()).collect();
-    manage_list(io, "node", &mut cfg.graph.nodes, 0, |n| format!("{} ({}, {})", n.id, role_name(n.role), tier_name(n.tier)), |io, e| build_node(io, &providers, &goals, e))?;
+    let providers: Vec<String> = cfg.execution.providers.providers.iter().map(|p| p.id.clone()).collect();
+    let goals: Vec<String> = cfg.intent.goals.iter().map(|g| g.name.clone()).collect();
+    manage_list(io, "node", &mut cfg.execution.graph.nodes, 0, |n| format!("{} ({}, {})", n.id, role_name(n.role), tier_name(n.tier)), |io, e| build_node(io, &providers, &goals, e))?;
 
-    if !cfg.graph.nodes.is_empty() {
+    if !cfg.execution.graph.nodes.is_empty() {
         let modes = vec![
             Choice::new("auto", "auto — derive parallelism from the graph"),
             Choice::new("sequential", "sequential — one node at a time"),
             Choice::new("fixed", "fixed — a set width"),
         ];
-        let cur = match cfg.graph.concurrency {
+        let cur = match cfg.execution.graph.concurrency {
             Concurrency::Auto { .. } => 0,
             Concurrency::Sequential => 1,
             Concurrency::Fixed { .. } => 2,
         };
         let mode = io.ask_select("Concurrency", &["How much to run at once."], &modes, Some(cur))?;
-        cfg.graph.concurrency = match mode.as_str() {
+        cfg.execution.graph.concurrency = match mode.as_str() {
             "sequential" => Concurrency::Sequential,
             "fixed" => {
                 let w = io.ask_text("Max parallel nodes", &[], Some("4"), &req_uint)?;
@@ -777,7 +782,7 @@ fn build_node(
         let pd = e.and_then(|n| n.provider.as_ref()).and_then(|p| providers.iter().position(|x| x == p)).map(|i| i + 1).unwrap_or(0);
         steps.push(Step::select("provider", "Pin a provider?", pchoices, pd));
     }
-    steps.push(Step::boolean("isolated", "Run in its own git worktree? (required for parallel writers)", e.map(|n| n.isolated).unwrap_or(false)));
+    steps.push(Step::boolean("isolated", "Run in its own git worktree? (required for parallel writers)", e.map(|n| n.isolation.needs_worktree()).unwrap_or(false)));
 
     let a = match form::run(io, &steps) {
         Ok(a) => a,
@@ -795,14 +800,14 @@ fn build_node(
         skills: e.map(|n| n.skills.clone()).unwrap_or_default(),
         stage: e.and_then(|n| n.stage.clone()),
         weight: e.map(|n| n.weight).unwrap_or(1.0),
-        isolated: a.flag("isolated"),
+        isolation: if a.flag("isolated") { Isolation::Worktree } else { Isolation::None },
     }))
 }
 
 /// Context policy.
 pub fn context(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
     io.heading("Context — what each iteration remembers");
-    let c = &cfg.context;
+    let c = &cfg.execution.memory;
     let steps = vec![
         Step::text("carry_summaries", "How many past iteration summaries to carry", c.carry_summaries.to_string())
             .help(&["0 disables carry-forward; 2 lets a node see its last two tries."])
@@ -812,10 +817,14 @@ pub fn context(io: &mut Io, cfg: &mut LoopConfig) -> Result<(), Nav> {
         Step::text("max_summary_chars", "Max characters per summary", c.max_summary_chars.to_string()).validated(req_uint),
     ];
     let a = form::run(io, &steps)?;
-    cfg.context = loopsmith_core::ContextPolicy {
+    cfg.execution.memory = loopsmith_core::MemoryPolicy {
         carry_summaries: a.s("carry_summaries").parse().unwrap_or(2),
         summary_provider: a.opt("summary_provider"),
         max_summary_chars: a.s("max_summary_chars").parse().unwrap_or(1200),
+        // The wizard does not ask about cross-run namespaces: the defaults are
+        // the conservative answer, and a question about promotion rules is not
+        // one a first-time author can answer usefully.
+        ..loopsmith_core::MemoryPolicy::default()
     };
     Ok(())
 }
@@ -978,6 +987,7 @@ fn clone_choices(src: &[Choice]) -> Vec<Choice> {
 
 fn goal_target_choices(cfg: &LoopConfig) -> Vec<Choice> {
     let mut v: Vec<Choice> = cfg
+        .intent
         .goals
         .iter()
         .map(|g| Choice::new(g.name.clone(), g.name.clone()))

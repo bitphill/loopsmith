@@ -199,7 +199,7 @@ impl Fixture {
         }
 
         if windows {
-            for v in &mut self.cfg.validations {
+            for v in &mut self.cfg.safety.checks {
                 if let Detector::Script { command, .. } = &mut v.detector {
                     if command.contains('/') && command.ends_with(".sh") {
                         *command = format!("{}.cmd", command.trim_end_matches(".sh"));
@@ -214,7 +214,8 @@ impl Fixture {
     /// Every distinct `scripts/…` path the config's detectors name.
     pub fn script_detectors(&self) -> BTreeSet<String> {
         self.cfg
-            .validations
+            .safety
+            .checks
             .iter()
             .filter_map(|v| match &v.detector {
                 Detector::Script { command, .. } => Some(command.clone()),
@@ -251,7 +252,8 @@ impl Fixture {
     /// Every `(path, non_empty)` a `file_exists` detector names.
     pub fn file_detectors(&self) -> Vec<(String, bool)> {
         self.cfg
-            .validations
+            .safety
+            .checks
             .iter()
             .filter_map(|v| match &v.detector {
                 Detector::FileExists { path, non_empty } => Some((path.clone(), *non_empty)),
@@ -266,7 +268,7 @@ impl Fixture {
     /// is asked to prove its plumbing, not its arithmetic.
     pub fn satisfy_metrics(self) -> Self {
         let mut map = serde_json::Map::new();
-        for v in &self.cfg.validations {
+        for v in &self.cfg.safety.checks {
             if let Detector::Threshold { metric, op, value } = &v.detector {
                 map.insert(metric.clone(), satisfying_value(*op, *value).into());
             }
@@ -382,7 +384,7 @@ impl Fixture {
 /// the teaching mechanism rather than a bug — which is why it happens on a
 /// copy.
 fn unblock(cfg: &mut LoopConfig) {
-    for step in &mut cfg.pre_execution {
+    for step in &mut cfg.intent.prerequisites {
         step.done = true;
     }
 }
@@ -401,7 +403,7 @@ fn unblock(cfg: &mut LoopConfig) {
 /// re-derive the cascade to work out which provider a judge would land on.
 fn deterministic_providers(cfg: &mut LoopConfig) {
     let payload = judge_payload(cfg);
-    for p in &mut cfg.providers.providers {
+    for p in &mut cfg.execution.providers.providers {
         p.kind = ProviderKind::Byok;
         p.command = "printf".into();
         p.args = vec!["%s".into(), payload.clone()];
@@ -422,7 +424,7 @@ fn deterministic_providers(cfg: &mut LoopConfig) {
 /// every subjective validation permanently unsatisfiable.
 fn judge_payload(cfg: &LoopConfig) -> String {
     let mut out = String::new();
-    for v in &cfg.validations {
+    for v in &cfg.safety.checks {
         if let Detector::Judge { standard, .. } = &v.detector {
             out.push_str(&format!(
                 "VERDICT: {} PASS\nSTANDARD: {}\nEVIDENCE: asserted deterministically by the stress harness\nSCORE: 10\n",
@@ -439,7 +441,7 @@ fn judge_payload(cfg: &LoopConfig) -> String {
 /// A judge block that fails every check, for the judge-refuses axis.
 pub fn failing_judge_payload(cfg: &LoopConfig) -> String {
     let mut out = String::new();
-    for v in &cfg.validations {
+    for v in &cfg.safety.checks {
         if let Detector::Judge { .. } = &v.detector {
             out.push_str(&format!(
                 "VERDICT: {} FAIL\nEVIDENCE: the stress harness refused this deliberately\nSCORE: 1\n",
@@ -453,7 +455,7 @@ pub fn failing_judge_payload(cfg: &LoopConfig) -> String {
 /// Point one provider id at a different payload, so a judge can be made to
 /// disagree while the builders carry on.
 pub fn set_provider_output(cfg: &mut LoopConfig, id: &str, payload: &str) {
-    if let Some(p) = cfg.providers.providers.iter_mut().find(|p| p.id == id) {
+    if let Some(p) = cfg.execution.providers.providers.iter_mut().find(|p| p.id == id) {
         p.args = vec!["%s".into(), payload.to_string()];
     }
 }
@@ -461,7 +463,7 @@ pub fn set_provider_output(cfg: &mut LoopConfig, id: &str, payload: &str) {
 /// Which provider id a judge node actually sits on, following the cascade when
 /// the node did not name one.
 pub fn judge_provider_ids(cfg: &LoopConfig) -> BTreeSet<String> {
-    cfg.graph
+    cfg.execution.graph
         .nodes
         .iter()
         .filter(|n| n.role == Role::Judge)

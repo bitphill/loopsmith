@@ -18,7 +18,6 @@
 //! parsed out of the configs themselves, so an example that changes cannot
 //! disagree with its own card.
 
-use loopsmith_core::LoopConfig;
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -138,36 +137,37 @@ fn sources() -> Vec<(String, String, &'static str)> {
 }
 
 fn card_for(id: &str, text: &str, origin: &'static str) -> Option<ExampleCard> {
-    let cfg: LoopConfig = serde_yaml::from_str(text).ok()?;
+    let cfg = loopsmith_core::parse_str(text, id).ok()?;
     Some(ExampleCard {
         id: id.to_string(),
         name: cfg.name.clone(),
         blurb: crate::web::detect::truncate(&cfg.description, 180),
         origin: origin.to_string(),
-        goals: cfg.goals.len(),
-        validations: cfg.validations.len(),
+        goals: cfg.intent.goals.len(),
+        validations: cfg.safety.checks.len(),
         judge_validations: cfg
-            .validations
+            .safety
+            .checks
             .iter()
             .filter(|v| matches!(v.detector, loopsmith_core::Detector::Judge { .. }))
             .count(),
-        nodes: cfg.graph.nodes.len(),
-        providers: cfg.providers.providers.len(),
-        trigger: describe_triggers(&cfg.schedules),
-        max_iterations: cfg.stop_gates.max_iterations,
-        max_cost_usd: cfg.stop_gates.max_cost_usd,
+        nodes: cfg.execution.graph.nodes.len(),
+        providers: cfg.execution.providers.providers.len(),
+        trigger: describe_triggers(&cfg.execution.triggers.triggers),
+        max_iterations: cfg.safety.gates.stop.max_iterations,
+        max_cost_usd: cfg.safety.gates.stop.max_cost_usd,
     })
 }
 
 /// The schedule in the words someone would use out loud.
-fn describe_triggers(triggers: &[loopsmith_core::Trigger]) -> String {
+fn describe_triggers(triggers: &[loopsmith_core::TriggerSpec]) -> String {
     use loopsmith_core::Trigger;
     if triggers.is_empty() {
         return "manual".into();
     }
     let parts: Vec<String> = triggers
         .iter()
-        .map(|t| match t {
+        .map(|t| match &t.trigger {
             Trigger::Manual => "manual".to_string(),
             Trigger::Cron { expr } => format!("cron {expr}"),
             Trigger::Interval { seconds } => format!("every {}", human_seconds(*seconds)),
@@ -198,10 +198,14 @@ mod tests {
         // library exists for.
         assert!(!EMBEDDED.is_empty(), "no examples were compiled in");
         for (file, text) in EMBEDDED {
-            let cfg: LoopConfig = serde_yaml::from_str(text)
+            // `parse_str`, not `serde_yaml::from_str`: the shipped examples
+            // are still in the 0.3 spelling, and going through the loader is
+            // what proves the legacy path works for real files rather than
+            // only for the fixtures in `config::legacy`.
+            let cfg = loopsmith_core::parse_str(text, file)
                 .unwrap_or_else(|e| panic!("{file} does not parse: {e}"));
-            assert!(!cfg.goals.is_empty(), "{file} has no goals");
-            assert!(!cfg.validations.is_empty(), "{file} has no validations");
+            assert!(!cfg.intent.goals.is_empty(), "{file} has no goals");
+            assert!(!cfg.safety.checks.is_empty(), "{file} has no validations");
             assert!(
                 !cfg.description.trim().is_empty(),
                 "{file} has no description, so its card would be blank"
@@ -258,7 +262,7 @@ mod tests {
     fn raw_returns_the_yaml_the_card_was_built_from() {
         let first = &list()[0];
         let text = raw(&first.id).expect("the card's own id resolves");
-        let cfg: LoopConfig = serde_yaml::from_str(&text).unwrap();
+        let cfg = loopsmith_core::parse_str(&text, &first.id).unwrap();
         assert_eq!(cfg.name, first.name);
     }
 

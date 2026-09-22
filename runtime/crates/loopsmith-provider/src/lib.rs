@@ -540,8 +540,8 @@ validations:
             "test",
         )
         .unwrap();
-        cfg.providers.providers = providers;
-        cfg.providers.cascade = cascade
+        cfg.execution.providers.providers = providers;
+        cfg.execution.providers.cascade = cascade
             .iter()
             .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
             .collect();

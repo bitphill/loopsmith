@@ -99,7 +99,7 @@ pub fn search(terms: &[String], min_stars: u64, limit: usize) -> Result<ExitCode
 pub fn acquire(config: &Path, name: &str) -> Result<ExitCode, String> {
     let cfg = loopsmith_core::load(config).map_err(|e| e.to_string())?;
     let root = config_dir(config);
-    let r = loopsmith_skills::acquire(name, "acquired on request", &cfg.skills, &root)
+    let r = loopsmith_skills::acquire(name, "acquired on request", &cfg.execution.skills, &root)
         .map_err(|e| e.to_string())?;
     println!(
         "{} `{}` at {}",
@@ -124,13 +124,13 @@ pub fn acquire(config: &Path, name: &str) -> Result<ExitCode, String> {
 pub fn install(config: &Path) -> Result<ExitCode, String> {
     let cfg = loopsmith_core::load(config).map_err(|e| e.to_string())?;
     let root = config_dir(config);
-    if cfg.default_skills.is_empty() {
+    if cfg.execution.default_skills.is_empty() {
         println!("this loop declares no `default_skills`");
         return Ok(ExitCode::SUCCESS);
     }
     let mut failed = 0;
-    for spec in &cfg.default_skills {
-        match loopsmith_skills::install_default(spec, &cfg.skills, &root) {
+    for spec in &cfg.execution.default_skills {
+        match loopsmith_skills::install_default(spec, &cfg.execution.skills, &root) {
             Ok(r) => println!(
                 "{:<28} {:<12} {}",
                 r.name,
@@ -177,7 +177,7 @@ pub fn scores(config: &Path) -> Result<ExitCode, String> {
     }
     println!(
         "\nFewer than {} trials is not evidence; one lucky run proves nothing.",
-        cfg.skills.min_trials
+        cfg.execution.skills.min_trials
     );
     Ok(ExitCode::SUCCESS)
 }

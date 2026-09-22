@@ -59,7 +59,7 @@ pub fn export_success(
 }
 
 fn skill_md(cfg: &LoopConfig, verdicts: &BTreeMap<String, TargetVerdict>, iterations: u32) -> String {
-    let goals: Vec<&str> = cfg.goals.iter().map(|g| g.name.as_str()).collect();
+    let goals: Vec<&str> = cfg.intent.goals.iter().map(|g| g.name.as_str()).collect();
     let checks: usize = verdicts.values().map(|v| v.total).sum();
 
     let mut s = format!(

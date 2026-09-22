@@ -6,9 +6,11 @@
 //! sled trees.
 
 use loopsmith_core::{
-    AcquisitionSource, Concurrency, ConstraintSet, Constraints, Detector, Goal, GraphSpec,
-    InfoItem, LoopConfig, Mode, NodeSpec, ProviderRouting, Role, SkillPolicy, StopGates,
-    SuccessScenario, Tier, Trigger, Validation, WorkItem, OVERALL,
+    AcquisitionSource, Concurrency, ConstraintSet, Constraints, Detector, Environment, Evolution,
+    Execution, Features, Gates, Goal, GraphSpec, InfoItem, Intent, Isolation, Join, LoopConfig,
+    Mode, NodeSpec, Protected, ProviderRouting, Recovery, Role, Safety, SkillPolicy, StopGates,
+    SuccessScenario, Tier, Trigger, TriggerPolicy, TriggerSpec, TrustLevel, Validation, WorkItem,
+    OVERALL,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -114,13 +116,19 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
         version: "0.1.0".into(),
         description: purpose.to_string(),
 
-        information: vec![InfoItem {
+        // A starter loop is a development loop, and every risky capability is
+        // off. Turning one on should be something the author did on purpose.
+        environment: Environment::Dev,
+        features: Features::default(),
+
+        intent: Intent {
+        background: vec![InfoItem {
             key: "purpose".into(),
             value: purpose.to_string(),
             note: Some("Replace with the durable facts every node should know.".into()),
         }],
 
-        pre_execution: vec![
+        prerequisites: vec![
             WorkItem {
                 step: "Run this task manually end to end at least once".into(),
                 done: false,
@@ -140,7 +148,17 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             priority: Some(1),
         }],
 
-        validations: vec![
+        success: vec![SuccessScenario {
+            target: OVERALL.into(),
+            name: "all-blocking-pass".into(),
+            mode: Mode::Percentage,
+            statement: "Every blocking validation passes.".into(),
+            threshold: Some(1.0),
+        }],
+        },
+
+        safety: Safety {
+        checks: vec![
             Validation {
                 target: "primary".into(),
                 name: "artifact-exists".into(),
@@ -166,34 +184,24 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             },
         ],
 
-        success: vec![SuccessScenario {
-            target: OVERALL.into(),
-            name: "all-blocking-pass".into(),
-            mode: Mode::Percentage,
-            statement: "Every blocking validation passes.".into(),
-            threshold: Some(1.0),
-        }],
-
-        stop_gates: StopGates {
-            max_iterations: 8,
-            max_revisions_per_node: 3,
-            max_wall_clock_seconds: Some(3600),
-            max_tokens: Some(2_000_000),
-            max_cost_usd: Some(5.0),
-            no_progress_iterations: 3,
-            no_progress_iterations_randomness: Some(2),
-            stop_on_overall_success: true,
+        gates: Gates {
+            stop: StopGates {
+                max_iterations: 8,
+                max_revisions_per_node: 3,
+                max_wall_clock_seconds: Some(3600),
+                max_tokens: Some(2_000_000),
+                max_cost_usd: Some(5.0),
+                no_progress_iterations: 3,
+                no_progress_iterations_randomness: Some(2),
+                stop_on_overall_success: true,
+            },
+            // No entry, approval or rollback rules in the starter. Each costs
+            // a detector run, and a loop with nothing built yet has nothing
+            // for them to check.
+            ..Gates::default()
         },
 
-        schedules: vec![Trigger::Manual],
-
-        execution_guidelines: Default::default(),
-
-        // Section J is empty in the starter: a fresh loop should not reach the
-        // network on its first run to fetch something nobody asked for.
-        default_skills: vec![],
-
-        constraints: Constraints {
+        limits: Constraints {
             global: ConstraintSet {
                 rules: ConstraintSet::frozen_git_rules(),
                 forbidden_paths: vec![".git/".into(), "node_modules/".into()],
@@ -209,6 +217,11 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             per_node: BTreeMap::new(),
         },
 
+        recovery: Recovery::default(),
+        protected: Protected::default(),
+        },
+
+        execution: Execution {
         graph: GraphSpec {
             nodes: vec![
                 NodeSpec {
@@ -222,7 +235,7 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
                     stage: None,
                     skills: vec![],
                     weight: 3.0,
-                    isolated: true,
+                    isolation: Isolation::Worktree,
                 },
                 NodeSpec {
                     id: "judge".into(),
@@ -235,13 +248,15 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
                     stage: None,
                     skills: vec![],
                     weight: 1.0,
-                    isolated: false,
+                    isolation: Isolation::None,
                 },
             ],
             concurrency: Concurrency::Auto {
                 cap: 16,
                 min_marginal_gain: 0.05,
             },
+            join: Join::WaitForAll,
+            container_image: None,
         },
 
         providers: ProviderRouting {
@@ -249,6 +264,12 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             cascade,
             enforce_judge_independence: true,
         },
+
+        phases: Default::default(),
+
+        // A fresh loop should not reach the network on its first run to fetch
+        // something nobody asked for.
+        default_skills: vec![],
 
         skills: SkillPolicy {
             acquisition_order: vec![
@@ -262,9 +283,20 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             explore: false,
             explore_candidates: vec![],
             min_trials: 3,
+            min_trust_level: TrustLevel::Reviewed,
+            require_checksum: false,
+            allow_external_side_effects: false,
         },
 
-        context: Default::default(),
+        memory: Default::default(),
+
+        triggers: TriggerPolicy {
+            triggers: vec![TriggerSpec::from(Trigger::Manual)],
+            ..TriggerPolicy::default()
+        },
+        },
+
+        evolution: Evolution::default(),
     }
 }
 
@@ -1030,7 +1062,7 @@ mod tests {
         let mut cfg = starter_config("demo", "a demo loop");
         // As shipped it must NOT validate: the manual run has not happened.
         assert!(loopsmith_core::validate(&cfg).has_errors());
-        for w in &mut cfg.pre_execution {
+        for w in &mut cfg.intent.prerequisites {
             w.done = true;
         }
         let r = loopsmith_core::validate(&cfg);
@@ -1131,8 +1163,8 @@ mod tests {
         .unwrap();
         let cfg = loopsmith_core::load(root.join("loop.yaml")).expect("reloads");
         assert_eq!(cfg.name, "demo");
-        assert_eq!(cfg.graph.nodes.len(), 2);
-        assert!(cfg.providers.enforce_judge_independence);
+        assert_eq!(cfg.execution.graph.nodes.len(), 2);
+        assert!(cfg.execution.providers.enforce_judge_independence);
         let _ = std::fs::remove_dir_all(root);
     }
 

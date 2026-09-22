@@ -11,7 +11,7 @@
 //! that is quietly an hour off twice a year is worse than one that is honestly
 //! in UTC. For wall-clock-independent cadence, prefer `interval`.
 
-use loopsmith_core::Trigger;
+use loopsmith_core::{Trigger, TriggerSpec};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -260,9 +260,9 @@ impl Watcher {
 
     /// Prime file and goal state without firing, so starting the watcher does
     /// not immediately look like a change.
-    pub fn prime(&mut self, triggers: &[Trigger], root: &Path) {
-        for t in triggers {
-            if let Trigger::FileChange { path } = t {
+    pub fn prime(&mut self, triggers: &[TriggerSpec], root: &Path) {
+        for t in triggers.iter().filter(|t| t.enabled) {
+            if let Trigger::FileChange { path } = &t.trigger {
                 self.last_mtime.insert(
                     path.clone(),
                     newest_mtime_ignoring(&root.join(path), &self.ignore),
@@ -274,7 +274,7 @@ impl Watcher {
     /// Which triggers are due right now?
     pub fn poll(
         &mut self,
-        triggers: &[Trigger],
+        triggers: &[TriggerSpec],
         root: &Path,
         now: i64,
         satisfied: &BTreeMap<String, bool>,
@@ -283,8 +283,10 @@ impl Watcher {
         let minute = now.div_euclid(60);
         let mut out = Vec::new();
 
-        for t in triggers {
-            match t {
+        // A disabled trigger is skipped rather than removed, so turning one off
+        // for an afternoon does not mean deleting it and typing it back in.
+        for t in triggers.iter().filter(|t| t.enabled) {
+            match &t.trigger {
                 Trigger::Manual => {}
                 Trigger::Cron { expr } => {
                     let Ok(c) = CronExpr::parse(expr) else { continue };
@@ -332,10 +334,10 @@ impl Watcher {
 }
 
 /// Shortest sensible poll interval for a trigger set.
-pub fn poll_interval(triggers: &[Trigger]) -> Duration {
+pub fn poll_interval(triggers: &[TriggerSpec]) -> Duration {
     let mut secs = 30u64;
-    for t in triggers {
-        match t {
+    for t in triggers.iter().filter(|t| t.enabled) {
+        match &t.trigger {
             // Cron needs sub-minute polling or a minute can be missed.
             Trigger::Cron { .. } => secs = secs.min(20),
             Trigger::FileChange { .. } => secs = secs.min(5),
@@ -504,9 +506,9 @@ mod tests {
     #[test]
     fn a_cron_trigger_fires_once_per_minute_not_once_per_poll() {
         let mut w = Watcher::default();
-        let triggers = vec![Trigger::Cron {
+        let triggers = vec![TriggerSpec::from(Trigger::Cron {
             expr: "* * * * *".into(),
-        }];
+        })];
         let root = std::env::temp_dir();
         let sat = BTreeMap::new();
         let t = 1_786_000_020; // some second inside a minute
@@ -525,7 +527,7 @@ mod tests {
     #[test]
     fn an_interval_waits_before_its_first_repeat() {
         let mut w = Watcher::default();
-        let triggers = vec![Trigger::Interval { seconds: 100 }];
+        let triggers = vec![TriggerSpec::from(Trigger::Interval { seconds: 100 })];
         let root = std::env::temp_dir();
         let sat = BTreeMap::new();
         assert!(w.poll(&triggers, &root, 1000, &sat).is_empty(), "primes, does not fire");
@@ -539,9 +541,9 @@ mod tests {
         let watched = dir.join("watched.txt");
         std::fs::write(&watched, "one").unwrap();
 
-        let triggers = vec![Trigger::FileChange {
+        let triggers = vec![TriggerSpec::from(Trigger::FileChange {
             path: "watched.txt".into(),
-        }];
+        })];
         let mut w = Watcher::default();
         w.prime(&triggers, &dir);
         let sat = BTreeMap::new();
@@ -564,7 +566,7 @@ mod tests {
     #[test]
     fn goal_satisfied_fires_on_the_transition_only() {
         let mut w = Watcher::default();
-        let triggers = vec![Trigger::GoalSatisfied { goal: "g1".into() }];
+        let triggers = vec![TriggerSpec::from(Trigger::GoalSatisfied { goal: "g1".into() })];
         let root = std::env::temp_dir();
 
         let mut sat = BTreeMap::new();
@@ -582,7 +584,7 @@ mod tests {
     #[test]
     fn manual_only_configs_never_fire() {
         let mut w = Watcher::default();
-        let triggers = vec![Trigger::Manual];
+        let triggers = vec![TriggerSpec::from(Trigger::Manual)];
         assert!(w
             .poll(&triggers, &std::env::temp_dir(), now_unix(), &BTreeMap::new())
             .is_empty());
@@ -590,13 +592,13 @@ mod tests {
 
     #[test]
     fn poll_interval_tightens_for_the_most_demanding_trigger() {
-        assert_eq!(poll_interval(&[Trigger::Manual]), Duration::from_secs(30));
+        assert_eq!(poll_interval(&[TriggerSpec::from(Trigger::Manual)]), Duration::from_secs(30));
         assert_eq!(
-            poll_interval(&[Trigger::FileChange { path: "x".into() }]),
+            poll_interval(&[TriggerSpec::from(Trigger::FileChange { path: "x".into() })]),
             Duration::from_secs(5)
         );
         assert_eq!(
-            poll_interval(&[Trigger::Interval { seconds: 8 }]),
+            poll_interval(&[TriggerSpec::from(Trigger::Interval { seconds: 8 })]),
             Duration::from_secs(2)
         );
     }

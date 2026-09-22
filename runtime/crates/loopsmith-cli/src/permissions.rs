@@ -18,12 +18,12 @@ pub fn required(cfg: &LoopConfig) -> Vec<String> {
     let mut set: BTreeSet<String> = BTreeSet::new();
 
     // Every provider is a command, so each one needs its binary allowed.
-    for p in &cfg.providers.providers {
+    for p in &cfg.execution.providers.providers {
         set.insert(format!("Bash({}:*)", p.command));
     }
 
     // Script detectors run during gating.
-    for v in &cfg.validations {
+    for v in &cfg.safety.checks {
         if let Detector::Script { command, .. } = &v.detector {
             set.insert(format!("Bash({command}:*)"));
         }
@@ -31,6 +31,7 @@ pub fn required(cfg: &LoopConfig) -> Vec<String> {
 
     // Skill acquisition reaches the marketplace and the skills CLI.
     if cfg
+        .execution
         .skills
         .acquisition_order
         .iter()
@@ -151,7 +152,7 @@ providers:
         assert!(with.iter().any(|g| g.contains("claudemarketplaces.com")));
 
         let mut c = cfg("");
-        c.skills.acquisition_order = vec![loopsmith_core::AcquisitionSource::Installed];
+        c.execution.skills.acquisition_order = vec![loopsmith_core::AcquisitionSource::Installed];
         let without = required(&c);
         assert!(!without.iter().any(|g| g.contains("claudemarketplaces.com")));
         assert!(!without.iter().any(|g| g.contains("npx skills")));

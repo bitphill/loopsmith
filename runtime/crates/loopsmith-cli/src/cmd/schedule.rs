@@ -110,9 +110,11 @@ fn crontab(
     install: bool,
 ) {
     let expr = cfg
-        .schedules
+        .execution
+        .triggers
+        .triggers
         .iter()
-        .find_map(|t| match t {
+        .find_map(|t| match &t.trigger {
             loopsmith_core::Trigger::Cron { expr } => Some(expr.clone()),
             _ => None,
         })
