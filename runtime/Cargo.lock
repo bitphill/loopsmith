@@ -609,6 +609,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "thiserror 1.0.69",
 ]
 

@@ -9,7 +9,7 @@ use super::perturb::Perturbation;
 use super::prompts::{build_node_prompt, build_system_prompt};
 use crate::logging::Recorder;
 use crate::worktree::{self, Isolation};
-use loopsmith_core::{LoopConfig, NodeSpec, Role};
+use loopsmith_core::{FailureClass, LoopConfig, NodeSpec, Role};
 use loopsmith_memory::{LedgerKind, Store};
 use loopsmith_provider::{digest, dispatch, InvokeRequest};
 use std::collections::BTreeMap;
@@ -28,6 +28,9 @@ pub struct NodeOutcome {
     pub duration_ms: u64,
     pub skipped: Vec<String>,
     pub error: Option<String>,
+    /// The recovery class of `error`, when there is one. Carried structurally
+    /// because the dispatcher decides what to do next from it.
+    pub failure: Option<FailureClass>,
     /// Paths copied in from the loop root before the node ran, so it could see
     /// what its upstream produced.
     pub seeded: Vec<String>,
@@ -106,6 +109,9 @@ pub struct NodeContext<'a> {
     /// because a worktree branches from `HEAD` and would otherwise be blind to
     /// everything the run has produced since — including its own upstream.
     pub published: &'a BTreeMap<String, String>,
+    /// What was wrong with this node's previous attempt in the same
+    /// iteration, when recovery is asking it again.
+    pub revision: Option<&'a str>,
 }
 
 /// Dispatch one node. Pure with respect to the store so it is safe to call
@@ -163,6 +169,7 @@ pub fn run_node(
             duration_ms: resp.duration_ms,
             skipped,
             error: None,
+            failure: None,
             seeded,
             isolation: iso,
         },
@@ -178,6 +185,7 @@ pub fn run_node(
             duration_ms: 0,
             skipped: vec![],
             error: Some(e.to_string()),
+            failure: Some(e.class()),
             seeded,
             isolation: iso,
         },

@@ -47,8 +47,11 @@ pub enum RecoveryAction {
     /// Re-dispatch the same work unchanged. For failures that are about the
     /// world, not the output.
     Retry {
+        /// Dispatches in total, counting the one that failed: 3 is the first
+        /// try and two more.
         #[serde(default = "default_attempts")]
         max_attempts: u32,
+        /// Delay before the first retry; `backoff` decides the rest.
         #[serde(default = "default_base_delay")]
         base_delay_seconds: u64,
         #[serde(default = "default_backoff")]
@@ -57,6 +60,7 @@ pub enum RecoveryAction {
     /// Re-dispatch, telling the node what was wrong with its last output. For
     /// failures that are about the output.
     Revise {
+        /// Dispatches in total, counting the one that was refused.
         #[serde(default = "default_attempts")]
         max_attempts: u32,
     },

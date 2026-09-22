@@ -741,3 +741,319 @@ fn an_unschedulable_graph_is_recorded_as_a_failed_run() {
     assert_eq!(cp.outcome.as_deref(), Some("failed"));
     let _ = std::fs::remove_dir_all(d);
 }
+
+// --- rules -------------------------------------------------------------------
+
+fn rules(yaml: &str) -> Vec<loopsmith_core::GateRule> {
+    serde_yaml::from_str(yaml).expect("rules parse")
+}
+
+fn ledger_says(s: &SledStore, run: &str, kind: LedgerKind, text: &str) -> bool {
+    s.ledger(run)
+        .unwrap()
+        .iter()
+        .any(|e| e.kind == kind && e.detail.contains(text))
+}
+
+fn resumed(run: &str, d: &Path) -> RunOptions {
+    let mut o = opts(run, d);
+    o.resume = true;
+    o
+}
+
+#[test]
+fn a_failed_entry_rule_stops_the_run_before_it_spends_anything() {
+    let (s, d) = store("entry");
+    let mut c = cfg("");
+    c.safety.gates.entry = rules(
+        "- id: brief\n  statement: the brief is written\n  \
+         detector: { type: file_exists, path: BRIEF.md }\n  on_fail: pause\n",
+    );
+    let out = execute(&c, &s, &opts("entry", &d)).unwrap();
+    assert_eq!(out.state, RunState::Paused);
+    assert_eq!(out.iterations, 0);
+    assert!(s.episodes("entry").unwrap().is_empty(), "nothing may be dispatched");
+
+    // Once the world is as the rule asks, the same run goes through.
+    std::fs::write(d.join("BRIEF.md"), "go").unwrap();
+    let out = execute(&c, &s, &resumed("entry", &d)).unwrap();
+    assert_eq!(out.state, RunState::Succeeded);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn an_approval_rule_holds_the_run_until_its_artifact_exists() {
+    let (s, d) = store("approval");
+    let mut c = cfg("");
+    c.safety.gates.approval = rules(
+        "- id: signed-off\n  statement: a human approved this run\n  \
+         detector: { type: file_exists, path: APPROVED }\n  on_fail: escalate\n",
+    );
+    let out = execute(&c, &s, &opts("approval", &d)).unwrap();
+    assert_eq!(out.state, RunState::Escalated);
+    assert!(road(&s, "approval").contains(&"awaiting_approval".to_string()));
+    assert!(s.episodes("approval").unwrap().is_empty());
+
+    std::fs::write(d.join("APPROVED"), "yes").unwrap();
+    let out = execute(&c, &s, &resumed("approval", &d)).unwrap();
+    assert_eq!(out.state, RunState::Succeeded);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn approval_rules_are_skipped_and_said_to_be_when_human_approval_is_off() {
+    let (s, d) = store("approval-off");
+    let mut c = cfg("");
+    c.features.human_approval = false;
+    c.safety.gates.approval = rules(
+        "- id: signed-off\n  statement: s\n  detector: { type: file_exists, path: APPROVED }\n",
+    );
+    let out = execute(&c, &s, &opts("approval-off", &d)).unwrap();
+    assert_eq!(out.state, RunState::Succeeded);
+    assert!(ledger_says(&s, "approval-off", LedgerKind::RuleEvaluated, "not checked"));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_failed_rollback_rule_discards_the_iterations_progress_but_not_its_spend() {
+    let (s, d) = store("rollback");
+    let mut c = cfg("");
+    c.safety.gates.rollback = rules(
+        "- id: canary\n  statement: the canary survives\n  \
+         detector: { type: file_exists, path: canary }\n  on_fail: rollback\n",
+    );
+    let out = execute(&c, &s, &opts("rollback", &d)).unwrap();
+    assert_eq!(out.state, RunState::RolledBack);
+    let cp = s.checkpoint("rollback").unwrap().unwrap();
+    assert!(cp.completed_nodes.is_empty(), "the iteration's progress is discarded");
+    assert!(cp.tokens_used > 0, "what it spent is not refunded");
+    let _ = std::fs::remove_dir_all(d);
+}
+
+// --- recovery ------------------------------------------------------------------
+
+fn provider_script(c: &mut LoopConfig, script: &str) {
+    let p = &mut c.execution.providers.providers[0];
+    p.command = "sh".into();
+    p.args = vec!["-c".into(), script.into()];
+}
+
+#[test]
+fn a_transient_provider_failure_is_retried_and_the_run_carries_on() {
+    let (s, d) = store("retry");
+    let mut c = cfg("");
+    provider_script(
+        &mut c,
+        "if [ -f .tried ]; then echo ok; else touch .tried; \
+         echo '429 Too Many Requests' >&2; exit 1; fi",
+    );
+    c.safety.recovery.transient_error = loopsmith_core::RecoveryAction::Retry {
+        max_attempts: 3,
+        base_delay_seconds: 0,
+        backoff: loopsmith_core::Backoff::Fixed,
+    };
+    let out = execute(&c, &s, &opts("retry", &d)).unwrap();
+    assert_eq!(out.state, RunState::Succeeded);
+    assert!(road(&s, "retry").contains(&"retrying".to_string()));
+    assert!(ledger_says(&s, "retry", LedgerKind::Recovered, "transient error"));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_tool_that_fails_the_same_way_every_time_is_not_retried() {
+    // A wrong flag fails identically on the second try. Retrying it with
+    // backoff spends the wall-clock budget learning that.
+    let (s, d) = store("no-retry");
+    let mut c = failing(cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n"));
+    provider_script(&mut c, "echo \"error: unexpected argument '--quiet'\" >&2; exit 2");
+    let out = execute(&c, &s, &opts("no-retry", &d)).unwrap();
+    assert_eq!(out.state, RunState::Paused);
+    assert!(!road(&s, "no-retry").contains(&"retrying".to_string()));
+    assert!(ledger_says(&s, "no-retry", LedgerKind::Recovered, "tool unavailable"));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_judge_that_ignores_the_output_contract_is_asked_again() {
+    let (s, d) = store("revise");
+    let c = loopsmith_core::parse_str(
+        r#"
+name: t
+goals:
+  - name: g1
+    description: a sufficiently long goal description
+pre_execution:
+  - step: done
+    done: true
+validations:
+  - target: g1
+    name: prose
+    mode: subjective
+    statement: reads well
+    detector: { type: judge, standard: "the house style guide" }
+  - target: overall
+    name: prose-overall
+    mode: subjective
+    statement: reads well
+    detector: { type: judge, standard: "the house style guide" }
+graph:
+  nodes:
+    - id: build
+      role: builder
+      instruction: write the thing described in the goal
+      goals: [g1]
+      provider: maker
+    - id: review
+      role: judge
+      instruction: check the draft against the named standard and report
+      depends_on: [build]
+      goals: [g1]
+      provider: checker
+providers:
+  providers:
+    - id: maker
+      kind: byok
+      command: echo
+      args: ["a draft"]
+    - id: checker
+      kind: byok
+      command: sh
+      args: ["-c", "if [ -f .judged ]; then printf 'VERDICT: prose PASS\nEVIDENCE: e\nVERDICT: prose-overall PASS\nEVIDENCE: e\n'; else touch .judged; echo looks fine to me; fi"]
+  cascade:
+    standard: [maker]
+"#,
+        "test",
+    )
+    .unwrap();
+    let out = execute(&c, &s, &opts("revise", &d)).unwrap();
+    assert_eq!(out.state, RunState::Succeeded, "the second answer satisfies the gate");
+    assert!(ledger_says(&s, "revise", LedgerKind::Recovered, "invalid output"));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_node_out_of_revisions_is_escalated_and_a_resume_answers_it() {
+    let (s, d) = store("escalate");
+    let mut c = failing(cfg(
+        "stop_gates:\n  max_iterations: 4\n  max_revisions_per_node: 1\n  no_progress_iterations: 0\n",
+    ));
+    c.safety.checks[0].detector = c.safety.checks[1].detector.clone();
+    let out = execute(&c, &s, &opts("escalate", &d)).unwrap();
+    assert_eq!(out.stop, StopReason::IterationCap(4), "the stop gate still fired");
+    assert_eq!(out.state, RunState::Escalated, "but a human is what it waits on");
+    assert_eq!(s.checkpoint("escalate").unwrap().unwrap().escalations.len(), 1);
+
+    let _ = execute(&c, &s, &resumed("escalate", &d)).unwrap();
+    assert!(ledger_says(&s, "escalate", LedgerKind::Escalated, "resuming answers 1"));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_budget_policy_of_stop_fails_the_run_instead_of_pausing_it() {
+    let (s, d) = store("exhaust-stop");
+    let mut c = failing(cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n"));
+    c.safety.recovery.resource_exhaustion = loopsmith_core::RecoveryAction::Stop;
+    let out = execute(&c, &s, &opts("exhaust-stop", &d)).unwrap();
+    assert_eq!(out.state, RunState::Failed);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+fn git(args: &[&str], cwd: &Path) {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("git runs");
+    assert!(out.status.success(), "git {args:?}: {out:?}");
+}
+
+#[test]
+fn an_isolated_node_that_touches_a_forbidden_path_halts_the_run_and_publishes_nothing() {
+    let (s, d) = store("forbidden");
+    git(&["init", "-q"], &d);
+    git(&["config", "user.email", "t@t.t"], &d);
+    git(&["config", "user.name", "t"], &d);
+    git(&["config", "commit.gpgsign", "false"], &d);
+    std::fs::write(d.join(".gitignore"), "state/\nlogs/\n").unwrap();
+    git(&["add", "-A"], &d);
+    git(&["commit", "-qm", "seed"], &d);
+
+    let mut c = cfg("");
+    c.execution.graph.nodes[0].isolation = loopsmith_core::Isolation::Worktree;
+    provider_script(&mut c, "echo leaked > .env; echo fine > out.txt; echo ok");
+    c.safety.limits.global.forbidden_paths = vec![".env".into()];
+
+    let out = execute(&c, &s, &opts("forbidden", &d)).unwrap();
+    assert_eq!(out.state, RunState::Failed, "a safety violation is never negotiated");
+    assert!(!d.join(".env").exists(), "the forbidden file must not reach the root");
+    assert!(!d.join("out.txt").exists(), "nor anything else from that worktree");
+    assert!(ledger_says(&s, "forbidden", LedgerKind::Recovered, "safety violation"));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+// --- join ------------------------------------------------------------------------
+
+/// `build` plus two more independent builders, all in one wave.
+fn three_wide(extra: &str) -> LoopConfig {
+    let mut c = cfg(extra);
+    let base = c.execution.graph.nodes[0].clone();
+    for id in ["second", "third"] {
+        c.execution.graph.nodes.push(loopsmith_core::NodeSpec {
+            id: id.into(),
+            ..base.clone()
+        });
+    }
+    c.execution.graph.concurrency = loopsmith_core::Concurrency::Fixed { max_parallel: 1 };
+    c
+}
+
+#[test]
+fn first_success_releases_the_wave_without_dispatching_the_rest() {
+    let (s, d) = store("first-success");
+    let mut c = three_wide("");
+    c.execution.graph.join = loopsmith_core::Join::FirstSuccess;
+    let out = execute(&c, &s, &opts("first-success", &d)).unwrap();
+    assert_eq!(out.state, RunState::Succeeded);
+    assert_eq!(s.episodes("first-success").unwrap().len(), 1, "one success was enough");
+    assert!(ledger_says(
+        &s,
+        "first-success",
+        LedgerKind::NodeDispatched,
+        "released by its first_success"
+    ));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn an_unmet_quorum_holds_back_the_waves_after_it() {
+    let (s, d) = store("quorum");
+    let mut c = failing(cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n"));
+    provider_script(&mut c, "exit 3");
+    let base = c.execution.graph.nodes[0].clone();
+    c.execution.graph.nodes.push(loopsmith_core::NodeSpec {
+        id: "after".into(),
+        depends_on: vec!["build".into()],
+        ..base
+    });
+    c.execution.graph.join = loopsmith_core::Join::Quorum { count: 1 };
+    let _ = execute(&c, &s, &opts("quorum", &d)).unwrap();
+    assert!(ledger_says(&s, "quorum", LedgerKind::NodeFailed, "not dispatched this iteration"));
+    let after_ran = s
+        .ledger("quorum")
+        .unwrap()
+        .iter()
+        .any(|e| e.node_id.as_deref() == Some("after"));
+    assert!(!after_ran, "the downstream wave must not run on answers that are not there");
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_budget_reached_mid_iteration_stops_further_dispatch() {
+    let (s, d) = store("mid-budget");
+    let c = failing(three_wide("stop_gates:\n  max_tokens: 1\n  max_iterations: 5\n"));
+    let out = execute(&c, &s, &opts("mid-budget", &d)).unwrap();
+    assert_eq!(out.stop, StopReason::TokenBudget(1));
+    assert_eq!(s.episodes("mid-budget").unwrap().len(), 1, "one dispatch spent the budget");
+    assert!(ledger_says(&s, "mid-budget", LedgerKind::StopGateTriggered, "mid-iteration"));
+    let _ = std::fs::remove_dir_all(d);
+}

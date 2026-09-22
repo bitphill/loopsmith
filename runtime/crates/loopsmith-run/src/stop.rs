@@ -11,6 +11,7 @@
 //! meant remembering that dance; forgetting it meant the borrow checker
 //! complained about something unrelated three screens away.
 
+use crate::state::RunState;
 use loopsmith_core::{LoopConfig, StopGates};
 use loopsmith_gate::TargetVerdict;
 use std::collections::BTreeMap;
@@ -26,6 +27,10 @@ pub enum StopReason {
     TokenBudget(u64),
     CostBudget(String),
     NoProgress(u32),
+    /// Stopped by something other than a stop gate: an entry, approval, or
+    /// rollback rule, or a failure the recovery policy answers with a halt.
+    /// `state` is the outcome it sends the run to.
+    Halted { state: RunState, why: String },
 }
 
 impl StopReason {
@@ -43,6 +48,7 @@ impl StopReason {
             StopReason::NoProgress(n) => {
                 format!("no measurable change for {n} iterations; stopping the line")
             }
+            StopReason::Halted { why, .. } => why.clone(),
         }
     }
 }

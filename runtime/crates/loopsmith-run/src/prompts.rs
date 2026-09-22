@@ -49,6 +49,15 @@ pub fn build_node_prompt(cfg: &LoopConfig, node: &NodeSpec, ctx: &NodeContext) -
     let mut s = String::new();
     s.push_str(&format!("## Your task\n{}\n\n", node.instruction));
 
+    // First, so it is not lost under everything else: the previous attempt in
+    // this iteration was refused, and this is why.
+    if let Some(why) = ctx.revision {
+        s.push_str(&format!(
+            "## Your previous attempt was not accepted\n{why}\n\nAnswer again. Do not \
+             repeat the previous response.\n\n"
+        ));
+    }
+
     // The phase instruction comes before the goals: it is the standing rule for
     // this stretch of the run, and it is usually about what *not* to do yet.
     if let (Some(stage), Some(text)) = (node.stage.as_deref(), ctx.guideline) {

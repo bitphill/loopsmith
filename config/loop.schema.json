@@ -1875,12 +1875,14 @@
             },
             "base_delay_seconds": {
               "default": 2,
+              "description": "Delay before the first retry; `backoff` decides the rest.",
               "format": "uint64",
               "minimum": 0.0,
               "type": "integer"
             },
             "max_attempts": {
               "default": 3,
+              "description": "Dispatches in total, counting the one that failed: 3 is the first try and two more.",
               "format": "uint32",
               "minimum": 0.0,
               "type": "integer"
@@ -1902,6 +1904,7 @@
             },
             "max_attempts": {
               "default": 3,
+              "description": "Dispatches in total, counting the one that was refused.",
               "format": "uint32",
               "minimum": 0.0,
               "type": "integer"

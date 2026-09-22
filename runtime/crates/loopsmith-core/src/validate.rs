@@ -88,6 +88,8 @@ pub fn validate(cfg: &LoopConfig) -> ValidationReport {
     check_execution_guidelines(cfg, &mut r);
     check_graph(cfg, &goal_names, &mut r);
     check_providers(cfg, &mut r);
+    check_gate_rules(cfg, &mut r);
+    check_recovery(cfg, &mut r);
     r
 }
 
@@ -462,6 +464,98 @@ fn check_stop_gates(cfg: &LoopConfig, r: &mut ValidationReport) {
     }
 }
 
+/// Entry, approval, and rollback rules.
+fn check_gate_rules(cfg: &LoopConfig, r: &mut ValidationReport) {
+    use crate::{GateKind, GateOutcome};
+    let gates = &cfg.safety.gates;
+    for (kind, list) in [
+        (GateKind::Entry, &gates.entry),
+        (GateKind::Approval, &gates.approval),
+        (GateKind::Rollback, &gates.rollback),
+    ] {
+        let mut seen = BTreeSet::new();
+        for (i, rule) in list.iter().enumerate() {
+            let field = format!("safety.gates.{}[{i}]", kind.as_str());
+            if rule.id.trim().is_empty() {
+                r.issues.push(Issue::err(format!("{field}.id"), "must not be empty"));
+            } else if !seen.insert(rule.id.as_str()) {
+                r.issues.push(Issue::err(
+                    format!("{field}.id"),
+                    format!("`{}` is used twice; the ledger could not tell them apart", rule.id),
+                ));
+            }
+            if kind != GateKind::Rollback && rule.on_fail == GateOutcome::Rollback {
+                r.issues.push(Issue::warn(
+                    format!("{field}.on_fail"),
+                    format!(
+                        "an {} rule runs before anything has been done, so there is nothing \
+                         to roll back; the run fails instead",
+                        kind.as_str()
+                    ),
+                ));
+            }
+        }
+    }
+
+    // An approval rule nobody checks is a sign-off that never happens. That is
+    // a choice a developer may make on their own machine, and one a production
+    // loop must not be able to make quietly.
+    if !gates.approval.is_empty() && !cfg.features.human_approval {
+        let msg = "approval rules are declared but `features.human_approval` is off, so none \
+                   of them is checked";
+        r.issues.push(if cfg.environment == crate::Environment::Prod {
+            Issue::err("features.human_approval", msg)
+        } else {
+            Issue::warn("features.human_approval", msg)
+        });
+    }
+    if cfg.environment == crate::Environment::Prod && !cfg.evolution.require_approval {
+        r.issues.push(Issue::err(
+            "evolution.require_approval",
+            "must stay on in `prod`: a production loop may propose changes to itself, never \
+             adopt them unreviewed",
+        ));
+    }
+}
+
+/// The failure-class to action map.
+fn check_recovery(cfg: &LoopConfig, r: &mut ValidationReport) {
+    use crate::RecoveryAction;
+    let rec = &cfg.safety.recovery;
+    let rows = [
+        ("transient_error", rec.transient_error),
+        ("invalid_output", rec.invalid_output),
+        ("tool_unavailable", rec.tool_unavailable),
+        ("repeated_failure", rec.repeated_failure),
+        ("safety_violation", rec.safety_violation),
+        ("resource_exhaustion", rec.resource_exhaustion),
+        ("corrupted_state", rec.corrupted_state),
+    ];
+    for (name, action) in rows {
+        let field = format!("safety.recovery.{name}");
+        if let RecoveryAction::Retry { max_attempts, .. } | RecoveryAction::Revise { max_attempts } =
+            action
+        {
+            if max_attempts <= 1 {
+                r.issues.push(Issue::warn(
+                    field.clone(),
+                    "max_attempts counts dispatches, so 1 or 0 never tries a second time",
+                ));
+            }
+        }
+    }
+    if matches!(
+        rec.safety_violation,
+        RecoveryAction::Retry { .. } | RecoveryAction::Revise { .. } | RecoveryAction::Fallback
+    ) {
+        r.issues.push(Issue::err(
+            "safety.recovery.safety_violation",
+            "a safety violation cannot be retried, revised, or routed around; use stop, pause, \
+             escalate, or restore_checkpoint",
+        ));
+    }
+}
+
 fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut ValidationReport) {
     let ids: BTreeSet<&str> = cfg.execution.graph.nodes.iter().map(|n| n.id.as_str()).collect();
     if cfg.execution.graph.nodes.is_empty() {
@@ -674,6 +768,76 @@ pre_execution:
             "test",
         )
         .expect("parses")
+    }
+
+    fn errors_on(cfg: &LoopConfig, field: &str) -> usize {
+        validate(cfg).errors().filter(|i| i.field == field).count()
+    }
+
+    fn warnings_on(cfg: &LoopConfig, field: &str) -> usize {
+        validate(cfg).warnings().filter(|i| i.field == field).count()
+    }
+
+    fn rule(id: &str, on_fail: &str) -> crate::GateRule {
+        serde_yaml::from_str(&format!(
+            "id: {id}\nstatement: s\ndetector: {{ type: file_exists, path: x }}\non_fail: {on_fail}\n"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_rule_id_used_twice_is_refused() {
+        let mut c = minimal();
+        c.safety.gates.entry = vec![rule("a", "stop"), rule("a", "pause")];
+        assert_eq!(errors_on(&c, "safety.gates.entry[1].id"), 1);
+    }
+
+    #[test]
+    fn an_entry_rule_cannot_roll_back_what_has_not_run() {
+        let mut c = minimal();
+        c.safety.gates.entry = vec![rule("a", "rollback")];
+        assert_eq!(warnings_on(&c, "safety.gates.entry[0].on_fail"), 1);
+        c.safety.gates.rollback = vec![rule("b", "rollback")];
+        assert_eq!(warnings_on(&c, "safety.gates.rollback[0].on_fail"), 0);
+    }
+
+    #[test]
+    fn unchecked_approval_rules_are_refused_in_prod_and_warned_about_elsewhere() {
+        let mut c = minimal();
+        c.safety.gates.approval = vec![rule("signed-off", "pause")];
+        c.features.human_approval = false;
+        assert_eq!(warnings_on(&c, "features.human_approval"), 1);
+        c.environment = crate::Environment::Prod;
+        assert_eq!(errors_on(&c, "features.human_approval"), 1);
+    }
+
+    #[test]
+    fn a_safety_violation_cannot_be_retried() {
+        let mut c = minimal();
+        c.safety.recovery.safety_violation = crate::RecoveryAction::Retry {
+            max_attempts: 3,
+            base_delay_seconds: 1,
+            backoff: crate::Backoff::Fixed,
+        };
+        assert_eq!(errors_on(&c, "safety.recovery.safety_violation"), 1);
+    }
+
+    #[test]
+    fn the_default_policy_raises_nothing() {
+        // The shipped examples use every default, and CI asserts they raise
+        // exactly one issue. None of these checks may be it.
+        let c = minimal();
+        let report = validate(&c);
+        assert!(
+            report
+                .issues
+                .iter()
+                .all(|i| !i.field.starts_with("safety.gates.entry")
+                    && !i.field.starts_with("safety.recovery")
+                    && i.field != "features.human_approval"),
+            "{:?}",
+            report.issues
+        );
     }
 
     #[test]

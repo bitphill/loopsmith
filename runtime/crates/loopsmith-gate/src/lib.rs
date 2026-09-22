@@ -16,7 +16,8 @@
 //!   which is the failure the whole architecture exists to avoid.
 
 use loopsmith_core::{
-    CompareOp, Detector, LoopConfig, Mode, SuccessScenario, Validation, OVERALL,
+    CompareOp, Detector, GateKind, GateOutcome, GateRule, LoopConfig, Mode, SuccessScenario,
+    Validation, OVERALL,
 };
 use loopsmith_memory::{now_ms, GoalState};
 use serde::{Deserialize, Serialize};
@@ -144,7 +145,7 @@ pub fn evaluate(cfg: &LoopConfig, target: &str, ev: &Evidence) -> TargetVerdict 
 
     let mut checks = Vec::new();
     for v in &vals {
-        let (passed, evidence) = match run_detector(cfg, v, ev) {
+        let (passed, evidence) = match run_detector(cfg, &v.name, &v.detector, ev) {
             Ok(pair) => pair,
             Err(e) => (false, format!("detector error: {e}")),
         };
@@ -242,12 +243,60 @@ pub fn overall_success(cfg: &LoopConfig, verdicts: &BTreeMap<String, TargetVerdi
     })
 }
 
+/// The ruling on one entry, approval, or rollback rule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleVerdict {
+    pub kind: GateKind,
+    pub id: String,
+    pub statement: String,
+    pub passed: bool,
+    pub evidence: String,
+    /// What the rule says should happen when it does not pass.
+    pub on_fail: GateOutcome,
+}
+
+/// Evaluate every rule of one kind — `safety.gates.entry`, `.approval`, or
+/// `.rollback` — against the evidence.
+///
+/// A rule is the same object as a validation: a statement and a detector. It
+/// is decided by the same compiled code, so a gate condition can never be
+/// argued past any more than a check can. A detector that cannot run at all
+/// fails the rule: "could not tell" is not "passed".
+pub fn check_rules(cfg: &LoopConfig, kind: GateKind, ev: &Evidence) -> Vec<RuleVerdict> {
+    cfg.safety
+        .gates
+        .rules()
+        .filter(|(k, _)| *k == kind)
+        .map(|(_, rule)| check_rule(cfg, kind, rule, ev))
+        .collect()
+}
+
+/// Evaluate one rule.
+pub fn check_rule(cfg: &LoopConfig, kind: GateKind, rule: &GateRule, ev: &Evidence) -> RuleVerdict {
+    let (passed, evidence) = match run_detector(cfg, &rule.id, &rule.detector, ev) {
+        Ok(pair) => pair,
+        Err(e) => (false, format!("detector error: {e}")),
+    };
+    RuleVerdict {
+        kind,
+        id: rule.id.clone(),
+        statement: rule.statement.clone(),
+        passed,
+        evidence,
+        on_fail: rule.on_fail,
+    }
+}
+
+/// Run one detector. `name` is what the detector is known by — a validation's
+/// name, or a gate rule's id — which is what a judge verdict is matched on and
+/// what a bad regex is reported under.
 fn run_detector(
     cfg: &LoopConfig,
-    v: &Validation,
+    name: &str,
+    detector: &Detector,
     ev: &Evidence,
 ) -> Result<(bool, String), GateError> {
-    match &v.detector {
+    match detector {
         Detector::Script {
             command,
             args,
@@ -285,7 +334,7 @@ fn run_detector(
 
         Detector::RegexMatch { artifact, pattern } => {
             let re = regex::Regex::new(pattern).map_err(|source| GateError::Regex {
-                name: v.name.clone(),
+                name: name.to_string(),
                 source,
             })?;
             match ev.artifacts.get(artifact) {
@@ -321,10 +370,10 @@ fn run_detector(
             let judgments: Vec<&Judgment> = ev
                 .judgments
                 .iter()
-                .filter(|j| j.validation == v.name)
+                .filter(|j| j.validation == name)
                 .collect();
             if judgments.is_empty() {
-                return Ok((false, format!("no judgment recorded for `{}`", v.name)));
+                return Ok((false, format!("no judgment recorded for `{name}`")));
             }
             // Independence check first: a judgment from the builder's own
             // provider is refused outright rather than counted.
@@ -417,6 +466,55 @@ validations:
 "#
         );
         loopsmith_core::parse_str(&text, "test").expect("config parses")
+    }
+
+    fn with_rules(rules: &str) -> LoopConfig {
+        let mut c = cfg_with(
+            "  - target: g1\n    name: v\n    mode: objective\n    statement: s\n    \
+             detector: { type: script, command: \"true\" }\n",
+        );
+        c.safety.gates = serde_yaml::from_str(rules).expect("rules parse");
+        c
+    }
+
+    #[test]
+    fn a_rule_is_decided_by_its_detector_and_carries_its_consequence() {
+        let c = with_rules(
+            "entry:\n  - id: brief-present\n    statement: the brief exists\n    \
+             detector: { type: file_exists, path: BRIEF.md }\n    on_fail: pause\n",
+        );
+        let dir = loopsmith_util::testing::temp_dir("gate-rule");
+        let v = check_rules(&c, GateKind::Entry, &Evidence::new(&dir));
+        assert_eq!(v.len(), 1);
+        assert!(!v[0].passed, "the file is not there yet");
+        assert_eq!(v[0].on_fail, GateOutcome::Pause);
+
+        std::fs::write(dir.join("BRIEF.md"), "go").unwrap();
+        assert!(check_rules(&c, GateKind::Entry, &Evidence::new(&dir))[0].passed);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_rule_whose_detector_cannot_run_does_not_pass() {
+        // "Could not tell" is not "passed". A gate that waved a run through
+        // because its own check was broken would be worse than no gate.
+        let c = with_rules(
+            "rollback:\n  - id: r\n    statement: s\n    \
+             detector: { type: script, command: loopsmith-no-such-binary-xyzzy }\n",
+        );
+        let v = check_rules(&c, GateKind::Rollback, &Evidence::new(std::env::temp_dir()));
+        assert!(!v[0].passed);
+        assert!(v[0].evidence.starts_with("detector error"), "{}", v[0].evidence);
+    }
+
+    #[test]
+    fn rules_of_one_kind_do_not_leak_into_another() {
+        let c = with_rules(
+            "approval:\n  - id: a\n    statement: s\n    detector: { type: script, command: \"true\" }\n",
+        );
+        let ev = Evidence::new(std::env::temp_dir());
+        assert!(check_rules(&c, GateKind::Entry, &ev).is_empty());
+        assert_eq!(check_rules(&c, GateKind::Approval, &ev).len(), 1);
     }
 
     #[test]

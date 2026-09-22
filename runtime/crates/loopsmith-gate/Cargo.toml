@@ -25,3 +25,4 @@ regex = { workspace = true }
 
 [dev-dependencies]
 loopsmith-util = { workspace = true, features = ["testing"] }
+serde_yaml = { workspace = true }

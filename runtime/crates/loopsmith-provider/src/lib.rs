@@ -16,7 +16,7 @@
 //!   exist. Values are never read, never substituted into a logged command
 //!   line, and never written to the ledger.
 
-use loopsmith_core::{LoopConfig, ProviderKind, ProviderSpec, Tier};
+use loopsmith_core::{FailureClass, LoopConfig, ProviderKind, ProviderSpec, Tier};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -27,7 +27,14 @@ use std::time::{Duration, Instant};
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     #[error("no provider available for tier {tier:?}; tried: {tried}")]
-    NoneAvailable { tier: Tier, tried: String },
+    NoneAvailable {
+        tier: Tier,
+        tried: String,
+        /// The class the cascade's failures add up to: transient if any
+        /// candidate failed in a way that might pass on a second try, and
+        /// "tool unavailable" otherwise.
+        class: FailureClass,
+    },
     #[error("provider `{id}` failed to start: {source}")]
     Spawn {
         id: String,
@@ -42,6 +49,54 @@ pub enum ProviderError {
         code: i32,
         stderr: String,
     },
+}
+
+impl ProviderError {
+    /// Which recovery class this failure belongs to.
+    ///
+    /// A timeout is transient by definition. A non-zero exit is transient only
+    /// when its stderr says so — a rate limit, an overloaded upstream, a
+    /// dropped connection. Every other non-zero exit is the tool, as
+    /// configured, being unable to do the job: a wrong flag or a missing login
+    /// fails identically on the second try, and retrying it with backoff only
+    /// spends the wall-clock budget learning that.
+    pub fn class(&self) -> FailureClass {
+        match self {
+            ProviderError::NoneAvailable { class, .. } => *class,
+            ProviderError::Spawn { .. } => FailureClass::ToolUnavailable,
+            ProviderError::Timeout { .. } => FailureClass::TransientError,
+            ProviderError::Failed { stderr, .. } if looks_transient(stderr) => {
+                FailureClass::TransientError
+            }
+            ProviderError::Failed { .. } => FailureClass::ToolUnavailable,
+        }
+    }
+}
+
+/// Whether a provider's stderr describes a condition that may clear by itself.
+fn looks_transient(stderr: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "rate limit",
+        "rate-limit",
+        "ratelimit",
+        "too many requests",
+        "429",
+        "502",
+        "503",
+        "504",
+        "overloaded",
+        "temporarily",
+        "try again",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "econnreset",
+        "etimedout",
+        "network",
+    ];
+    let s = stderr.to_ascii_lowercase();
+    MARKERS.iter().any(|m| s.contains(m))
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +349,7 @@ pub fn dispatch(
     };
 
     let mut skipped = Vec::new();
+    let mut class = FailureClass::ToolUnavailable;
     for spec in &candidates {
         let av = availability(spec);
         if !av.ok() {
@@ -302,7 +358,12 @@ pub fn dispatch(
         }
         match invoke(spec, req) {
             Ok(resp) => return Ok((resp, skipped)),
-            Err(e) => skipped.push(format!("{}: {e}", spec.id)),
+            Err(e) => {
+                if e.class() == FailureClass::TransientError {
+                    class = FailureClass::TransientError;
+                }
+                skipped.push(format!("{}: {e}", spec.id));
+            }
         }
     }
 
@@ -313,6 +374,7 @@ pub fn dispatch(
         } else {
             skipped.join("; ")
         },
+        class,
     })
 }
 
@@ -511,6 +573,37 @@ mod tests {
         let s = spec("failer", "false", &[]);
         let e = invoke(&s, &req()).unwrap_err();
         assert!(matches!(e, ProviderError::Failed { .. }));
+    }
+
+    #[test]
+    fn a_rate_limit_is_transient_and_a_bad_flag_is_not() {
+        let failed = |stderr: &str| ProviderError::Failed {
+            id: "p".into(),
+            code: 1,
+            stderr: stderr.into(),
+        };
+        assert_eq!(
+            failed("Error: 429 Too Many Requests").class(),
+            FailureClass::TransientError
+        );
+        assert_eq!(
+            failed("upstream is overloaded, please try again").class(),
+            FailureClass::TransientError
+        );
+        assert_eq!(
+            failed("error: unexpected argument '--quiet'").class(),
+            FailureClass::ToolUnavailable
+        );
+    }
+
+    #[test]
+    fn a_timeout_is_transient_and_a_missing_binary_is_not() {
+        let mut s = spec("sleeper", "sleep", &["30"]);
+        s.timeout_seconds = Some(1);
+        assert_eq!(invoke(&s, &req()).unwrap_err().class(), FailureClass::TransientError);
+
+        let missing = spec("ghost", "loopsmith-no-such-binary-xyzzy", &[]);
+        assert_eq!(invoke(&missing, &req()).unwrap_err().class(), FailureClass::ToolUnavailable);
     }
 
     #[test]

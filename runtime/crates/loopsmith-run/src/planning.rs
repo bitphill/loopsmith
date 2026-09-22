@@ -5,9 +5,13 @@
 //! means paying for the discovery.
 
 use crate::context::Run;
+use crate::evidence::collect_evidence;
 use crate::logging::Recorder;
 use crate::phases::Phases;
-use loopsmith_core::LoopConfig;
+use crate::rules;
+use crate::state::RunState;
+use crate::waves::Halt;
+use loopsmith_core::{GateKind, LoopConfig};
 use loopsmith_memory::{LedgerKind, Store};
 use std::path::Path;
 
@@ -46,6 +50,35 @@ pub(crate) fn plan<S: Store>(run: &mut Run<S>) -> Result<Planned, String> {
     }
 
     Ok(Planned { graph, phases })
+}
+
+/// `AwaitingApproval`: the approval rules, when there are any.
+///
+/// An approval rule is a detector like any other, which is what lets a human
+/// approve without loopsmith growing a UI for it: the rule names an artifact —
+/// `APPROVED`, a signed-off ticket, a green deploy check — and the run
+/// proceeds once it is there. With `features.human_approval` off the rules are
+/// skipped and the ledger says so; validation already refuses that in `prod`.
+pub(crate) fn approve<S: Store>(run: &mut Run<S>) -> Result<Option<Halt>, String> {
+    let cfg = run.cfg;
+    let n = cfg.safety.gates.approval.len();
+    if n == 0 {
+        return Ok(None);
+    }
+    let it = run.checkpoint.iteration;
+    if !cfg.features.human_approval {
+        run.rec.entry(
+            it,
+            LedgerKind::RuleEvaluated,
+            format!("{n} approval rule(s) not checked: `features.human_approval` is off"),
+            None,
+        );
+        return Ok(None);
+    }
+    run.enter(RunState::AwaitingApproval, format!("{n} approval rule(s)"))?;
+    let root = run.root();
+    let ev = collect_evidence(cfg, root, Some(&root.join("metrics.json")), vec![]);
+    Ok(rules::apply(run, GateKind::Approval, &ev, it))
 }
 
 /// Install the declared default sub-agents. A failure is recorded and the run

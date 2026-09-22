@@ -4,9 +4,13 @@
 //! [`RunOutcome`]. Everything between is a state machine ([`state`]), and each
 //! state has its own module:
 //!
+//! - `validating` — entry rules, checked against the world before anything
+//!   runs.
 //! - `planning` — schedule the graph, resolve the phases, install declared
-//!   sub-agents.
-//! - `running` — the iteration loop: dispatch, gate, compress, decide.
+//!   sub-agents, then the approval rules.
+//! - `running` — the iteration loop: dispatch, gate, rollback rules, compress,
+//!   decide. Dispatch itself is `waves`: the work queue, join strategies, and
+//!   typed recovery (`recovering`).
 //! - `closing` — enter the outcome state, save, export on certified success.
 //!
 //! The work inside an iteration is split across neighbours so the state
@@ -40,7 +44,11 @@ mod closing;
 mod context;
 mod evidence;
 mod planning;
+mod recovering;
+mod rules;
 mod running;
+mod validating;
+mod waves;
 
 pub use evidence::collect_evidence;
 pub use planning::install_default_skills;
@@ -98,9 +106,14 @@ pub fn execute<S: Store>(
     opts: &RunOptions,
 ) -> Result<RunOutcome, String> {
     let mut run = context::Run::open(cfg, store, opts)?;
-    run.enter(RunState::Validating, if opts.resume { "resuming" } else { "" })?;
-    run.enter(RunState::Planning, "")?;
+    let mut progress = running::Progress::from_checkpoint(&run.checkpoint);
 
+    run.enter(RunState::Validating, if opts.resume { "resuming" } else { "" })?;
+    if let Some(halt) = validating::validate(&mut run) {
+        return closing::close(run, progress, halted(halt));
+    }
+
+    run.enter(RunState::Planning, "")?;
     let mut planned = match planning::plan(&mut run) {
         Ok(p) => p,
         Err(e) => {
@@ -109,11 +122,24 @@ pub fn execute<S: Store>(
             return Err(e);
         }
     };
+    if let Some(halt) = planning::approve(&mut run)? {
+        return closing::close(run, progress, halted(halt));
+    }
 
     run.enter(RunState::Running, "")?;
-    let mut progress = running::Progress::from_checkpoint(&run.checkpoint);
     let stopped = running::iterate(&mut run, &mut planned, &mut progress);
     closing::close(run, progress, stopped)
+}
+
+/// A run stopped by a rule before its first iteration: no rulings to report.
+fn halted(h: waves::Halt) -> running::Stopped {
+    running::Stopped {
+        reason: StopReason::Halted {
+            state: h.state,
+            why: h.why,
+        },
+        verdicts: BTreeMap::new(),
+    }
 }
 
 #[cfg(test)]

@@ -9,14 +9,16 @@
 //! amount of confident output from a node can extend a run past its ceiling.
 
 use crate::context::Run;
-use crate::dispatch::{self, ensure_skills, run_node, NodeOutcome};
 use crate::evidence::{collect_evidence, failing_checks};
 use crate::planning::Planned;
+use crate::recovering::{self, Response};
+use crate::state::RunState;
 use crate::stop::{progress_signature, should_stop, StopInputs, StopReason};
-use crate::{evolve, perturb, publish, summary};
-use loopsmith_core::{NodeSpec, Role};
-use loopsmith_gate::TargetVerdict;
-use loopsmith_memory::{now_ms, Checkpoint, Episode, LedgerKind, Store};
+use crate::waves::{self, Halt};
+use crate::{evolve, perturb, rules, summary};
+use loopsmith_core::{FailureClass, GateKind, Role};
+use loopsmith_gate::{Evidence, TargetVerdict};
+use loopsmith_memory::{Checkpoint, LedgerKind, Store};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The accounting that outlives an iteration.
@@ -42,6 +44,9 @@ pub(crate) struct Progress {
     /// or reused from an earlier one — can be seeded with what its upstream
     /// produced.
     pub published_paths: BTreeMap<String, String>,
+    /// Nodes escalated to a human this run. Not dispatched again until a
+    /// resume, which is how a human answers.
+    pub escalated_nodes: BTreeSet<String>,
 }
 
 impl Progress {
@@ -54,15 +59,22 @@ impl Progress {
             revisions: cp.revisions.clone(),
             previous_verdicts: restore_verdicts(cp),
             published_paths: BTreeMap::new(),
+            escalated_nodes: BTreeSet::new(),
         }
     }
 
     /// Write the counters back, with the rulings that were current.
+    ///
+    /// A run halted before its first ruling has no verdicts to store, and
+    /// overwriting the previous run's with nothing would throw away the only
+    /// record of where it had got to.
     pub fn store_into(&self, cp: &mut Checkpoint, verdicts: &BTreeMap<String, TargetVerdict>) {
         cp.revisions = self.revisions.clone();
         cp.stale_iterations = self.stale_iterations;
         cp.last_signature = self.last_signature.clone();
-        cp.verdicts_json = serde_json::to_string(verdicts).ok();
+        if !verdicts.is_empty() {
+            cp.verdicts_json = serde_json::to_string(verdicts).ok();
+        }
     }
 }
 
@@ -88,32 +100,66 @@ pub(crate) struct Stopped {
 }
 
 /// What every node in one iteration is shown, gathered once.
-struct Inputs {
+pub(crate) struct Inputs {
     /// Per-goal scratchpad notes. Read once per iteration and shared, so a
     /// thread never touches the store mid-dispatch.
-    scratch: BTreeMap<String, String>,
+    pub scratch: BTreeMap<String, String>,
     /// Compressed history from earlier iterations, the same for every node.
-    carried: String,
+    pub carried: String,
     /// The untried sub-agent to attach to this iteration's first builder.
-    explore_now: Option<String>,
-    perturbation: Option<perturb::Perturbation>,
-    seed: u64,
+    pub explore_now: Option<String>,
+    pub perturbation: Option<perturb::Perturbation>,
+    pub seed: u64,
 }
 
 /// What one iteration dispatched, before the gate ruled on it.
 #[derive(Default)]
-struct Dispatched {
-    episodes: Vec<evolve::RanNode>,
+pub(crate) struct Dispatched {
+    pub episodes: Vec<evolve::RanNode>,
     /// Every dispatch including failures, for the summary.
-    log: Vec<(String, String, Role, bool)>,
-    outputs: Vec<(String, String)>,
-    node_skills: BTreeMap<String, Vec<(String, String)>>,
+    pub log: Vec<(String, String, Role, bool)>,
+    pub outputs: Vec<(String, String)>,
+    pub node_skills: BTreeMap<String, Vec<(String, String)>>,
     /// Which node published each path *this iteration*, so two isolated
     /// builders writing the same file is reported rather than resolved by
     /// whichever thread happened to finish last. Deliberately narrower than
     /// `Progress::published_paths`: a node rewriting its own output next
     /// iteration is the normal case and is not a collision.
-    claimed_paths: BTreeMap<String, String>,
+    pub claimed_paths: BTreeMap<String, String>,
+}
+
+/// Where the run stood when an iteration began, for a rollback to return to.
+///
+/// Spend is deliberately not in it. A rollback discards what an iteration
+/// *achieved*; what it cost stays charged, or a run could refund its own
+/// budget by tripping a rollback rule.
+struct Snapshot {
+    completed_nodes: Vec<String>,
+    previous_verdicts: Option<BTreeMap<String, TargetVerdict>>,
+    last_signature: String,
+    stale_iterations: u32,
+    published_paths: BTreeMap<String, String>,
+}
+
+impl Snapshot {
+    fn take(cp: &Checkpoint, p: &Progress) -> Self {
+        Snapshot {
+            completed_nodes: cp.completed_nodes.clone(),
+            previous_verdicts: p.previous_verdicts.clone(),
+            last_signature: p.last_signature.clone(),
+            stale_iterations: p.stale_iterations,
+            published_paths: p.published_paths.clone(),
+        }
+    }
+
+    fn restore(self, cp: &mut Checkpoint, p: &mut Progress) -> BTreeMap<String, TargetVerdict> {
+        cp.completed_nodes = self.completed_nodes;
+        p.last_signature = self.last_signature;
+        p.stale_iterations = self.stale_iterations;
+        p.published_paths = self.published_paths;
+        p.previous_verdicts = self.previous_verdicts.clone();
+        self.previous_verdicts.unwrap_or_default()
+    }
 }
 
 pub(crate) fn iterate<S: Store>(
@@ -127,12 +173,30 @@ pub(crate) fn iterate<S: Store>(
         run.rec
             .entry(it, LedgerKind::IterationStarted, format!("iteration {it}"), None);
 
+        let before = Snapshot::take(&run.checkpoint, progress);
         let mut inputs = prepare(run, progress, it);
-        let dispatched = dispatch_waves(run, planned, progress, &mut inputs, it);
-        let (current, phases_closed) = rule(run, planned, it);
+        let mut explore = inputs.explore_now.take();
+        let mut dispatched = Dispatched::default();
+        let mut halt = waves::dispatch(
+            run,
+            planned,
+            progress,
+            &inputs,
+            &mut explore,
+            &mut dispatched,
+            it,
+        );
+        let (current, phases_closed, ev) = rule(run, planned, it);
+        if halt.is_none() {
+            halt = rules::apply(run, GateKind::Rollback, &ev, it);
+        }
 
         compress(run, progress, &dispatched, &current, &phases_closed, it);
         let exhausted = spend_revisions(run, progress, &dispatched, &current);
+        let repeated = answer_repeated_failures(run, progress, &exhausted, it);
+        if halt.is_none() {
+            halt = repeated;
+        }
 
         // --- what was each skill worth? ------------------------------------
         evolve::record_trials(
@@ -152,6 +216,18 @@ pub(crate) fn iterate<S: Store>(
             },
         );
 
+        if let Some(Halt { state, why }) = halt {
+            let verdicts = if state == RunState::RolledBack {
+                roll_back(run, progress, before, &dispatched, it)
+            } else {
+                current
+            };
+            return Stopped {
+                reason: StopReason::Halted { state, why },
+                verdicts,
+            };
+        }
+
         if let Some(reason) = decide(run, progress, &current, it) {
             return Stopped {
                 reason,
@@ -162,6 +238,65 @@ pub(crate) fn iterate<S: Store>(
         progress.store_into(&mut run.checkpoint, &current);
         run.save();
     }
+}
+
+/// Undo what this iteration achieved, and say what it left on disk.
+fn roll_back<S: Store>(
+    run: &mut Run<S>,
+    progress: &mut Progress,
+    before: Snapshot,
+    dispatched: &Dispatched,
+    it: u32,
+) -> BTreeMap<String, TargetVerdict> {
+    let verdicts = before.restore(&mut run.checkpoint, progress);
+    let written: Vec<String> = dispatched
+        .claimed_paths
+        .keys()
+        .map(|p| format!("`{p}`"))
+        .collect();
+    run.rec.entry(
+        it,
+        LedgerKind::Recovered,
+        if written.is_empty() {
+            format!("rolled back iteration {it}: its progress is discarded; spend stays charged")
+        } else {
+            format!(
+                "rolled back iteration {it}: its progress is discarded and spend stays \
+                 charged. It published {} into the loop root, which loopsmith does not \
+                 revert — check them before resuming",
+                written.join(", ")
+            )
+        },
+        None,
+    );
+    verdicts
+}
+
+/// Answer each node that has just spent its last revision.
+fn answer_repeated_failures<S: Store>(
+    run: &mut Run<S>,
+    progress: &mut Progress,
+    exhausted: &[String],
+    it: u32,
+) -> Option<Halt> {
+    let mut halt = None;
+    for node in exhausted {
+        let why = format!(
+            "revised {} times without satisfying its goals",
+            run.cfg.safety.gates.stop.max_revisions_per_node
+        );
+        match recovering::respond(&run.cfg.safety.recovery, FailureClass::RepeatedFailure, 1) {
+            Response::Escalate => waves::escalate(run, progress, node, &why, it),
+            Response::Halt(state) => {
+                halt.get_or_insert(Halt {
+                    state,
+                    why: format!("`{node}`: {why}"),
+                });
+            }
+            Response::Retry { .. } | Response::Revise | Response::Continue => {}
+        }
+    }
+    halt
 }
 
 /// Gather what every node in this iteration is shown, and decide whether a
@@ -243,306 +378,12 @@ fn prepare<S: Store>(run: &Run<S>, progress: &Progress, it: u32) -> Inputs {
     }
 }
 
-/// Dispatch every wave, in order, and record what came back.
-fn dispatch_waves<S: Store>(
-    run: &mut Run<S>,
-    planned: &Planned,
-    progress: &mut Progress,
-    inputs: &mut Inputs,
-    it: u32,
-) -> Dispatched {
-    let mut out = Dispatched::default();
-    let width = planned.graph.concurrency.max(1);
-
-    for wave in &planned.graph.waves {
-        // Nodes inside a wave are independent by construction, so the only
-        // ordering that matters is between waves. Chunking by the chosen
-        // concurrency keeps the fleet at the size `plan` justified.
-        let mut wave_nodes = wave.nodes.clone();
-        if matches!(&inputs.perturbation, Some(perturb::Perturbation::Reorder)) {
-            perturb::shuffle(&mut wave_nodes, inputs.seed);
-        }
-        for chunk in wave_nodes.chunks(width) {
-            let nodes = eligible_nodes(run, planned, progress, chunk, it);
-            if nodes.is_empty() {
-                continue;
-            }
-
-            if run.opts.dry_run {
-                for n in &nodes {
-                    run.rec.entry(
-                        it,
-                        LedgerKind::NodeDispatched,
-                        format!("dry run: would dispatch `{}` ({:?})", n.id, n.role),
-                        Some(n.id.clone()),
-                    );
-                }
-                continue;
-            }
-
-            // Acquisition touches the store, so it happens before the threads
-            // start.
-            resolve_skills(run, &nodes, inputs, &mut out, it);
-
-            let outcomes = run_chunk(run, planned, progress, inputs, &out, &nodes);
-
-            // Writes happen after the join so the ledger stays ordered.
-            for o in outcomes {
-                record_outcome(run, progress, &mut out, o, it);
-            }
-        }
-    }
-    out
-}
-
-/// The nodes in `chunk` that should run this iteration.
-fn eligible_nodes<'c, S: Store>(
-    run: &Run<'c, S>,
-    planned: &Planned,
-    progress: &Progress,
-    chunk: &[String],
-    it: u32,
-) -> Vec<&'c NodeSpec> {
-    let cfg = run.cfg;
-    let ceiling = cfg.safety.gates.stop.max_revisions_per_node;
-    let mut nodes = Vec::new();
-    for id in chunk {
-        let Some(n) = cfg.execution.graph.nodes.iter().find(|n| &n.id == id) else {
-            continue;
-        };
-        if !planned.phases.eligible(n) {
-            // Silently skipped rather than logged every iteration: a node
-            // waiting on its phase is the normal state of affairs, and one line
-            // per node per iteration would bury the events that matter.
-            continue;
-        }
-        let spent = progress.revisions.get(&n.id).copied().unwrap_or(0);
-        if spent >= ceiling {
-            run.rec.entry(
-                it,
-                LedgerKind::NodeDispatched,
-                format!(
-                    "`{}` has been revised {spent} times without satisfying its goals; \
-                     revision ceiling is {ceiling}, so it is not dispatched again",
-                    n.id
-                ),
-                Some(n.id.clone()),
-            );
-            continue;
-        }
-        nodes.push(n);
-    }
-    nodes
-}
-
-/// Resolve each node's sub-agents, and attach the exploration candidate to the
-/// first builder in the chunk. Judges and adversaries keep a fixed toolset so
-/// the check itself does not drift while the work does.
-fn resolve_skills<S: Store>(
-    run: &Run<S>,
-    nodes: &[&NodeSpec],
-    inputs: &mut Inputs,
-    out: &mut Dispatched,
-    it: u32,
-) {
-    let cfg = run.cfg;
-    let root = run.root();
-    for n in nodes {
-        let mut resolved = ensure_skills(cfg, n, root, &run.rec, it, run.opts.acquire_skills);
-        if n.role == Role::Builder {
-            if let Some(cand) = inputs.explore_now.take() {
-                match loopsmith_skills::acquire(&cand, &n.instruction, &cfg.execution.skills, root)
-                {
-                    Ok(r) => {
-                        run.rec.entry(
-                            it,
-                            LedgerKind::SkillAcquired,
-                            format!("exploring `{}` on `{}`", r.name, n.id),
-                            Some(n.id.clone()),
-                        );
-                        resolved.push((r.name, r.source.as_str().to_string()));
-                    }
-                    Err(e) => run.rec.entry(
-                        it,
-                        LedgerKind::NodeFailed,
-                        format!("could not explore `{cand}`: {e}"),
-                        Some(n.id.clone()),
-                    ),
-                }
-            }
-        }
-        out.node_skills.insert(n.id.clone(), resolved);
-    }
-}
-
-/// Run one chunk of nodes concurrently and collect their outcomes.
-fn run_chunk<S: Store>(
-    run: &Run<S>,
-    planned: &Planned,
-    progress: &Progress,
-    inputs: &Inputs,
-    out: &Dispatched,
-    nodes: &[&NodeSpec],
-) -> Vec<NodeOutcome> {
-    let cfg = run.cfg;
-    let root = run.root();
-    let run_id = run.opts.run_id.as_str();
-    // Snapshotted per chunk rather than borrowed: the map is written to as each
-    // outcome is published, and the threads are still reading it. Every node
-    // in one chunk therefore sees the same published set, which is also the
-    // honest answer — they ran at the same time.
-    let published_now = progress.published_paths.clone();
-    std::thread::scope(|s| {
-        let handles: Vec<_> = nodes
-            .iter()
-            .map(|n| {
-                let skills = out.node_skills.get(&n.id).cloned().unwrap_or_default();
-                let guideline = planned.phases.guideline_for(n).map(str::to_string);
-                let scratch = &inputs.scratch;
-                let carried = inputs.carried.as_str();
-                // Borrowed out here: taking the reference inside the `move`
-                // closure would capture the Option itself.
-                let nudge = inputs.perturbation.as_ref();
-                let published = &published_now;
-                s.spawn(move || {
-                    run_node(
-                        cfg,
-                        n,
-                        root,
-                        run_id,
-                        &dispatch::NodeContext {
-                            scratch,
-                            skills: &skills,
-                            guideline: guideline.as_deref(),
-                            carried,
-                            perturbation: nudge,
-                            published,
-                        },
-                    )
-                })
-            })
-            .collect();
-        handles.into_iter().filter_map(|h| h.join().ok()).collect()
-    })
-}
-
-/// Write down one node's outcome: ledger, episode, spend, and publication.
-fn record_outcome<S: Store>(
-    run: &mut Run<S>,
-    progress: &mut Progress,
-    out: &mut Dispatched,
-    o: NodeOutcome,
-    it: u32,
-) {
-    let cfg = run.cfg;
-    out.log
-        .push((o.node_id.clone(), o.provider_id.clone(), o.role, o.error.is_none()));
-    if let Some(err) = &o.error {
-        run.rec
-            .entry(it, LedgerKind::NodeFailed, err.clone(), Some(o.node_id.clone()));
-        return;
-    }
-    if !o.skipped.is_empty() {
-        run.rec.entry(
-            it,
-            LedgerKind::NodeDispatched,
-            format!("cascade skipped: {}", o.skipped.join("; ")),
-            Some(o.node_id.clone()),
-        );
-    }
-    if o.tokens_estimated {
-        progress.any_estimated = true;
-    }
-    run.checkpoint.tokens_used += o.tokens.unwrap_or(0);
-    run.checkpoint.cost_usd += o.cost_usd.unwrap_or(0.0);
-
-    let node_goals: Vec<String> = cfg
-        .execution
-        .graph
-        .nodes
-        .iter()
-        .find(|n| n.id == o.node_id)
-        .map(|n| n.goals.clone())
-        .unwrap_or_default();
-
-    let _ = run.store.put_episode(&Episode {
-        run_id: run.opts.run_id.clone(),
-        iteration: it,
-        node_id: o.node_id.clone(),
-        role: format!("{:?}", o.role).to_lowercase(),
-        provider_id: o.provider_id.clone(),
-        prompt_digest: o.prompt_digest.clone(),
-        output: o.output.clone(),
-        tokens: o.tokens,
-        cost_usd: o.cost_usd,
-        duration_ms: Some(o.duration_ms),
-        error: None,
-        created_ms: now_ms(),
-    });
-    run.checkpoint.completed_nodes.push(o.node_id.clone());
-    run.rec.entry(
-        it,
-        LedgerKind::NodeSucceeded,
-        format!(
-            "served by `{}` in {}ms, {} tokens{}; {}",
-            o.provider_id,
-            o.duration_ms,
-            o.tokens.unwrap_or(0),
-            if o.tokens_estimated { " (est)" } else { "" },
-            o.isolation.describe()
-        ),
-        Some(o.node_id.clone()),
-    );
-
-    // Isolation is a property of the wave, not of the run. The node wrote in
-    // its own worktree so its neighbours could not tread on it; now the wave
-    // has joined, what it produced is published into the loop root, because
-    // the gate collects evidence there and nowhere else.
-    if !o.seeded.is_empty() {
-        run.rec.entry(
-            it,
-            LedgerKind::NodeDispatched,
-            format!(
-                "`{}` was seeded with {} path(s) published by other nodes: {}",
-                o.node_id,
-                o.seeded.len(),
-                o.seeded.join(", ")
-            ),
-            Some(o.node_id.clone()),
-        );
-    }
-    let published = publish::publish(run.root(), &o.node_id, &o.isolation, &mut out.claimed_paths);
-    for path in &published.published {
-        progress
-            .published_paths
-            .insert(path.clone(), o.node_id.clone());
-    }
-    if let Some(line) = published.describe(&o.node_id) {
-        run.rec.entry(
-            it,
-            if published.conflicts.is_empty() {
-                LedgerKind::NodeSucceeded
-            } else {
-                LedgerKind::NodeFailed
-            },
-            line,
-            Some(o.node_id.clone()),
-        );
-    }
-    out.outputs.push((o.node_id.clone(), o.output.clone()));
-    out.episodes.push(evolve::RanNode {
-        node_id: o.node_id,
-        goals: node_goals,
-        tokens: o.tokens,
-    });
-}
-
 /// Harvest judgments, ask the gate, and close any phase the ruling completes.
 fn rule<S: Store>(
     run: &mut Run<S>,
     planned: &mut Planned,
     it: u32,
-) -> (BTreeMap<String, TargetVerdict>, Vec<String>) {
+) -> (BTreeMap<String, TargetVerdict>, Vec<String>, Evidence) {
     let cfg = run.cfg;
     let root = run.root();
 
@@ -588,7 +429,7 @@ fn rule<S: Store>(
             None,
         );
     }
-    (current, phases_closed)
+    (current, phases_closed, ev)
 }
 
 /// Compress this iteration into a summary the next one reads.

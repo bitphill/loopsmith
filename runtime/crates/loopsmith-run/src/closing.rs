@@ -8,26 +8,42 @@
 
 use crate::context::Run;
 use crate::export;
+use crate::recovering;
 use crate::running::{Progress, Stopped};
 use crate::state::RunState;
 use crate::stop::StopReason;
 use crate::RunOutcome;
+use loopsmith_core::{FailureClass, Recovery};
 use loopsmith_memory::{LedgerKind, Store};
 
 /// The outcome state a stop reason sends the run to.
 ///
-/// A budget ceiling pauses rather than fails: the run did nothing wrong, it
-/// ran out of what it was given, and resuming with a larger budget is the
-/// ordinary next step. A run with nothing moving is blocked, because resuming
-/// it unchanged would stall the same way.
-pub(crate) fn outcome_for(reason: &StopReason) -> RunState {
-    match reason {
-        StopReason::OverallSuccess => RunState::Succeeded,
+/// A budget or iteration ceiling is resource exhaustion, answered by
+/// `safety.recovery.resource_exhaustion` — `pause` by default, because the run
+/// did nothing wrong and a bigger budget is the ordinary next step. A run with
+/// nothing moving is blocked, because resuming it unchanged would stall the
+/// same way. Either becomes `escalated` when the run has questions open for a
+/// human: that, not the ceiling, is what it is actually waiting on.
+pub(crate) fn outcome_for(
+    reason: &StopReason,
+    policy: &Recovery,
+    open_escalations: bool,
+) -> RunState {
+    let state = match reason {
+        StopReason::OverallSuccess => return RunState::Succeeded,
+        StopReason::Halted { state, .. } => return *state,
         StopReason::IterationCap(_)
         | StopReason::WallClock(_)
         | StopReason::TokenBudget(_)
-        | StopReason::CostBudget(_) => RunState::Paused,
+        | StopReason::CostBudget(_) => {
+            recovering::run_outcome(policy, FailureClass::ResourceExhaustion, RunState::Paused)
+        }
         StopReason::NoProgress(_) => RunState::Blocked,
+    };
+    if open_escalations && matches!(state, RunState::Paused | RunState::Blocked) {
+        RunState::Escalated
+    } else {
+        state
     }
 }
 
@@ -37,7 +53,11 @@ pub(crate) fn close<S: Store>(
     stopped: Stopped,
 ) -> Result<RunOutcome, String> {
     let Stopped { reason, verdicts } = stopped;
-    let outcome = outcome_for(&reason);
+    let outcome = outcome_for(
+        &reason,
+        &run.cfg.safety.recovery,
+        !run.checkpoint.escalations.is_empty(),
+    );
 
     progress.store_into(&mut run.checkpoint, &verdicts);
     run.enter(outcome, reason.describe())?;

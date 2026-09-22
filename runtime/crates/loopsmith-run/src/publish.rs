@@ -80,6 +80,61 @@ fn is_reserved(rel: &str) -> bool {
     rel.starts_with("state/") || rel.starts_with("logs/") || rel.starts_with(".git/")
 }
 
+/// Paths an isolated node changed that its constraints forbid it to touch.
+///
+/// Only an isolated node can be checked: its worktree's git status is exactly
+/// what it changed. A node sharing the loop root leaves no such record, so its
+/// `forbidden_paths` remain a prompt-level instruction and nothing more.
+pub fn forbidden_changes(iso: &Isolation, forbidden: &[String]) -> Vec<String> {
+    let Isolation::Worktree { path, .. } = iso else {
+        return Vec::new();
+    };
+    if forbidden.is_empty() {
+        return Vec::new();
+    }
+    let mut hits: Vec<String> = changed_paths(path)
+        .into_iter()
+        .filter(|rel| !is_reserved(rel))
+        .filter(|rel| forbidden.iter().any(|f| path_matches(rel, f)))
+        .collect();
+    hits.sort();
+    hits
+}
+
+/// Whether a relative path falls under a forbidden pattern.
+///
+/// A pattern names a file, a directory (everything beneath it), or a glob: `*`
+/// matches within one path segment, `**` across segments, `?` one character.
+fn path_matches(rel: &str, pattern: &str) -> bool {
+    let p = pattern.trim_start_matches("./").trim_end_matches('/');
+    if p.is_empty() {
+        return false;
+    }
+    if !p.contains(['*', '?']) {
+        return rel == p || rel.starts_with(&format!("{p}/"));
+    }
+    glob(p.as_bytes(), rel.as_bytes()) || glob(format!("{p}/**").as_bytes(), rel.as_bytes())
+}
+
+fn glob(p: &[u8], s: &[u8]) -> bool {
+    match (p.first(), s.first()) {
+        (None, None) => true,
+        (None, Some(_)) => false,
+        (Some(b'*'), _) if p.get(1) == Some(&b'*') => {
+            let rest = p[2..].strip_prefix(b"/").unwrap_or(&p[2..]);
+            (0..=s.len()).any(|i| glob(rest, &s[i..]))
+        }
+        (Some(b'*'), _) => {
+            let rest = &p[1..];
+            let seg = s.iter().position(|&c| c == b'/').unwrap_or(s.len());
+            (0..=seg).any(|i| glob(rest, &s[i..]))
+        }
+        (Some(b'?'), Some(&c)) if c != b'/' => glob(&p[1..], &s[1..]),
+        (Some(&a), Some(&b)) if a == b => glob(&p[1..], &s[1..]),
+        _ => false,
+    }
+}
+
 /// Copy what an isolated node changed back into the loop root.
 ///
 /// `claimed` maps an already-published path to the node that published it, and
@@ -218,6 +273,19 @@ fn parse_status(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_forbidden_pattern_covers_a_file_a_directory_and_a_glob() {
+        assert!(path_matches(".env", ".env"));
+        assert!(path_matches("secrets/prod.key", "secrets/"));
+        assert!(path_matches("secrets/prod.key", "./secrets"));
+        assert!(!path_matches("secrets-public.txt", "secrets"), "a prefix is not a directory");
+        assert!(!path_matches("config/app.pem", "*.pem"), "`*` stays in one segment");
+        assert!(path_matches("config/app.pem", "**/*.pem"));
+        assert!(path_matches("app.pem", "*.pem"));
+        assert!(path_matches("infra/prod/main.tf", "infra/*/main.tf"));
+        assert!(path_matches("infra/prod/modules/x.tf", "infra/prod"));
+    }
     use loopsmith_util::testing::temp_dir;
     use std::path::PathBuf;
 
