@@ -12,8 +12,10 @@ use crate::recovering;
 use crate::running::{Progress, Stopped};
 use crate::state::RunState;
 use crate::stop::StopReason;
+use crate::metrics::RunMetrics;
 use crate::RunOutcome;
-use loopsmith_core::{FailureClass, Recovery};
+use loopsmith_core::{Baseline, FailureClass, Recovery};
+use loopsmith_gate::BaselineVerdict;
 use loopsmith_memory::{LedgerKind, Store};
 
 /// The outcome state a stop reason sends the run to.
@@ -49,7 +51,7 @@ pub(crate) fn outcome_for(
 
 pub(crate) fn close<S: Store>(
     mut run: Run<S>,
-    progress: Progress,
+    mut progress: Progress,
     stopped: Stopped,
 ) -> Result<RunOutcome, String> {
     let Stopped { reason, verdicts } = stopped;
@@ -109,6 +111,12 @@ pub(crate) fn close<S: Store>(
         None
     };
 
+    // Wall clock and spend can cross an alert's line in the last moments of a
+    // run, so the alerts get a final look at the numbers the outcome reports.
+    crate::metrics::watch(&run, &mut progress, it);
+    let metrics = crate::metrics::measure(&run, &progress);
+    let baseline = judge_against_baseline(&run, &metrics, outcome, it);
+
     run.enter(RunState::Closed, "")?;
     let _ = run.store.flush();
 
@@ -124,5 +132,43 @@ pub(crate) fn close<S: Store>(
         proposals: progress.proposals_written,
         log_path: run.rec.log.path().map(|p| p.to_path_buf()),
         export_path,
+        metrics,
+        alerts: progress.alerts,
+        baseline,
     })
+}
+
+/// The regression gate, applied to what this run measured.
+///
+/// Cost, latency, and iterations are only comparable between runs that
+/// succeeded — "mean cost of a successful run" is what the baseline holds — so
+/// a run that did not succeed is measured on completion and pass rate alone.
+fn judge_against_baseline<S: Store>(
+    run: &Run<S>,
+    m: &RunMetrics,
+    outcome: RunState,
+    it: u32,
+) -> BaselineVerdict {
+    let succeeded = outcome == RunState::Succeeded;
+    let measured = Baseline {
+        completion_rate: Some(if succeeded { 1.0 } else { 0.0 }),
+        validation_pass_rate: m.validation_pass_rate,
+        cost_usd: succeeded.then_some(m.cost_usd),
+        latency_seconds: succeeded.then_some(m.wall_clock_seconds as f64),
+        iterations_to_success: succeeded.then_some(m.iterations as f64),
+        measured_at: None,
+    };
+    let verdict = loopsmith_gate::compare_to_baseline(run.cfg, &measured);
+    let line = match &verdict {
+        BaselineVerdict::Off => return verdict,
+        BaselineVerdict::NoBaseline => {
+            "no evolution baseline is frozen, so this run cannot show an improvement — \
+             proposals are recorded, not adoptable"
+                .to_string()
+        }
+        BaselineVerdict::Held => "held the evolution baseline on every metric it names".into(),
+        BaselineVerdict::Regressed(r) => format!("regressed against the evolution baseline: {}", r.join("; ")),
+    };
+    run.rec.entry(it, LedgerKind::GateEvaluated, line, None);
+    verdict
 }

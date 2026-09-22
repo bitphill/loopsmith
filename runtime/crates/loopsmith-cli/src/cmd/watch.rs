@@ -63,11 +63,49 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
             .map(|m| m.into_iter().map(|(k, v)| (k, v.satisfied)).collect())
             .unwrap_or_default();
 
-        let fired = watcher.poll(&cfg.execution.triggers.triggers, &root, schedule::now_unix(), &satisfied);
-        if !fired.is_empty() {
-            let why: Vec<String> = fired.iter().map(|f| f.describe()).collect();
+        let now = schedule::now_unix();
+        let policy = &cfg.execution.triggers;
+        let fired = watcher.poll(&policy.triggers, &root, now, &satisfied);
+
+        // Several triggers can fire in one poll; they start one run between
+        // them, at the shallowest depth any of them allows.
+        let mut depth: Option<u32> = None;
+        let mut why: Vec<String> = Vec::new();
+        for f in &fired {
+            match watcher.admit(policy, f, now) {
+                schedule::Admission::Run { depth: d } => {
+                    depth = Some(depth.map_or(d, |x| x.min(d)));
+                    why.push(f.describe());
+                }
+                schedule::Admission::Duplicate { key } => println!(
+                    "  skipped: {} — the same firing (key `{key}`) already ran inside the \
+                     {}s dedup window",
+                    f.describe(),
+                    policy.dedup_window_seconds
+                ),
+                schedule::Admission::DepthCapped { depth: d } => println!(
+                    "  refused: {} — it would be run {} in a chain this loop started itself, \
+                     and `max_depth` is {}",
+                    f.describe(),
+                    d + 1,
+                    policy.max_depth
+                ),
+            }
+        }
+
+        if let Some(depth) = depth {
+            watcher.started(depth);
             let run_id = format!("run-{}", loopsmith_memory::now_ms());
-            println!("\n[{}] {} — starting {run_id}", runs + 1, why.join("; "));
+            println!(
+                "\n[{}] {} — starting {run_id}{}",
+                runs + 1,
+                why.join("; "),
+                if depth > 0 {
+                    format!(" (chain depth {depth} of {})", policy.max_depth)
+                } else {
+                    String::new()
+                }
+            );
 
             match loopsmith_run::execute(
                 &cfg,

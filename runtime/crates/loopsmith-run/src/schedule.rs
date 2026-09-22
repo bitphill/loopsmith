@@ -11,7 +11,7 @@
 //! that is quietly an hour off twice a year is worse than one that is honestly
 //! in UTC. For wall-clock-independent cadence, prefer `interval`.
 
-use loopsmith_core::{Trigger, TriggerSpec};
+use loopsmith_core::{Trigger, TriggerPolicy, TriggerSpec};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -225,6 +225,25 @@ pub enum Fired {
 }
 
 impl Fired {
+    /// Whether a run's own output can cause this firing. A file the run
+    /// writes, a goal the run satisfies: both can start the run that caused
+    /// them, which is what `max_depth` exists to bound. The clock cannot be
+    /// advanced by a run.
+    pub fn is_self_reachable(&self) -> bool {
+        matches!(self, Fired::FileChange(_) | Fired::GoalSatisfied(_))
+    }
+
+    /// Whether this firing came from `trigger`.
+    fn is_from(&self, trigger: &Trigger) -> bool {
+        match (self, trigger) {
+            (Fired::Cron(a), Trigger::Cron { expr }) => a == expr,
+            (Fired::Interval(a), Trigger::Interval { seconds }) => a == seconds,
+            (Fired::FileChange(a), Trigger::FileChange { path }) => a == path,
+            (Fired::GoalSatisfied(a), Trigger::GoalSatisfied { goal }) => a == goal,
+            _ => false,
+        }
+    }
+
     pub fn describe(&self) -> String {
         match self {
             Fired::Cron(e) => format!("cron `{e}` matched (UTC)"),
@@ -233,6 +252,19 @@ impl Fired {
             Fired::GoalSatisfied(g) => format!("goal `{g}` became satisfied"),
         }
     }
+}
+
+/// Whether a firing becomes a run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Admission {
+    /// Start a run at this depth: 0 for a run the clock started, one more
+    /// than the last run for a run the last run's own output started.
+    Run { depth: u32 },
+    /// The same firing was already acted on inside the dedup window.
+    Duplicate { key: String },
+    /// A self-reachable trigger fired, and the chain it would extend is
+    /// already `max_depth` runs long.
+    DepthCapped { depth: u32 },
 }
 
 /// Trigger state carried between polls.
@@ -247,6 +279,10 @@ pub struct Watcher {
     /// Directory names this watcher must not treat as a change, beyond the
     /// ones every loop writes. In practice: the success export.
     ignore: Vec<String>,
+    /// Idempotency key → when it was last admitted.
+    admitted: BTreeMap<String, i64>,
+    /// Depth of the most recent run this watcher started.
+    depth: u32,
 }
 
 impl Watcher {
@@ -330,6 +366,66 @@ impl Watcher {
             }
         }
         out
+    }
+}
+
+impl Watcher {
+    /// Decide whether one firing starts a run.
+    ///
+    /// **Idempotency.** Every firing has a key: the trigger's own
+    /// `idempotency_key` when it sets one, or else one derived from what fired
+    /// — the cron minute, the interval slot, the file's new mtime. A key seen
+    /// inside `dedup_window_seconds` is a duplicate. A derived key almost never
+    /// repeats; the explicit key is for events noisier than their cause, like
+    /// six files landing in one directory at once.
+    ///
+    /// **Depth.** A clock firing starts a chain at depth 0. A self-reachable
+    /// firing extends the chain the last run started, and is refused once
+    /// that chain is `max_depth` long — which is the difference between a
+    /// `goal_satisfied` trigger that re-runs a loop and one that re-runs it
+    /// forever.
+    pub fn admit(&mut self, policy: &TriggerPolicy, fired: &Fired, now: i64) -> Admission {
+        let key = self.key_for(policy, fired, now);
+        if let Some(&at) = self.admitted.get(&key) {
+            if now - at < policy.dedup_window_seconds as i64 {
+                return Admission::Duplicate { key };
+            }
+        }
+        let depth = if fired.is_self_reachable() {
+            if !policy.may_chain(self.depth) {
+                return Admission::DepthCapped { depth: self.depth };
+            }
+            self.depth + 1
+        } else {
+            0
+        };
+        self.admitted.insert(key, now);
+        Admission::Run { depth }
+    }
+
+    /// Record that a run was started at `depth`, so the next self-reachable
+    /// firing is measured against it.
+    pub fn started(&mut self, depth: u32) {
+        self.depth = depth;
+    }
+
+    fn key_for(&self, policy: &TriggerPolicy, fired: &Fired, now: i64) -> String {
+        let explicit = policy
+            .triggers
+            .iter()
+            .filter(|t| t.enabled)
+            .find(|t| fired.is_from(&t.trigger))
+            .and_then(|t| t.idempotency_key.clone());
+        explicit.unwrap_or_else(|| match fired {
+            Fired::Cron(e) => format!("cron:{e}:{}", now.div_euclid(60)),
+            Fired::Interval(secs) => {
+                format!("interval:{secs}:{}", now.div_euclid((*secs as i64).max(1)))
+            }
+            Fired::FileChange(p) => {
+                format!("file:{p}:{}", self.last_mtime.get(p).copied().unwrap_or(0))
+            }
+            Fired::GoalSatisfied(g) => format!("goal:{g}:{now}"),
+        })
     }
 }
 
@@ -441,6 +537,71 @@ pub fn schtasks_command(label: &str, exe: &Path, config: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn policy(triggers: &[&str], max_depth: u32) -> TriggerPolicy {
+        TriggerPolicy {
+            triggers: triggers
+                .iter()
+                .map(|t| serde_yaml::from_str(t).expect("trigger parses"))
+                .collect(),
+            max_depth,
+            dedup_window_seconds: 300,
+        }
+    }
+
+    #[test]
+    fn an_explicit_key_turns_a_burst_into_one_run() {
+        let p = policy(&["on: { type: file_change, path: inbox }\nidempotency_key: inbox\n"], 5);
+        let mut w = Watcher::default();
+        let f = Fired::FileChange("inbox".into());
+        assert!(matches!(w.admit(&p, &f, 1_000), Admission::Run { .. }));
+        assert_eq!(
+            w.admit(&p, &f, 1_010),
+            Admission::Duplicate { key: "inbox".into() },
+            "six files landing together are one event"
+        );
+        assert!(
+            matches!(w.admit(&p, &f, 1_400), Admission::Run { .. }),
+            "outside the window it is a new event"
+        );
+    }
+
+    #[test]
+    fn derived_keys_let_distinct_firings_through() {
+        let p = policy(&["on: { type: interval, seconds: 60 }\n"], 5);
+        let mut w = Watcher::default();
+        let f = Fired::Interval(60);
+        assert!(matches!(w.admit(&p, &f, 600), Admission::Run { .. }));
+        assert!(matches!(w.admit(&p, &f, 660), Admission::Run { .. }));
+    }
+
+    #[test]
+    fn a_self_reachable_chain_stops_at_max_depth_and_the_clock_resets_it() {
+        let p = policy(
+            &[
+                "on: { type: goal_satisfied, goal: g }\n",
+                "on: { type: cron, expr: \"0 * * * *\" }\n",
+            ],
+            2,
+        );
+        let mut w = Watcher::default();
+        let goal = Fired::GoalSatisfied("g".into());
+        for (now, want) in [(10, 1), (20, 2)] {
+            match w.admit(&p, &goal, now) {
+                Admission::Run { depth } => {
+                    assert_eq!(depth, want);
+                    w.started(depth);
+                }
+                other => panic!("expected a run at depth {want}, got {other:?}"),
+            }
+        }
+        assert_eq!(w.admit(&p, &goal, 30), Admission::DepthCapped { depth: 2 });
+
+        let clock = Fired::Cron("0 * * * *".into());
+        assert_eq!(w.admit(&p, &clock, 3_600), Admission::Run { depth: 0 });
+        w.started(0);
+        assert_eq!(w.admit(&p, &goal, 3_610), Admission::Run { depth: 1 });
+    }
 
     fn civil(y: i64, mo: u32, d: u32, h: u32, mi: u32, wd: u32) -> Civil {
         Civil {

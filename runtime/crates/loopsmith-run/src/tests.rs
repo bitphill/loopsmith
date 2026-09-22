@@ -1057,3 +1057,71 @@ fn a_budget_reached_mid_iteration_stops_further_dispatch() {
     assert!(ledger_says(&s, "mid-budget", LedgerKind::StopGateTriggered, "mid-iteration"));
     let _ = std::fs::remove_dir_all(d);
 }
+
+// --- metrics, alerts, baseline, protected ----------------------------------------
+
+#[test]
+fn an_alert_fires_once_when_its_metric_crosses_the_line() {
+    let (s, d) = store("alert");
+    let mut c = failing(cfg("stop_gates:\n  max_iterations: 3\n  no_progress_iterations: 0\n"));
+    c.safety.alerts = serde_yaml::from_str(
+        "- id: chatty\n  metric: tokens_used\n  above: 1\n  message: spend is running hot\n",
+    )
+    .unwrap();
+    let out = execute(&c, &s, &opts("alert", &d)).unwrap();
+    assert_eq!(out.alerts.len(), 1, "an alert fires once per run, not once per iteration");
+    assert_eq!(out.alerts[0].id, "chatty");
+    assert_eq!(out.alerts[0].iteration, 1);
+    assert!(ledger_says(&s, "alert", LedgerKind::AlertRaised, "spend is running hot"));
+    assert_eq!(out.metrics.iterations, 3);
+    assert_eq!(out.metrics.validation_pass_rate, Some(0.5));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+fn evolving(mut c: LoopConfig, baseline: &str) -> LoopConfig {
+    c.features.self_evolution = true;
+    c.evolution.enabled = true;
+    c.evolution.baseline = Some(serde_yaml::from_str(baseline).unwrap());
+    c
+}
+
+#[test]
+fn a_run_that_misses_the_bar_regresses_a_baseline_that_always_completed() {
+    let (s, d) = store("baseline-bad");
+    let c = evolving(
+        failing(cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n")),
+        "completion_rate: 1.0\n",
+    );
+    let out = execute(&c, &s, &opts("baseline-bad", &d)).unwrap();
+    assert!(
+        matches!(&out.baseline, BaselineVerdict::Regressed(r) if r[0].starts_with("completion_rate")),
+        "{:?}",
+        out.baseline
+    );
+    assert!(ledger_says(&s, "baseline-bad", LedgerKind::GateEvaluated, "regressed"));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_run_inside_the_baseline_holds_it() {
+    let (s, d) = store("baseline-ok");
+    let c = evolving(cfg(""), "completion_rate: 1.0\ncost_usd: 1.0\n");
+    let out = execute(&c, &s, &opts("baseline-ok", &d)).unwrap();
+    assert_eq!(out.baseline, BaselineVerdict::Held);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_proposal_that_would_touch_a_protected_path_is_never_written() {
+    let (s, d) = store("protected");
+    let mut c = failing(cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n"));
+    // The desk suggests switching exploration on. Protect that switch, and the
+    // gate must refuse to let the suggestion be recorded at all.
+    c.execution.skills.explore_candidates = vec!["helper".into()];
+    c.safety.protected.extra_paths = vec!["execution.skills.explore".into()];
+    let out = execute(&c, &s, &opts("protected", &d)).unwrap();
+    assert_eq!(out.proposals, 0);
+    assert!(s.proposals("protected").unwrap().is_empty());
+    assert!(ledger_says(&s, "protected", LedgerKind::GateEvaluated, "the gate refused a proposal"));
+    let _ = std::fs::remove_dir_all(d);
+}

@@ -33,6 +33,7 @@ use super::graph::GraphSpec;
 use super::guidelines::ExecutionGuidelines;
 use super::info::InfoItem;
 use super::memory::MemoryPolicy;
+use super::alerts::Alert;
 use super::protected::Protected;
 use super::providers::ProviderRouting;
 use super::recovery::Recovery;
@@ -131,6 +132,10 @@ pub struct Safety {
     /// What evolution may never touch.
     #[serde(default)]
     pub protected: Protected,
+    /// Thresholds on the run's own metrics that get a human's attention
+    /// without stopping anything.
+    #[serde(default)]
+    pub alerts: Vec<Alert>,
 }
 
 impl Safety {

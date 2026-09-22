@@ -366,7 +366,7 @@ fn handle<'scope, 'env, 'c: 'env, S: Store>(
 
     let Some((class, detail)) = failure_of(node, &outcome) else {
         let violation = record_outcome(run, progress, out, outcome, it);
-        finish(run, q, wave, node, violation.is_none(), it);
+        finish(run, progress, q, wave, violation.is_none(), it);
         if let Some((class, why)) = violation {
             answer_final(run, progress, q, node, class, why, it);
         }
@@ -412,6 +412,7 @@ fn handle<'scope, 'env, 'c: 'env, S: Store>(
                 );
             }
             q.retrying += 1;
+            progress.retries += 1;
             launch(
                 s,
                 tx,
@@ -431,7 +432,7 @@ fn handle<'scope, 'env, 'c: 'env, S: Store>(
         }
         other => {
             let _ = record_outcome(run, progress, out, outcome, it);
-            finish(run, q, wave, node, false, it);
+            finish(run, progress, q, wave, false, it);
             apply_final(run, progress, q, node, other, detail, it);
         }
     }
@@ -444,9 +445,9 @@ fn handle<'scope, 'env, 'c: 'env, S: Store>(
 /// Mark a node's final report against its wave, and check the budget.
 fn finish<S: Store>(
     run: &mut Run<S>,
+    progress: &mut Progress,
     q: &mut Queue,
     wave: usize,
-    _node: &NodeSpec,
     succeeded: bool,
     it: u32,
 ) {
@@ -454,6 +455,8 @@ fn finish<S: Store>(
     t.finished += 1;
     if succeeded {
         t.succeeded += 1;
+    } else {
+        progress.failed_dispatches += 1;
     }
     if !q.spent {
         if let Some(why) = over_budget(run) {

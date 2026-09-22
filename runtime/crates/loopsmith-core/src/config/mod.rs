@@ -18,6 +18,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub mod alerts;
 pub mod bundles;
 pub mod constraints;
 pub mod default_skills;
@@ -39,6 +40,7 @@ pub mod triggers;
 pub mod validation;
 pub mod work;
 
+pub use alerts::{Alert, Metric};
 pub use bundles::{Execution, Intent, Safety};
 pub use constraints::{ConstraintSet, Constraints};
 pub use default_skills::{is_safe_repo_url, DefaultSkill, SkillOrigin, TrustLevel};

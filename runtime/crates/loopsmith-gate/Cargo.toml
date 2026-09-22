@@ -22,7 +22,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 regex = { workspace = true }
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 loopsmith-util = { workspace = true, features = ["testing"] }
-serde_yaml = { workspace = true }

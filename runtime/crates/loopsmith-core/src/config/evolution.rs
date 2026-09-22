@@ -132,36 +132,52 @@ impl Evolution {
     /// Returns `None` when there is no baseline — which is not "pass", and the
     /// caller must not treat it as one.
     pub fn is_improvement(&self, measured: &Baseline) -> Option<bool> {
+        self.regressions(measured).map(|r| r.is_empty())
+    }
+
+    /// Every metric on which `measured` is worse than the baseline by more
+    /// than the tolerance, each as a one-line account. Empty means no
+    /// regression; `None` means there is no baseline to regress against.
+    pub fn regressions(&self, measured: &Baseline) -> Option<Vec<String>> {
         let base = self.baseline.as_ref()?;
         let tol = self.max_regression;
 
         // Higher is better.
         let up = [
-            (base.completion_rate, measured.completion_rate),
-            (base.validation_pass_rate, measured.validation_pass_rate),
+            ("completion_rate", base.completion_rate, measured.completion_rate),
+            (
+                "validation_pass_rate",
+                base.validation_pass_rate,
+                measured.validation_pass_rate,
+            ),
         ];
         // Lower is better.
         let down = [
-            (base.cost_usd, measured.cost_usd),
-            (base.latency_seconds, measured.latency_seconds),
-            (base.iterations_to_success, measured.iterations_to_success),
+            ("cost_usd", base.cost_usd, measured.cost_usd),
+            ("latency_seconds", base.latency_seconds, measured.latency_seconds),
+            (
+                "iterations_to_success",
+                base.iterations_to_success,
+                measured.iterations_to_success,
+            ),
         ];
 
-        for (b, m) in up {
+        let mut out = Vec::new();
+        for (name, b, m) in up {
             if let (Some(b), Some(m)) = (b, m) {
                 if m < b - (b.abs() * tol) {
-                    return Some(false);
+                    out.push(format!("{name} fell to {m:.3} from a baseline of {b:.3}"));
                 }
             }
         }
-        for (b, m) in down {
+        for (name, b, m) in down {
             if let (Some(b), Some(m)) = (b, m) {
                 if m > b + (b.abs() * tol) {
-                    return Some(false);
+                    out.push(format!("{name} rose to {m:.3} from a baseline of {b:.3}"));
                 }
             }
         }
-        Some(true)
+        Some(out)
     }
 }
 

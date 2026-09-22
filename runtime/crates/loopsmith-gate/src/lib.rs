@@ -16,8 +16,8 @@
 //!   which is the failure the whole architecture exists to avoid.
 
 use loopsmith_core::{
-    CompareOp, Detector, GateKind, GateOutcome, GateRule, LoopConfig, Mode, SuccessScenario,
-    Validation, OVERALL,
+    Baseline, CompareOp, Detector, GateKind, GateOutcome, GateRule, LoopConfig, Mode,
+    ProposalKind, SuccessScenario, Validation, OVERALL,
 };
 use loopsmith_memory::{now_ms, GoalState};
 use serde::{Deserialize, Serialize};
@@ -287,6 +287,119 @@ pub fn check_rule(cfg: &LoopConfig, kind: GateKind, rule: &GateRule, ev: &Eviden
     }
 }
 
+/// Whether a proposed change to the config may be recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Admission {
+    Admitted,
+    /// Refused, and why, in a sentence for the ledger.
+    Refused(String),
+}
+
+/// Rule on a proposal before it is written down.
+///
+/// This is where `safety.protected` is enforced. A proposal whose patch would
+/// write to a protected path — or replace a parent a protected path sits
+/// under — is refused outright, whether or not self-evolution is switched on:
+/// a loop that can *suggest* loosening its own gates has already started
+/// arguing with them. With evolution on, a kind not in
+/// `evolution.allowed_kinds` is refused as well.
+///
+/// A patch is read the way a config is — 0.3 keys are relocated first — so an
+/// old-shaped `stop_gates:` fragment is judged as the `safety.gates` it means.
+/// A patch that is not YAML at all is refused: nothing unreadable is admitted.
+pub fn admit_proposal(cfg: &LoopConfig, kind: ProposalKind, patch: Option<&str>) -> Admission {
+    if cfg.evolution_enabled() && !cfg.evolution.allows(kind) {
+        return Admission::Refused(format!(
+            "`{}` is not in `evolution.allowed_kinds`",
+            kind_name(kind)
+        ));
+    }
+    let Some(text) = patch else {
+        return Admission::Admitted;
+    };
+    let Ok(doc) = serde_yaml::from_str::<serde_yaml::Value>(text) else {
+        return Admission::Refused("its patch is not readable YAML".into());
+    };
+    let (doc, _) = loopsmith_core::config::legacy::migrate(&doc);
+    let mut paths = Vec::new();
+    leaf_paths(&doc, String::new(), &mut paths);
+    let touched: Vec<String> = paths
+        .into_iter()
+        .filter(|p| cfg.safety.protected.touches(p))
+        .collect();
+    if touched.is_empty() {
+        Admission::Admitted
+    } else {
+        Admission::Refused(format!(
+            "it would change {}, which `safety.protected` puts beyond evolution",
+            touched
+                .iter()
+                .map(|p| format!("`{p}`"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))
+    }
+}
+
+fn kind_name(kind: ProposalKind) -> &'static str {
+    match kind {
+        ProposalKind::NewSkill => "new_skill",
+        ProposalKind::SkillUpdate => "skill_update",
+        ProposalKind::PromptChange => "prompt_change",
+        ProposalKind::GraphChange => "graph_change",
+        ProposalKind::ProviderRouting => "provider_routing",
+        ProposalKind::ValidationChange => "validation_change",
+        ProposalKind::SuccessCriteria => "success_criteria",
+    }
+}
+
+/// Every dotted path a patch writes. A list is written whole, so its path is a
+/// leaf; so is an empty mapping, which replaces whatever was there.
+fn leaf_paths(v: &serde_yaml::Value, prefix: String, out: &mut Vec<String>) {
+    match v {
+        serde_yaml::Value::Mapping(m) if !m.is_empty() => {
+            for (k, child) in m {
+                let Some(k) = k.as_str() else { continue };
+                let path = if prefix.is_empty() {
+                    k.to_string()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                leaf_paths(child, path, out);
+            }
+        }
+        _ if !prefix.is_empty() => out.push(prefix),
+        _ => {}
+    }
+}
+
+/// How a run measured up against `evolution.baseline`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BaselineVerdict {
+    /// Self-evolution is off, so nothing is compared.
+    Off,
+    /// Evolution is on but no baseline is frozen. This is not a pass.
+    NoBaseline,
+    /// Within tolerance on every metric the baseline names.
+    Held,
+    /// Worse than tolerated, one line per metric.
+    Regressed(Vec<String>),
+}
+
+/// The regression gate: compare what a run measured against the frozen
+/// baseline. The baseline is a protected component, so the loop being judged
+/// cannot move it.
+pub fn compare_to_baseline(cfg: &LoopConfig, measured: &Baseline) -> BaselineVerdict {
+    if !cfg.evolution_enabled() {
+        return BaselineVerdict::Off;
+    }
+    match cfg.evolution.regressions(measured) {
+        None => BaselineVerdict::NoBaseline,
+        Some(r) if r.is_empty() => BaselineVerdict::Held,
+        Some(r) => BaselineVerdict::Regressed(r),
+    }
+}
+
 /// Run one detector. `name` is what the detector is known by — a validation's
 /// name, or a gate rule's id — which is what a judge verdict is matched on and
 /// what a bad regex is reported under.
@@ -515,6 +628,75 @@ validations:
         let ev = Evidence::new(std::env::temp_dir());
         assert!(check_rules(&c, GateKind::Entry, &ev).is_empty());
         assert_eq!(check_rules(&c, GateKind::Approval, &ev).len(), 1);
+    }
+
+    #[test]
+    fn a_proposal_to_loosen_the_gates_is_refused_even_with_evolution_off() {
+        let c = cfg_with(
+            "  - target: g1\n    name: v\n    mode: objective\n    statement: s\n    \
+             detector: { type: script, command: \"true\" }\n",
+        );
+        // The 0.3 spelling is judged as the 1.0 path it means.
+        let old = admit_proposal(&c, ProposalKind::ValidationChange, Some("stop_gates:\n  max_iterations: 500\n"));
+        assert!(matches!(old, Admission::Refused(ref why) if why.contains("safety.gates")), "{old:?}");
+        let new = admit_proposal(&c, ProposalKind::GraphChange, Some("safety:\n  gates: {}\n"));
+        assert!(matches!(new, Admission::Refused(_)));
+        // Replacing a parent overwrites everything protected beneath it.
+        let parent = admit_proposal(&c, ProposalKind::GraphChange, Some("safety: {}\n"));
+        assert!(matches!(parent, Admission::Refused(_)));
+    }
+
+    #[test]
+    fn an_ordinary_proposal_is_admitted() {
+        let c = cfg_with(
+            "  - target: g1\n    name: v\n    mode: objective\n    statement: s\n    \
+             detector: { type: script, command: \"true\" }\n",
+        );
+        assert_eq!(
+            admit_proposal(&c, ProposalKind::NewSkill, Some("execution:\n  skills:\n    explore: true\n")),
+            Admission::Admitted
+        );
+        assert_eq!(admit_proposal(&c, ProposalKind::NewSkill, None), Admission::Admitted);
+    }
+
+    #[test]
+    fn with_evolution_on_only_allowed_kinds_are_admitted() {
+        let mut c = cfg_with(
+            "  - target: g1\n    name: v\n    mode: objective\n    statement: s\n    \
+             detector: { type: script, command: \"true\" }\n",
+        );
+        c.features.self_evolution = true;
+        c.evolution.enabled = true;
+        c.evolution.allowed_kinds = vec![ProposalKind::NewSkill];
+        assert!(matches!(
+            admit_proposal(&c, ProposalKind::GraphChange, None),
+            Admission::Refused(_)
+        ));
+        assert_eq!(admit_proposal(&c, ProposalKind::NewSkill, None), Admission::Admitted);
+    }
+
+    #[test]
+    fn no_baseline_is_reported_as_such_not_as_a_pass() {
+        let mut c = cfg_with(
+            "  - target: g1\n    name: v\n    mode: objective\n    statement: s\n    \
+             detector: { type: script, command: \"true\" }\n",
+        );
+        let measured = Baseline {
+            cost_usd: Some(3.0),
+            ..Baseline::default()
+        };
+        assert_eq!(compare_to_baseline(&c, &measured), BaselineVerdict::Off);
+        c.features.self_evolution = true;
+        c.evolution.enabled = true;
+        assert_eq!(compare_to_baseline(&c, &measured), BaselineVerdict::NoBaseline);
+        c.evolution.baseline = Some(Baseline {
+            cost_usd: Some(1.0),
+            ..Baseline::default()
+        });
+        assert!(matches!(
+            compare_to_baseline(&c, &measured),
+            BaselineVerdict::Regressed(ref r) if r[0].starts_with("cost_usd")
+        ));
     }
 
     #[test]

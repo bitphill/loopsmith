@@ -10,6 +10,50 @@
       ],
       "type": "string"
     },
+    "Alert": {
+      "additionalProperties": false,
+      "description": "One threshold on one metric.",
+      "properties": {
+        "above": {
+          "default": null,
+          "description": "Fire when the metric rises above this.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "below": {
+          "default": null,
+          "description": "Fire when the metric falls below this.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "description": "Stable name, used in the ledger and the run's outcome.",
+          "type": "string"
+        },
+        "message": {
+          "default": null,
+          "description": "What to tell the human, in their words. Defaults to a sentence built from the metric and the threshold.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metric": {
+          "$ref": "#/definitions/Metric"
+        }
+      },
+      "required": [
+        "id",
+        "metric"
+      ],
+      "type": "object"
+    },
     "Backoff": {
       "description": "How a retry spaces its attempts.",
       "oneOf": [
@@ -1218,6 +1262,67 @@
       },
       "type": "object"
     },
+    "Metric": {
+      "description": "A number the engine keeps for every run.",
+      "oneOf": [
+        {
+          "description": "Iterations completed so far.",
+          "enum": [
+            "iterations"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Tokens charged so far, estimated where a provider reported none.",
+          "enum": [
+            "tokens_used"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Dollars charged so far.",
+          "enum": [
+            "cost_usd"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Seconds since the run started.",
+          "enum": [
+            "wall_clock_seconds"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Node dispatches that failed, after recovery had its say.",
+          "enum": [
+            "failed_dispatches"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Dispatches recovery sent round again: retries and revisions.",
+          "enum": [
+            "retries"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Consecutive iterations in which no ruling moved.",
+          "enum": [
+            "stale_iterations"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Fraction of blocking checks passing at the latest ruling, 0 to 1.",
+          "enum": [
+            "validation_pass_rate"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "Mode": {
       "enum": [
         "subjective",
@@ -1595,7 +1700,7 @@
           "type": "string"
         },
         {
-          "description": "The ledger and what is recorded in it.",
+          "description": "The ledger, what is recorded in it, and the alerts that watch it.",
           "enum": [
             "audit"
           ],
@@ -2035,6 +2140,14 @@
       "additionalProperties": false,
       "description": "What must not happen, and when this stops.\n\nEverything here is enforced by compiled code rather than asked of a model, and every part of it is a [`Protected`] component by default — the loop can propose changes to what it does, never to what constrains it.",
       "properties": {
+        "alerts": {
+          "default": [],
+          "description": "Thresholds on the run's own metrics that get a human's attention without stopping anything.",
+          "items": {
+            "$ref": "#/definitions/Alert"
+          },
+          "type": "array"
+        },
         "checks": {
           "default": [],
           "description": "How each goal is checked. Formerly section D.\n\nNamed `checks` rather than `validations` because the old name read as a synonym for `success`, and authors routinely put success criteria here and detectors there.",
@@ -2785,6 +2898,7 @@
         }
       ],
       "default": {
+        "alerts": [],
         "checks": [],
         "gates": {
           "approval": [],

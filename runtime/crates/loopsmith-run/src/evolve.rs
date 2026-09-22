@@ -7,6 +7,7 @@
 use crate::judgment;
 use crate::logging::Recorder;
 use loopsmith_core::{LoopConfig, Role};
+use loopsmith_gate::Admission;
 use loopsmith_gate::{Judgment, TargetVerdict};
 use loopsmith_memory::{
     now_ms, score_skills, Episode, LedgerKind, Proposal, ProposalKind, SkillTrial, Store,
@@ -158,6 +159,7 @@ pub struct Observed<'a> {
 /// repeated every iteration for the length of the loop — a proposals file with
 /// forty identical entries is a proposals file nobody reads.
 struct Desk<'a, S: Store> {
+    cfg: &'a LoopConfig,
     rec: &'a Recorder<'a, S>,
     iteration: u32,
     said: BTreeSet<String>,
@@ -175,6 +177,19 @@ impl<S: Store> Desk<'_, S> {
         headline: String,
     ) -> usize {
         if self.said.contains(&format!("{kind:?}:{subject}")) {
+            return 0;
+        }
+        // The gate rules on a proposal before it is written, the same as on
+        // anything else that could change what the loop is held to.
+        if let Admission::Refused(why) =
+            loopsmith_gate::admit_proposal(self.cfg, evolution_kind(kind), patch.as_deref())
+        {
+            self.rec.entry(
+                self.iteration,
+                LedgerKind::GateEvaluated,
+                format!("the gate refused a proposal to {headline}: {why}"),
+                None,
+            );
             return 0;
         }
         let p = Proposal {
@@ -225,9 +240,9 @@ fn propose_reshape<S: Store>(cfg: &LoopConfig, desk: &Desk<'_, S>, exhausted: &[
                 cfg.safety.gates.stop.max_revisions_per_node
             ),
             Some(format!(
-                "graph:\n  nodes:\n    - id: {node_id}-prepare\n      role: researcher\n      \
-                 instruction: gather what `{node_id}` needs before it runs\n    - id: {node_id}\n      \
-                 depends_on: [{node_id}-prepare]"
+                "execution:\n  graph:\n    nodes:\n      - id: {node_id}-prepare\n        \
+                 role: researcher\n        instruction: gather what `{node_id}` needs before it \
+                 runs\n      - id: {node_id}\n        depends_on: [{node_id}-prepare]"
             )),
             format!("reshape the graph around `{node_id}`"),
         );
@@ -305,7 +320,7 @@ fn propose_try_skill<S: Store>(
              off, so it has never been tried. Targets are still unsatisfied; switching exploration \
              on would let the loop find out whether it helps, at the cost of the extra dispatch"
         ),
-        Some("skills:\n  explore: true".into()),
+        Some("execution:\n  skills:\n    explore: true".into()),
         format!("try `{candidate}`"),
     )
 }
@@ -320,6 +335,7 @@ pub fn write_proposals<S: Store>(
     observed: &Observed,
 ) -> usize {
     let desk = Desk {
+        cfg,
         rec,
         iteration,
         said: rec
@@ -377,7 +393,10 @@ fn skill_proposals<S: Store>(cfg: &LoopConfig, desk: &Desk<'_, S>) -> usize {
                 "goals were satisfied in {:.0}% of {n} trials using `{skill}`; it is not in the config",
                 rate * 100.0
             ),
-            Some(format!("skills: [{skill}]")),
+            Some(format!(
+                "execution:\n  graph:\n    nodes:\n      - id: <the node that should use it>\n        \
+                 skills: [{skill}]"
+            )),
             format!("adopt `{skill}`"),
         );
     }
@@ -397,3 +416,18 @@ fn skill_proposals<S: Store>(cfg: &LoopConfig, desk: &Desk<'_, S>) -> usize {
     }
     written
 }
+
+/// The evolution policy's name for a kind of proposal.
+///
+/// The desk's kinds say what the loop observed; the policy's say what part of
+/// the config would change. Every desk kind lands on exactly one.
+fn evolution_kind(kind: ProposalKind) -> loopsmith_core::ProposalKind {
+    use loopsmith_core::ProposalKind as K;
+    match kind {
+        ProposalKind::AdoptSkill | ProposalKind::TrySkill => K::NewSkill,
+        ProposalKind::DropSkill => K::SkillUpdate,
+        ProposalKind::ReshapeGraph => K::GraphChange,
+        ProposalKind::ChangeCriteria => K::ValidationChange,
+    }
+}
+

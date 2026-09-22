@@ -219,6 +219,7 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
 
         recovery: Recovery::default(),
         protected: Protected::default(),
+        alerts: Vec::new(),
         },
 
         execution: Execution {

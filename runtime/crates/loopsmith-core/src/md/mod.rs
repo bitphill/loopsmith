@@ -120,6 +120,7 @@ pub(crate) fn section_shape(section: &str) -> Option<SectionShape> {
         "intent.goals" => (None, "name"),
         "intent.success" => (None, "name"),
         "safety.checks" => (None, "name"),
+        "safety.alerts" => (None, "id"),
         "execution.triggers" => (Some("triggers"), "on.type"),
         "execution.phases" => (Some("items"), "name"),
         "execution.default_skills" => (None, "name"),
@@ -170,6 +171,7 @@ pub(crate) const SECTION_PATHS: &[(&str, &str, &str)] = &[
     ("limits", "safety.limits", "Limits"),
     ("recovery", "safety.recovery", "Recovery"),
     ("protected", "safety.protected", "Protected"),
+    ("alerts", "safety.alerts", "Alerts"),
     ("evolution", "evolution", "Evolution"),
 ];
 

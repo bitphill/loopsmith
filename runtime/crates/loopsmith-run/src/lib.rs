@@ -30,6 +30,7 @@ pub mod evolve;
 pub mod export;
 pub mod judgment;
 pub mod logging;
+pub mod metrics;
 pub mod perturb;
 pub mod phases;
 pub mod prompts;
@@ -51,6 +52,8 @@ mod validating;
 mod waves;
 
 pub use evidence::collect_evidence;
+pub use loopsmith_gate::BaselineVerdict;
+pub use metrics::{RaisedAlert, RunMetrics};
 pub use planning::install_default_skills;
 pub use state::{IllegalTransition, Lifecycle, RunState};
 pub use stop::StopReason;
@@ -92,6 +95,12 @@ pub struct RunOutcome {
     /// Where the reusable success package was written. Only ever `Some` when
     /// the gate certified overall success.
     pub export_path: Option<PathBuf>,
+    /// What the run measured about itself.
+    pub metrics: RunMetrics,
+    /// Alerts from `safety.alerts` that fired.
+    pub alerts: Vec<RaisedAlert>,
+    /// How this run measured up against `evolution.baseline`.
+    pub baseline: BaselineVerdict,
 }
 
 /// Run a loop from wherever its checkpoint says it is, until something stops

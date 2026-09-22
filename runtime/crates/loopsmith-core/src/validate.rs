@@ -90,6 +90,7 @@ pub fn validate(cfg: &LoopConfig) -> ValidationReport {
     check_providers(cfg, &mut r);
     check_gate_rules(cfg, &mut r);
     check_recovery(cfg, &mut r);
+    check_alerts(cfg, &mut r);
     r
 }
 
@@ -509,12 +510,57 @@ fn check_gate_rules(cfg: &LoopConfig, r: &mut ValidationReport) {
             Issue::warn("features.human_approval", msg)
         });
     }
+    if cfg.evolution_enabled() && cfg.evolution.baseline.is_none() {
+        r.issues.push(Issue::warn(
+            "evolution.baseline",
+            "self-evolution is on with no baseline, so no proposal can ever be shown to be an \
+             improvement; they are recorded, never adoptable",
+        ));
+    }
     if cfg.environment == crate::Environment::Prod && !cfg.evolution.require_approval {
         r.issues.push(Issue::err(
             "evolution.require_approval",
             "must stay on in `prod`: a production loop may propose changes to itself, never \
              adopt them unreviewed",
         ));
+    }
+}
+
+/// Alert thresholds.
+fn check_alerts(cfg: &LoopConfig, r: &mut ValidationReport) {
+    use crate::Metric;
+    let mut seen = BTreeSet::new();
+    for (i, a) in cfg.safety.alerts.iter().enumerate() {
+        let field = format!("safety.alerts[{i}]");
+        if a.id.trim().is_empty() {
+            r.issues.push(Issue::err(format!("{field}.id"), "must not be empty"));
+        } else if !seen.insert(a.id.as_str()) {
+            r.issues.push(Issue::err(
+                format!("{field}.id"),
+                format!("`{}` is used twice", a.id),
+            ));
+        }
+        match (a.above, a.below) {
+            (None, None) => r.issues.push(Issue::err(
+                field.clone(),
+                "needs `above`, `below`, or both; without one it can never fire",
+            )),
+            (Some(hi), Some(lo)) if lo >= hi => r.issues.push(Issue::warn(
+                field.clone(),
+                format!("fires on anything above {hi} or below {lo}, which is every value"),
+            )),
+            _ => {}
+        }
+        if a.metric == Metric::ValidationPassRate {
+            for t in [a.above, a.below].into_iter().flatten() {
+                if !(0.0..=1.0).contains(&t) {
+                    r.issues.push(Issue::warn(
+                        field.clone(),
+                        format!("validation_pass_rate is a fraction from 0 to 1; {t} is outside it"),
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -809,6 +855,23 @@ pre_execution:
         assert_eq!(warnings_on(&c, "features.human_approval"), 1);
         c.environment = crate::Environment::Prod;
         assert_eq!(errors_on(&c, "features.human_approval"), 1);
+    }
+
+    #[test]
+    fn evolution_without_a_baseline_is_warned_about() {
+        let mut c = minimal();
+        c.features.self_evolution = true;
+        c.evolution.enabled = true;
+        assert_eq!(warnings_on(&c, "evolution.baseline"), 1);
+        c.evolution.baseline = Some(Default::default());
+        assert_eq!(warnings_on(&c, "evolution.baseline"), 0);
+    }
+
+    #[test]
+    fn an_alert_that_can_never_fire_is_refused() {
+        let mut c = minimal();
+        c.safety.alerts = serde_yaml::from_str("- id: a\n  metric: cost_usd\n").unwrap();
+        assert_eq!(errors_on(&c, "safety.alerts[0]"), 1);
     }
 
     #[test]

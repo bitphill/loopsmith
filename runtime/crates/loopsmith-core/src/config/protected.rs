@@ -28,7 +28,7 @@ pub enum ProtectedComponent {
     Approvals,
     /// Credential and secret configuration.
     Credentials,
-    /// The ledger and what is recorded in it.
+    /// The ledger, what is recorded in it, and the alerts that watch it.
     Audit,
     /// `evolution.baseline` — what a proposal is measured against. A loop that
     /// can move its own baseline can declare any change an improvement.
@@ -55,7 +55,7 @@ impl ProtectedComponent {
             ProtectedComponent::Credentials => {
                 &["execution.providers.providers.requires_env", "secrets"]
             }
-            ProtectedComponent::Audit => &["observability"],
+            ProtectedComponent::Audit => &["safety.alerts"],
             ProtectedComponent::Baselines => &["evolution.baseline"],
             ProtectedComponent::Retention => &["execution.memory.namespaces"],
             ProtectedComponent::Environment => &["environment", "features"],
@@ -119,6 +119,15 @@ impl Protected {
         covered.into_iter().any(|p| under(path, p))
     }
 
+    /// Whether writing `path` would change anything protected: the path is
+    /// protected itself, or a protected path sits beneath it.
+    ///
+    /// The second half is the one that matters for a patch. Replacing all of
+    /// `safety` touches no *protected* key by name, and overwrites every one.
+    pub fn touches(&self, path: &str) -> bool {
+        self.is_protected(path) || self.paths().iter().any(|p| under(p, path))
+    }
+
     /// Every protected path, for reporting.
     pub fn paths(&self) -> Vec<String> {
         let mut out: Vec<String> = self
@@ -166,6 +175,15 @@ mod tests {
         assert!(p.is_protected("safety.limits"));
         assert!(p.is_protected("safety.limits.global.rules"));
         assert!(!p.is_protected("safety.limits_extra"));
+    }
+
+    #[test]
+    fn replacing_a_parent_touches_the_protected_children_beneath_it() {
+        let p = Protected::default();
+        assert!(p.touches("safety"), "all of safety includes its gates");
+        assert!(p.touches("safety.gates.stop.max_iterations"));
+        assert!(!p.touches("safety.checks"), "checks are not protected");
+        assert!(!p.touches("execution.skills.explore"));
     }
 
     #[test]

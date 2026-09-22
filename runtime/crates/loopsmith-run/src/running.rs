@@ -47,6 +47,12 @@ pub(crate) struct Progress {
     /// Nodes escalated to a human this run. Not dispatched again until a
     /// resume, which is how a human answers.
     pub escalated_nodes: BTreeSet<String>,
+    /// Final dispatch failures this run, after recovery had its say.
+    pub failed_dispatches: u32,
+    /// Dispatches recovery sent round again.
+    pub retries: u32,
+    /// Alerts raised this run. Each fires at most once.
+    pub alerts: Vec<crate::metrics::RaisedAlert>,
 }
 
 impl Progress {
@@ -60,6 +66,9 @@ impl Progress {
             previous_verdicts: restore_verdicts(cp),
             published_paths: BTreeMap::new(),
             escalated_nodes: BTreeSet::new(),
+            failed_dispatches: 0,
+            retries: 0,
+            alerts: Vec::new(),
         }
     }
 
@@ -192,6 +201,7 @@ pub(crate) fn iterate<S: Store>(
         }
 
         compress(run, progress, &dispatched, &current, &phases_closed, it);
+        crate::metrics::watch(run, progress, it);
         let exhausted = spend_revisions(run, progress, &dispatched, &current);
         let repeated = answer_repeated_failures(run, progress, &exhausted, it);
         if halt.is_none() {

@@ -73,6 +73,19 @@ pub fn report_outcome(out: &RunOutcome) {
             out.cost_usd
         );
     }
+    for a in &out.alerts {
+        println!("alert:       `{}` {} (iteration {})", a.id, a.message, a.iteration);
+    }
+    match &out.baseline {
+        loopsmith_run::BaselineVerdict::Off => {}
+        loopsmith_run::BaselineVerdict::NoBaseline => {
+            println!("baseline:    none frozen; proposals are recorded, not adoptable")
+        }
+        loopsmith_run::BaselineVerdict::Held => println!("baseline:    held"),
+        loopsmith_run::BaselineVerdict::Regressed(r) => {
+            println!("baseline:    REGRESSED — {}", r.join("; "))
+        }
+    }
     if out.proposals > 0 {
         println!(
             "proposals:   {} written — review them, the loop cannot apply them itself",
