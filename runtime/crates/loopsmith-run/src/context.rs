@@ -6,9 +6,10 @@
 //! can this state touch" has one answer.
 
 use crate::logging::{Recorder, RunLog};
+use crate::recovering::{self, Response};
 use crate::state::{Lifecycle, RunState};
 use crate::RunOptions;
-use loopsmith_core::LoopConfig;
+use loopsmith_core::{FailureClass, LoopConfig};
 use loopsmith_memory::{now_ms, Checkpoint, LedgerKind, Store};
 use std::path::Path;
 use std::time::Instant;
@@ -39,7 +40,7 @@ impl<'a, S: Store> Run<'a, S> {
         );
 
         let stored = if opts.resume {
-            store.checkpoint(&opts.run_id).map_err(|e| e.to_string())?
+            read_checkpoint(cfg, store, &rec, &opts.run_id)?
         } else {
             None
         };
@@ -125,3 +126,54 @@ impl<'a, S: Store> Run<'a, S> {
         self.checkpoint.updated_ms = now_ms();
     }
 }
+
+/// Read the checkpoint a resume starts from, answering a failed read with the
+/// `corrupted_state` policy.
+///
+/// A retry is honoured: a store behind a network filesystem can fail a read
+/// and pass the next. Every other answer ends in a refusal, and deliberately
+/// so. `restore_checkpoint` has nothing to restore — the store keeps one
+/// checkpoint per run, and it is the one that just failed — and starting the
+/// run from a blank checkpoint would hand it a fresh iteration budget, a zero
+/// spend, and a no-progress counter of zero, which is every ceiling it had
+/// already spent against, refunded.
+fn read_checkpoint<S: Store>(
+    cfg: &LoopConfig,
+    store: &S,
+    rec: &Recorder<S>,
+    run_id: &str,
+) -> Result<Option<Checkpoint>, String> {
+    let mut attempt = 0u32;
+    loop {
+        let err = match store.checkpoint(run_id) {
+            Ok(cp) => return Ok(cp),
+            Err(e) => e,
+        };
+        attempt += 1;
+        let class = FailureClass::CorruptedState;
+        let response = recovering::respond(&cfg.safety.recovery, class, attempt);
+        rec.entry(
+            0,
+            LedgerKind::Recovered,
+            format!(
+                "the checkpoint for `{run_id}` could not be read ({err}) — {}",
+                recovering::describe(class, &response, attempt)
+            ),
+            None,
+        );
+        match response {
+            Response::Retry { delay_seconds } => {
+                std::thread::sleep(std::time::Duration::from_secs(delay_seconds));
+            }
+            _ => {
+                return Err(format!(
+                    "the checkpoint for `{run_id}` could not be read ({err}). Nothing was \
+                     resumed: no earlier checkpoint is kept to restore, and starting over would \
+                     refund every budget the run had spent. Start it under a new run id, or \
+                     repair the store."
+                ))
+            }
+        }
+    }
+}
+

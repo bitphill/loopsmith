@@ -240,11 +240,14 @@ fn sleeper_provider() -> (&'static str, std::time::Duration) {
             std::time::Duration::from_millis(2200),
         )
     } else {
-        // Serial: ~1.5s.
+        // One second each, the same as Windows. Serial is at least 3s; the
+        // ceiling sits well clear of both that and the ~1s a parallel wave
+        // takes, because the overhead between them grows with machine load
+        // and a half-second sleeper left too little room for it.
         (
             "    - id: sleeper\n      kind: byok\n      command: sleep\n      \
-             args: [\"0.5\"]\n",
-            std::time::Duration::from_millis(1200),
+             args: [\"1\"]\n",
+            std::time::Duration::from_millis(2200),
         )
     }
 }
@@ -1148,5 +1151,82 @@ fn a_container_node_without_an_image_degrades_to_a_worktree_and_still_runs() {
         .collect();
     assert_eq!(said.len(), 1, "said once, not once per iteration");
     assert!(said[0].detail.contains("no image"), "{}", said[0].detail);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+// --- corrupted state -----------------------------------------------------------------
+
+/// A store whose checkpoint reads fail a set number of times, then work.
+struct Flaky {
+    inner: SledStore,
+    failures: std::sync::atomic::AtomicU32,
+}
+
+impl Flaky {
+    fn new(inner: SledStore, failures: u32) -> Self {
+        Flaky {
+            inner,
+            failures: std::sync::atomic::AtomicU32::new(failures),
+        }
+    }
+}
+
+type R<T> = loopsmith_memory::Result<T>;
+
+impl Store for Flaky {
+    fn put_episode(&self, ep: &loopsmith_memory::Episode) -> R<u64> { self.inner.put_episode(ep) }
+    fn episodes(&self, r: &str) -> R<Vec<loopsmith_memory::Episode>> { self.inner.episodes(r) }
+    fn set_goal_state(&self, r: &str, st: &loopsmith_memory::GoalState) -> R<()> { self.inner.set_goal_state(r, st) }
+    fn goal_state(&self, r: &str, t: &str) -> R<Option<loopsmith_memory::GoalState>> { self.inner.goal_state(r, t) }
+    fn goal_states(&self, r: &str) -> R<BTreeMap<String, loopsmith_memory::GoalState>> { self.inner.goal_states(r) }
+    fn append_ledger(&self, e: &loopsmith_memory::LedgerEntry) -> R<u64> { self.inner.append_ledger(e) }
+    fn ledger(&self, r: &str) -> R<Vec<loopsmith_memory::LedgerEntry>> { self.inner.ledger(r) }
+    fn save_checkpoint(&self, cp: &Checkpoint) -> R<()> { self.inner.save_checkpoint(cp) }
+    fn checkpoint(&self, r: &str) -> R<Option<Checkpoint>> {
+        use std::sync::atomic::Ordering;
+        if self.failures.load(Ordering::SeqCst) > 0 {
+            self.failures.fetch_sub(1, Ordering::SeqCst);
+            return Err(loopsmith_memory::MemError::Backend("checksum mismatch".into()));
+        }
+        self.inner.checkpoint(r)
+    }
+    fn set_scratchpad(&self, r: &str, k: &str, v: &str) -> R<()> { self.inner.set_scratchpad(r, k, v) }
+    fn scratchpad(&self, r: &str, k: &str) -> R<Option<String>> { self.inner.scratchpad(r, k) }
+    fn put_summary(&self, s: &loopsmith_memory::IterationSummary) -> R<()> { self.inner.put_summary(s) }
+    fn summaries(&self, r: &str) -> R<Vec<loopsmith_memory::IterationSummary>> { self.inner.summaries(r) }
+    fn put_skill_trial(&self, t: &loopsmith_memory::SkillTrial) -> R<u64> { self.inner.put_skill_trial(t) }
+    fn skill_trials(&self) -> R<Vec<loopsmith_memory::SkillTrial>> { self.inner.skill_trials() }
+    fn put_proposal(&self, p: &loopsmith_memory::Proposal) -> R<u64> { self.inner.put_proposal(p) }
+    fn proposals(&self, r: &str) -> R<Vec<loopsmith_memory::Proposal>> { self.inner.proposals(r) }
+    fn runs(&self) -> R<Vec<String>> { self.inner.runs() }
+    fn flush(&self) -> R<()> { self.inner.flush() }
+}
+
+#[test]
+fn an_unreadable_checkpoint_is_never_resumed_over_with_a_fresh_budget() {
+    // The default answer to corrupted state is to restore the last good
+    // checkpoint. There is no earlier one kept, so the only honest outcome is
+    // to refuse: starting from nothing would refund every ceiling the run had
+    // already spent against.
+    let (s, d) = store("corrupt");
+    let s = Flaky::new(s, 1);
+    let err = execute(&cfg(""), &s, &resumed("corrupt", &d)).err().expect("must refuse");
+    assert!(err.contains("could not be read"), "{err}");
+    assert!(ledger_says(&s.inner, "corrupt", LedgerKind::Recovered, "corrupted state"));
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_checkpoint_read_that_fails_once_is_retried_when_the_policy_says_so() {
+    let (s, d) = store("corrupt-retry");
+    let s = Flaky::new(s, 1);
+    let mut c = cfg("");
+    c.safety.recovery.corrupted_state = loopsmith_core::RecoveryAction::Retry {
+        max_attempts: 3,
+        base_delay_seconds: 0,
+        backoff: loopsmith_core::Backoff::Fixed,
+    };
+    let out = execute(&c, &s, &resumed("corrupt-retry", &d)).unwrap();
+    assert_eq!(out.state, RunState::Succeeded);
     let _ = std::fs::remove_dir_all(d);
 }
