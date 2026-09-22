@@ -8,59 +8,52 @@
 //! bullet ends where the line ends. Values are therefore emitted `trim_end`ed.
 //! Nothing else is lost.
 
-use super::section_shape;
+use super::{section_shape, SECTION_PATHS};
 use crate::LoopConfig;
 use serde_yaml::Value;
 
-/// Section order and headings, matching the template so a rendered config and
-/// `LOOP-TEMPLATE.md` read the same way. Absent sections are skipped.
-const SECTIONS: &[(&str, &str)] = &[
-    ("information", "A. Information"),
-    ("pre_execution", "B. Pre-execution"),
-    ("goals", "C. Goals"),
-    ("validations", "D. Validations"),
-    ("success", "E. Success"),
-    ("stop_gates", "F. Stop gates"),
-    ("schedules", "G. Schedules"),
-    ("constraints", "H. Constraints"),
-    ("execution_guidelines", "I. Execution guidelines"),
-    ("default_skills", "J. Default skills"),
-    ("graph", "Graph"),
-    ("providers", "Providers"),
-    ("skills", "Skills"),
-    ("context", "Context"),
-];
-
 /// Top-level keys that are not sections; they render as preamble bullets.
-const PREAMBLE: &[&str] = &["version", "description"];
+const PREAMBLE: &[&str] = &["version", "description", "environment", "features"];
 
-/// Every top-level key must be either a section, a preamble field, or `name`.
-/// A key in none of those lists is silently dropped on render, which is how the
-/// `context` section went missing until a round-trip test caught it.
+/// Resolve a dotted path against a serialised config.
+fn at<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut cur = root;
+    for part in path.split('.') {
+        cur = cur.get(part)?;
+    }
+    Some(cur)
+}
+
+/// Every leaf of the config must be reachable from [`SECTION_PATHS`] or
+/// [`PREAMBLE`]. A leaf in neither is silently dropped on render, which is how
+/// the `context` section went missing until a round-trip test caught it.
 #[cfg(test)]
-fn covered_keys() -> Vec<&'static str> {
-    let mut v: Vec<&'static str> = SECTIONS.iter().map(|(k, _)| *k).collect();
+fn covered_paths() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = SECTION_PATHS.iter().map(|(_, p, _)| *p).collect();
     v.extend_from_slice(PREAMBLE);
     v.push("name");
     v
 }
 
 pub fn render_md(cfg: &LoopConfig) -> String {
-    let Ok(Value::Mapping(root)) = serde_yaml::to_value(cfg) else {
+    let Ok(root) = serde_yaml::to_value(cfg) else {
         // `LoopConfig` always serializes to a mapping; this arm exists so the
         // function has no panic in it.
         return String::new();
     };
+    if !root.is_mapping() {
+        return String::new();
+    }
 
     let mut out = String::new();
     let name = root
-        .get(Value::from("name"))
+        .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("unnamed-loop");
     out.push_str(&format!("# {name}\n\n"));
 
     for key in PREAMBLE {
-        if let Some(v) = root.get(Value::from(*key)) {
+        if let Some(v) = root.get(*key) {
             if !is_blank(v) {
                 push_field(&mut out, key, v, 0);
             }
@@ -70,15 +63,15 @@ pub fn render_md(cfg: &LoopConfig) -> String {
         out.push('\n');
     }
 
-    for (key, heading) in SECTIONS {
-        let Some(value) = root.get(Value::from(*key)) else {
+    for (_, path, heading) in SECTION_PATHS {
+        let Some(value) = at(&root, path) else {
             continue;
         };
         if is_blank(value) {
             continue;
         }
         out.push_str(&format!("## {heading}\n\n"));
-        render_section(&mut out, key, value);
+        render_section(&mut out, path, value);
         out.push('\n');
     }
     out
@@ -134,17 +127,22 @@ fn render_entry(out: &mut String, item: &Value, key_field: &str) {
         push_value_inline(out, item, 0);
         return;
     };
-    let heading = m
-        .get(Value::from(key_field))
+    let heading = super::nested_get(m, key_field)
         .and_then(|v| v.as_str())
         .unwrap_or("unnamed");
     out.push_str(&format!("### {heading}\n"));
-    for (k, v) in m {
-        let k = k.as_str().unwrap_or_default();
-        if k == key_field || is_blank(v) {
+
+    // Render everything except the field the heading already carries. Removing
+    // it from a clone rather than skipping it inline is what makes a dotted
+    // key work: `on.type` has to come out of the nested mapping, and the
+    // now-empty `on` has to come out with it.
+    let mut rest = m.clone();
+    super::nested_remove(&mut rest, key_field);
+    for (k, v) in &rest {
+        if is_blank(v) {
             continue;
         }
-        push_field(out, k, v, 0);
+        push_field(out, k.as_str().unwrap_or_default(), v, 0);
     }
     out.push('\n');
 }
@@ -243,39 +241,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_renderer_knows_about_every_top_level_config_key() {
-        // Serialise a default-ish config and check that every key it produces
-        // has somewhere to go. Without this, adding a section to `LoopConfig`
-        // and forgetting `SECTIONS` loses it silently on the markdown path.
+    fn the_renderer_knows_about_every_config_section() {
+        // Serialise a config and check that every section it produces has
+        // somewhere to go. Sections now sit one level inside a bundle, so this
+        // walks two levels: a top-level key is covered if it is itself listed
+        // (`name`, the preamble, a bundle that *is* a section like `evolution`)
+        // or if every key beneath it is.
+        //
+        // Without this, adding a section to a bundle and forgetting
+        // SECTION_PATHS loses it silently on the markdown path — which is
+        // exactly what happened to `context` once already.
         let cfg = crate::parse_str(
             r#"
 name: t
-goals: [{ name: g1, description: a sufficiently long goal description }]
-validations:
-  - target: g1
-    name: v
-    mode: objective
-    statement: it exists
-    detector: { type: file_exists, path: out.txt }
+intent:
+  goals: [{ name: g1, description: a sufficiently long goal description }]
+safety:
+  checks:
+    - target: g1
+      name: v
+      mode: objective
+      statement: it exists
+      detector: { type: file_exists, path: out.txt }
 "#,
             "test",
         )
         .expect("parses");
 
-        let Ok(Value::Mapping(root)) = serde_yaml::to_value(&cfg) else {
-            panic!("a config serialises to a mapping");
-        };
-        let covered = covered_keys();
-        let missing: Vec<String> = root
-            .keys()
-            .filter_map(|k| k.as_str())
-            .filter(|k| !covered.contains(k))
-            .map(str::to_string)
-            .collect();
+        let root = serde_yaml::to_value(&cfg).expect("a config serialises");
+        let covered = covered_paths();
+        let mut missing: Vec<String> = Vec::new();
+
+        for (key, value) in root.as_mapping().expect("a mapping") {
+            let Some(key) = key.as_str() else { continue };
+            if covered.contains(&key) {
+                continue;
+            }
+            // A bundle: every section inside it must be listed by full path.
+            let Some(inner) = value.as_mapping() else {
+                missing.push(key.to_string());
+                continue;
+            };
+            for sub in inner.keys().filter_map(|k| k.as_str()) {
+                let path = format!("{key}.{sub}");
+                if !covered.contains(&path.as_str()) {
+                    missing.push(path);
+                }
+            }
+        }
+
         assert!(
             missing.is_empty(),
-            "these top-level keys would be dropped by render_md; add them to \
-             SECTIONS or PREAMBLE: {missing:?}"
+            "these sections would be dropped by render_md; add them to \
+             SECTION_PATHS or PREAMBLE: {missing:?}"
         );
     }
 }

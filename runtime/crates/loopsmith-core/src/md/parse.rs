@@ -4,9 +4,44 @@
 //! generic value tree and lets serde do the typing, so a new section needs an
 //! entry in [`super::section_shape`] at most, and usually nothing at all.
 
-use super::{heading_to_key, section_shape};
+use super::{heading_to_key, section_path, section_shape, SECTION_PATHS};
 use crate::{CoreError, LoopConfig};
 use serde_yaml::{Mapping, Value};
+
+/// Walk to a dotted path inside `root`, creating intermediate mappings.
+///
+/// Sections live one level down now that the config is bundled — `## Goals`
+/// writes `intent.goals` — so every place that used to reach for a top-level
+/// key goes through here instead.
+fn slot_at<'a>(root: &'a mut Mapping, path: &str) -> Result<&'a mut Value, String> {
+    let mut parts = path.split('.').peekable();
+    let mut cursor = root;
+    loop {
+        let part = parts.next().expect("a path has at least one segment");
+        let key = Value::from(part);
+        if parts.peek().is_none() {
+            return Ok(cursor
+                .entry(key)
+                .or_insert(Value::Mapping(Mapping::new())));
+        }
+        let slot = cursor
+            .entry(key)
+            .or_insert_with(|| Value::Mapping(Mapping::new()));
+        let Value::Mapping(next) = slot else {
+            return Err(format!("`{path}` runs through a value that is not a section"));
+        };
+        cursor = next;
+    }
+}
+
+/// The headings a `##` may carry, for an error message worth reading.
+fn known_headings() -> String {
+    SECTION_PATHS
+        .iter()
+        .map(|(_, _, heading)| *heading)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 #[derive(Debug)]
 enum Tok {
@@ -18,17 +53,32 @@ enum Tok {
 
 /// Parse a markdown config.
 pub fn parse_md(text: &str, origin: &str) -> Result<LoopConfig, CoreError> {
+    parse_md_reporting(text, origin).map(|(cfg, _)| cfg)
+}
+
+/// [`parse_md`], additionally reporting which 0.3 keys were relocated.
+pub fn parse_md_reporting(
+    text: &str,
+    origin: &str,
+) -> Result<(LoopConfig, Vec<crate::config::legacy::Moved>), CoreError> {
     let toks = tokenize(text);
     let value = build_document(&toks).map_err(|e| CoreError::Parse {
         path: origin.to_string(),
         yaml: e,
         json: "not attempted: the file was read as markdown".into(),
     })?;
-    serde_yaml::from_value::<LoopConfig>(value).map_err(|e| CoreError::Parse {
-        path: origin.to_string(),
-        yaml: e.to_string(),
-        json: "not attempted: the file was read as markdown".into(),
-    })
+    // A legacy heading builds the 0.3 shape; this is what turns it into the
+    // 1.0 one. It also picks up the per-key repairs — a bare trigger gaining
+    // its `on:` wrapper, a node's `isolated: true` becoming an isolation
+    // level — so the markdown path and the YAML path cannot disagree.
+    let (value, moved) = crate::config::legacy::migrate(&value);
+    serde_yaml::from_value::<LoopConfig>(value)
+        .map(|cfg| (cfg, moved))
+        .map_err(|e| CoreError::Parse {
+            path: origin.to_string(),
+            yaml: e.to_string(),
+            json: "not attempted: the file was read as markdown".into(),
+        })
 }
 
 /// Split the document into headings and bullets, folding indented
@@ -128,7 +178,18 @@ fn build_document(toks: &[Tok]) -> Result<Value, String> {
             }
             Tok::H2(heading) => {
                 flush_entry(&mut root, &section, &mut entry)?;
-                section = Some(heading_to_key(heading));
+                let key = heading_to_key(heading);
+                // Resolving here rather than letting an unknown key fall
+                // through to `deny_unknown_fields` is worth the extra table
+                // lookup: serde can only say "unknown field `goles`", while
+                // this can say which headings exist.
+                let path = section_path(&key).ok_or_else(|| {
+                    format!(
+                        "`## {heading}` is not a config section. Known sections are: {}",
+                        known_headings()
+                    )
+                })?;
+                section = Some(path.to_string());
                 i += 1;
             }
             Tok::H3(heading) => {
@@ -146,10 +207,7 @@ fn build_document(toks: &[Tok]) -> Result<Value, String> {
                 // `### Recorded the baseline: test count, coverage` would
                 // otherwise parse as a one-entry mapping and land on a field
                 // that wanted text.
-                m.insert(
-                    Value::from(shape.key_field),
-                    Value::from(heading.to_string()),
-                );
+                super::nested_insert(&mut m, shape.key_field, Value::from(heading.to_string()));
                 entry = Some(m);
                 i += 1;
             }
@@ -174,9 +232,7 @@ fn build_document(toks: &[Tok]) -> Result<Value, String> {
                     (Some(m), _) => merge_into(m, value)?,
                     // Bullets directly under a `##` section are the section.
                     (None, Some(sec)) => {
-                        let slot = root
-                            .entry(Value::from(sec.to_string()))
-                            .or_insert(Value::Mapping(Mapping::new()));
+                        let slot = slot_at(&mut root, sec)?;
                         match slot {
                             Value::Mapping(m) => merge_into(m, value)?,
                             _ => return Err(format!("section `{sec}` already holds a list")),
@@ -208,11 +264,9 @@ fn flush_entry(
     let shape = section_shape(sec).ok_or_else(|| format!("section `{sec}` takes no entries"))?;
 
     let target = match shape.list_field {
-        // e.g. `graph` holds its entries under `graph.nodes`.
+        // e.g. `execution.graph` holds its entries under `…graph.nodes`.
         Some(field) => {
-            let slot = root
-                .entry(Value::from(sec.to_string()))
-                .or_insert(Value::Mapping(Mapping::new()));
+            let slot = slot_at(root, sec)?;
             let Value::Mapping(section_map) = slot else {
                 return Err(format!("section `{sec}` should be a mapping"));
             };
@@ -220,10 +274,16 @@ fn flush_entry(
                 .entry(Value::from(field))
                 .or_insert(Value::Sequence(vec![]))
         }
-        // e.g. `goals` *is* the list.
-        None => root
-            .entry(Value::from(sec.to_string()))
-            .or_insert(Value::Sequence(vec![])),
+        // e.g. `intent.goals` *is* the list.
+        None => {
+            let slot = slot_at(root, sec)?;
+            // `slot_at` creates an empty mapping for a path that did not
+            // exist; a list section wants a sequence there instead.
+            if slot.as_mapping().is_some_and(|m| m.is_empty()) {
+                *slot = Value::Sequence(vec![]);
+            }
+            slot
+        }
     };
     match target {
         Value::Sequence(seq) => seq.push(Value::Mapping(m)),
@@ -236,12 +296,31 @@ fn merge_into(target: &mut Mapping, value: Value) -> Result<(), String> {
     match value {
         Value::Mapping(m) => {
             for (k, v) in m {
-                target.insert(k, v);
+                merge_key(target, k, v);
             }
             Ok(())
         }
         _ => Err("expected `- key: value` bullets here, found a bare list".into()),
     }
+}
+
+/// Insert one key, merging rather than replacing when both sides are mappings.
+///
+/// A shallow insert is wrong wherever a `###` heading fills in a nested field.
+/// A trigger's heading writes `on.type`, and the `- on:` bullet beneath it then
+/// arrives carrying only `expr` — replacing outright would drop the `type` the
+/// heading just placed, and the entry fails to parse with `missing field
+/// type` pointing at a document that plainly says `### cron`.
+fn merge_key(target: &mut Mapping, key: Value, value: Value) {
+    if let (Some(Value::Mapping(existing)), Value::Mapping(incoming)) =
+        (target.get_mut(&key), &value)
+    {
+        for (k, v) in incoming.clone() {
+            merge_key(existing, k, v);
+        }
+        return;
+    }
+    target.insert(key, value);
 }
 
 /// Turn one indentation level of bullets into a mapping or a sequence.

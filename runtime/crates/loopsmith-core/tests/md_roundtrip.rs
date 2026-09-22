@@ -215,8 +215,8 @@ goals:
 "#;
     let cfg = loopsmith_core::parse_md(markdown, "md").expect("parses");
     assert_eq!(cfg.name, "quiet", "the fenced block must not rename the loop");
-    assert_eq!(cfg.goals.len(), 1, "prose must not add a goal");
-    assert_eq!(cfg.goals[0].name, "real");
+    assert_eq!(cfg.intent.goals.len(), 1, "prose must not add a goal");
+    assert_eq!(cfg.intent.goals[0].name, "real");
 }
 
 #[test]
@@ -275,7 +275,7 @@ fn a_multi_line_instruction_survives() {
 - goals: [g1]
 "#;
     let cfg = loopsmith_core::parse_md(markdown, "md").expect("parses");
-    let instruction = &cfg.graph.nodes[0].instruction;
+    let instruction = &cfg.execution.graph.nodes[0].instruction;
     assert!(instruction.contains("Read the goal"), "got: {instruction}");
     assert!(instruction.contains("Cite every claim"), "got: {instruction}");
     assert!(

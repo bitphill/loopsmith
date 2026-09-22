@@ -44,6 +44,10 @@ serde_json = "1"
 # renamed back to `serde_yaml` here and no call site changes.
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
 thiserror = "1"
+# `config/loop.schema.json` is generated from the Rust types rather than
+# hand-written, so the schema cannot drift from what actually parses. CI
+# regenerates it and fails on a diff. Only `loopsmith-core` needs it.
+schemars = "0.8"
 clap = { version = "4", features = ["derive"] }
 # Cross-OS Ctrl-C handling for `loopsmith --guided`. The terminal wizard traps
 # SIGINT so an interrupt can offer to save a partial draft instead of throwing

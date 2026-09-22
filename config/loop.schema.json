@@ -1,890 +1,1633 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/bitphill/loopsmith/config/loop.schema.json",
-  "title": "loopsmith loop config",
-  "description": "The A-H model. `loopsmith validate` enforces this schema plus cross-field rules the schema cannot express - most importantly, that every goal carries at least one blocking validation.",
-  "type": "object",
-  "required": [
-    "name",
-    "goals",
-    "validations"
-  ],
+  "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
-  "properties": {
-    "name": {
-      "type": "string",
-      "minLength": 1,
-      "description": "Loop identity. Becomes the sled tree name and the generated skill name."
-    },
-    "version": {
-      "type": "string",
-      "default": "0.1.0"
-    },
-    "description": {
+  "definitions": {
+    "AcquisitionSource": {
+      "enum": [
+        "installed",
+        "marketplace",
+        "generate"
+      ],
       "type": "string"
     },
-    "information": {
-      "description": "A - static context handed to every node.",
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "key",
-          "value"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "key": {
-            "type": "string",
-            "minLength": 1
-          },
-          "value": {
-            "type": "string"
-          },
-          "note": {
-            "type": "string"
-          }
+    "Backoff": {
+      "description": "How a retry spaces its attempts.",
+      "oneOf": [
+        {
+          "description": "Same delay every time.",
+          "enum": [
+            "fixed"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Delay grows by the base each attempt.",
+          "enum": [
+            "linear"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Delay doubles each attempt. The right default against a rate limit.",
+          "enum": [
+            "exponential"
+          ],
+          "type": "string"
         }
-      }
+      ]
     },
-    "pre_execution": {
-      "description": "B - the manual work that must happen before automation is allowed. Every step must be done:true or validation fails.",
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "step"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "step": {
-            "type": "string",
-            "minLength": 1
-          },
-          "done": {
-            "type": "boolean",
-            "default": false
-          },
-          "evidence": {
-            "type": "string"
-          }
+    "Baseline": {
+      "additionalProperties": false,
+      "description": "The frozen numbers a proposal is measured against.\n\nEvery field is optional: a loop that only cares about cost sets only cost. A metric left unset is not compared, which is different from being compared against zero.",
+      "properties": {
+        "completion_rate": {
+          "default": null,
+          "description": "Fraction of runs that reached overall success.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "cost_usd": {
+          "default": null,
+          "description": "Mean cost of a successful run.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "iterations_to_success": {
+          "default": null,
+          "description": "Mean iterations to reach overall success.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "latency_seconds": {
+          "default": null,
+          "description": "Mean wall-clock of a successful run.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "measured_at": {
+          "default": null,
+          "description": "When these numbers were measured, as an ISO-8601 date. Recorded rather than enforced: a baseline nobody can date is a baseline nobody can argue with.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "validation_pass_rate": {
+          "default": null,
+          "description": "Fraction of blocking validations that passed.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         }
-      }
+      },
+      "type": "object"
     },
-    "goals": {
-      "description": "C - named objectives in natural language.",
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": [
-          "name",
-          "description"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "not": {
-              "const": "overall"
-            },
-            "description": "`overall` is reserved for whole-loop targets."
-          },
-          "description": {
-            "type": "string",
-            "minLength": 12
-          },
-          "depends_on": {
-            "type": "array",
-            "items": {
+    "CompareOp": {
+      "enum": [
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "eq"
+      ],
+      "type": "string"
+    },
+    "Concurrency": {
+      "oneOf": [
+        {
+          "description": "One node at a time.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "sequential"
+              ],
               "type": "string"
             }
           },
-          "priority": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      }
-    },
-    "validations": {
-      "description": "D - how each goal is checked. Target is a goal name or `overall`.",
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": [
-          "target",
-          "name",
-          "mode",
-          "statement",
-          "detector"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "target": {
-            "type": "string",
-            "minLength": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "mode": {
-            "$ref": "#/$defs/mode"
-          },
-          "statement": {
-            "type": "string",
-            "minLength": 1
-          },
-          "blocking": {
-            "type": "boolean",
-            "default": true,
-            "description": "Blocking validations hold the gate shut. Non-blocking ones are recorded only."
-          },
-          "detector": {
-            "$ref": "#/$defs/detector"
-          }
-        }
-      }
-    },
-    "success": {
-      "description": "E - what counts as success, per goal or `overall`.",
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": [
-          "target",
-          "name",
-          "mode",
-          "statement"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "target": {
-            "type": "string",
-            "minLength": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "mode": {
-            "$ref": "#/$defs/mode"
-          },
-          "statement": {
-            "type": "string"
-          },
-          "threshold": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 1,
-            "description": "Required when mode is percentage: the fraction of blocking validations that must pass."
-          }
+          "required": [
+            "mode"
+          ],
+          "type": "object"
         },
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "mode": {
-                  "const": "percentage"
-                }
-              },
-              "required": [
-                "mode"
-              ]
+        {
+          "description": "Fixed width.",
+          "properties": {
+            "max_parallel": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
             },
-            "then": {
-              "required": [
-                "threshold"
-              ]
+            "mode": {
+              "enum": [
+                "fixed"
+              ],
+              "type": "string"
             }
-          }
-        ]
-      }
+          },
+          "required": [
+            "max_parallel",
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Derived from the graph: widest wave, capped, and trimmed to the point where marginal Amdahl speedup still beats marginal cost.",
+          "properties": {
+            "cap": {
+              "default": 16,
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "min_marginal_gain": {
+              "default": 0.05,
+              "description": "Stop adding workers once the next one buys less than this fraction of additional speedup.",
+              "format": "double",
+              "type": "number"
+            },
+            "mode": {
+              "enum": [
+                "auto"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        }
+      ]
     },
-    "stop_gates": {
-      "description": "F - the layered exits. All are evaluated every iteration; any one halts the run.",
-      "type": "object",
+    "ConstraintSet": {
       "additionalProperties": false,
       "properties": {
-        "max_iterations": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 10
+        "forbidden_commands": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "max_revisions_per_node": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 3
+        "forbidden_paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "max_wall_clock_seconds": {
-          "type": "integer",
-          "minimum": 1
+        "human_checkpoint": {
+          "default": [],
+          "description": "Any action matching these requires a human before proceeding. Bezos Type 1: irreversible decisions do not get made at machine speed.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_seconds": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "max_tokens": {
-          "type": "integer",
-          "minimum": 1
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
-        "max_cost_usd": {
-          "type": "number",
-          "minimum": 0
-        },
-          "no_progress_iterations_randomness": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Perturb the run after this many stalled iterations instead of waiting to halt at no_progress_iterations. Must be strictly less than no_progress_iterations. Omit to halt without ever varying. When it fires, a cheap-tier agent is asked which of four tactics to try - reorder, escalate, explore, or reframe - and a seeded fallback picks from the same four if no agent answers. The seed is written to the ledger so the run replays."
-        },
-      "no_progress_iterations": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 3,
-          "description": "Jidoka: halt after this many iterations with no measurable change. 0 disables."
-        },
-        "stop_on_overall_success": {
-          "type": "boolean",
-          "default": true
+        "rules": {
+          "default": [],
+          "description": "Literal rules injected into the node prompt.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
-      }
+      },
+      "type": "object"
     },
-    "schedules": {
-      "description": "G - time or event triggers. `loopsmith watch` polls these and runs the loop when one fires; `loopsmith schedule --install` hands the job to launchd or cron. Cron expressions are evaluated in UTC.",
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/trigger"
-      }
-    },
-    "constraints": {
-      "description": "H - limits applied per node or globally.",
-      "type": "object",
+    "Constraints": {
       "additionalProperties": false,
       "properties": {
         "global": {
-          "$ref": "#/$defs/constraintSet"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConstraintSet"
+            }
+          ],
+          "default": {
+            "forbidden_commands": [],
+            "forbidden_paths": [],
+            "human_checkpoint": [],
+            "max_seconds": null,
+            "max_tokens": null,
+            "rules": []
+          },
+          "description": "Applied to every node unless overridden."
         },
         "per_node": {
-          "type": "object",
           "additionalProperties": {
-            "$ref": "#/$defs/constraintSet"
-          }
-        }
-      }
-    },
-    "execution_guidelines": {
-      "description": "I - named phases, each with a standing instruction and a place in an ordering. Nodes join a phase with `stage`. Use this for ordering that is about method rather than data; `graph.depends_on` is only for a node that genuinely reads another node's output.",
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "items": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/guideline"
-          }
-        },
-        "dependency": {
-          "description": "Ordering, one chain per entry: `gather -> draft`, or `gather -> draft -> review`. Guidelines with no arrow between them run in parallel. Cycles are refused.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "pattern": "^[^>]+(->[^>]+)+$"
-          }
-        }
-      }
-    },
-    "default_skills": {
-      "description": "J - sub-agents installed before the loop starts. Installation is idempotent and runs at the start of every run, so a loop directory can be recreated from its config alone.",
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/defaultSkill"
-      }
-    },
-    "graph": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "nodes": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/node"
-          }
-        },
-        "concurrency": {
-          "$ref": "#/$defs/concurrency"
-        }
-      }
-    },
-    "providers": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "providers": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/provider"
-          }
-        },
-        "cascade": {
-          "type": "object",
-          "description": "Ordered fallback per tier. First reachable provider serves the call.",
-          "propertyNames": {
-            "enum": [
-              "cheap",
-              "standard",
-              "strong"
-            ]
+            "$ref": "#/definitions/ConstraintSet"
           },
-          "additionalProperties": {
-            "type": "array",
-            "items": {
+          "default": {},
+          "description": "Keyed by node id.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "DefaultSkill": {
+      "additionalProperties": false,
+      "properties": {
+        "checksum": {
+          "default": null,
+          "description": "Expected SHA-256 of the fetched content. When set, a mismatch refuses the skill rather than installing it — which is what turns \"we fetched the thing we meant to\" from a hope into a check.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "init_command": {
+          "default": null,
+          "description": "Setup step run inside the installed skill directory, as argv.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Directory name the skill is installed under, and the name nodes use in their `skills` list.",
+          "type": "string"
+        },
+        "note": {
+          "default": null,
+          "description": "Why this loop needs it. For the human, never sent to a node.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SkillOrigin"
+            }
+          ],
+          "default": "marketplace"
+        },
+        "trust_level": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TrustLevel"
+            }
+          ],
+          "default": "untrusted",
+          "description": "How far this particular sub-agent is trusted, overriding the policy default. Raising it is an assertion by the author that they read it."
+        },
+        "url": {
+          "default": null,
+          "description": "Where to get it. Required for `github`; for `marketplace` it may be an `owner/repo@skill` spec; ignored for `local`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Detector": {
+      "description": "How a validation is actually decided. Ordered by the independence ladder from the cheat sheet: `Judge` is rung 3, everything else is rung 4.",
+      "oneOf": [
+        {
+          "description": "Run a command; exit code 0 passes. The strongest detector available.",
+          "properties": {
+            "args": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "type": "string"
+            },
+            "expect_exit": {
+              "default": null,
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "script"
+              ],
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "command",
+            "type"
+          ],
+          "type": "object"
         },
-        "enforce_judge_independence": {
-          "type": "boolean",
-          "default": true,
-          "description": "Refuse a judge verdict produced by the same provider as the work it judges."
+        {
+          "description": "A path must exist (optionally non-empty).",
+          "properties": {
+            "non_empty": {
+              "default": false,
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "file_exists"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A regex must match the named artifact.",
+          "properties": {
+            "artifact": {
+              "type": "string"
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "regex_match"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "artifact",
+            "pattern",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A numeric metric compared against a threshold.",
+          "properties": {
+            "metric": {
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/definitions/CompareOp"
+            },
+            "type": {
+              "enum": [
+                "threshold"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "metric",
+            "op",
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A model verdict. Requires a judge whose provider differs from the builder's, otherwise the gate refuses it as non-independent.",
+          "properties": {
+            "min_score": {
+              "default": null,
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "standard": {
+              "description": "Name the external standard the judge checks against. Naming a standard is what turns an opinion into a check.",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "judge"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "standard",
+            "type"
+          ],
+          "type": "object"
         }
-      }
+      ]
     },
-    "skills": {
-      "type": "object",
+    "Environment": {
+      "description": "Which deployment this config describes.\n\n`Prod` is not merely a label: the gate refuses an unreviewed marketplace skill and an unapproved evolution proposal outright in production, where in `Dev` the same config only warns. Authors therefore develop against the looser setting and get told what would have been refused, instead of discovering it on the run that mattered.",
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ],
+      "type": "string"
+    },
+    "Evolution": {
       "additionalProperties": false,
+      "description": "The evolution policy.",
       "properties": {
-        "acquisition_order": {
-          "type": "array",
+        "allowed_kinds": {
+          "default": [
+            "new_skill",
+            "skill_update",
+            "prompt_change",
+            "validation_change"
+          ],
+          "description": "Which kinds of change may be proposed at all.",
           "items": {
-            "enum": [
+            "$ref": "#/definitions/ProposalKind"
+          },
+          "type": "array"
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Baseline"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What proposals are measured against. Without one, no proposal can be adopted — only recorded."
+        },
+        "enabled": {
+          "default": false,
+          "description": "Master switch for this section. Even with `features.self_evolution` on, a loop can leave evolution off for a single run.",
+          "type": "boolean"
+        },
+        "keep_rollback": {
+          "default": true,
+          "description": "Keep the previous known-good configuration so an adoption can be undone.",
+          "type": "boolean"
+        },
+        "max_regression": {
+          "default": 0.02,
+          "description": "How much a metric may worsen and still count as an improvement overall. Expressed as a fraction: `0.02` allows a two-percent regression.\n\nNonzero on purpose. A change that trades a hair of accuracy for half the cost is usually right, and a zero-tolerance gate refuses every such trade while admitting any change that touches nothing measured.",
+          "format": "double",
+          "type": "number"
+        },
+        "require_approval": {
+          "default": true,
+          "description": "Require a human to approve adoption. Turning this off is refused in `prod`.",
+          "type": "boolean"
+        },
+        "require_sandbox": {
+          "default": true,
+          "description": "Require a proposal to have been trialled in isolation before adoption.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Execution": {
+      "additionalProperties": false,
+      "description": "How the work gets done.",
+      "properties": {
+        "default_skills": {
+          "default": [],
+          "description": "Sub-agents installed before the loop starts. Formerly section J.",
+          "items": {
+            "$ref": "#/definitions/DefaultSkill"
+          },
+          "type": "array"
+        },
+        "graph": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GraphSpec"
+            }
+          ],
+          "default": {
+            "concurrency": {
+              "cap": 16,
+              "min_marginal_gain": 0.05,
+              "mode": "auto"
+            },
+            "container_image": null,
+            "join": {
+              "strategy": "wait_for_all"
+            },
+            "nodes": []
+          },
+          "description": "Nodes, edges, concurrency and join strategy."
+        },
+        "memory": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/MemoryPolicy"
+            }
+          ],
+          "default": {
+            "carry_summaries": 2,
+            "max_retrieved": 10,
+            "max_summary_chars": 1200,
+            "namespaces": {
+              "episodic": {
+                "enabled": true,
+                "min_confidence": 0.75,
+                "promotion": {
+                  "rule": "never"
+                },
+                "require_provenance": false,
+                "retention_days": null
+              },
+              "failure": {
+                "enabled": true,
+                "min_confidence": 0.75,
+                "promotion": {
+                  "rule": "automatic"
+                },
+                "require_provenance": true,
+                "retention_days": null
+              },
+              "procedural": {
+                "enabled": true,
+                "min_confidence": 0.75,
+                "promotion": {
+                  "rule": "repeated_validation",
+                  "times": 3
+                },
+                "require_provenance": true,
+                "retention_days": null
+              },
+              "semantic": {
+                "enabled": true,
+                "min_confidence": 0.75,
+                "promotion": {
+                  "rule": "repeated_validation",
+                  "times": 3
+                },
+                "require_provenance": true,
+                "retention_days": null
+              }
+            },
+            "summary_provider": null
+          },
+          "description": "What is carried between iterations, and what survives the run. Absorbs the old top-level `context` block."
+        },
+        "phases": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExecutionGuidelines"
+            }
+          ],
+          "default": {
+            "dependency": [],
+            "items": []
+          },
+          "description": "Named phases with their own standing instruction and ordering. Formerly section I."
+        },
+        "providers": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderRouting"
+            }
+          ],
+          "default": {
+            "cascade": {},
+            "enforce_judge_independence": false,
+            "providers": []
+          },
+          "description": "Provider routing. Every provider is a command template, so any CLI or HTTP endpoint reachable from a shell is usable without a Rust change."
+        },
+        "skills": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SkillPolicy"
+            }
+          ],
+          "default": {
+            "acquisition_order": [
               "installed",
               "marketplace",
               "generate"
-            ]
+            ],
+            "allow_external_side_effects": false,
+            "explore": false,
+            "explore_candidates": [],
+            "min_marketplace_stars": 100,
+            "min_trials": 3,
+            "min_trust_level": "reviewed",
+            "quarantine_dir": "generated-skills",
+            "require_checksum": false,
+            "require_human_promotion": true
           },
-          "default": [
-            "installed",
-            "marketplace",
-            "generate"
-          ]
+          "description": "How missing sub-agents are sourced, and how far they are trusted."
         },
-        "quarantine_dir": {
-          "type": "string",
-          "default": "generated-skills"
-        },
-        "min_marketplace_stars": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 100
-        },
-        "require_human_promotion": {
-          "type": "boolean",
-          "default": true
-        },
-        "explore": {
-          "type": "boolean",
-          "default": false,
-          "description": "Try a candidate sub-agent that is NOT in the config, so the loop can discover what helps rather than only confirming what it was told. Off by default: exploration spends real money."
-        },
-        "explore_candidates": {
-          "type": "array",
+        "triggers": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TriggerPolicy"
+            }
+          ],
+          "default": {
+            "dedup_window_seconds": 300,
+            "max_depth": 5,
+            "triggers": []
+          },
+          "description": "What starts a run, and the guards against a run starting itself forever. Formerly section G."
+        }
+      },
+      "type": "object"
+    },
+    "ExecutionGuidelines": {
+      "additionalProperties": false,
+      "properties": {
+        "dependency": {
+          "default": [],
+          "description": "Ordering, one chain per entry: `a -> b`, or `a -> b -> c`.\n\nAnything not named here has no predecessor and starts immediately, so two guidelines with no arrow between them run in parallel. That is the default on purpose: sequencing should be something you asked for.",
           "items": {
             "type": "string"
           },
-          "description": "Candidates to trial when explore is on. Each is attached to a builder node until it has min_trials behind it."
+          "type": "array"
         },
-        "min_trials": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 3,
-          "description": "Trials needed before a candidate can be proposed or dismissed. One lucky run is not evidence."
+        "items": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/Guideline"
+          },
+          "type": "array"
         }
       },
-      "description": "Sub-agent acquisition and the experiment loop. Outcomes are recorded per skill and turned into proposals; the loop never edits its own config."
+      "type": "object"
     },
-    "context": {
-      "type": "object",
+    "Features": {
       "additionalProperties": false,
-      "description": "How much of the previous iterations each prompt carries. Each iteration is compressed to a summary; only the last few summaries are sent forward, so prompt size stops growing with the run.",
+      "description": "Capability switches, each defaulting to the conservative answer.\n\nThese are deliberately coarse. A flag answers \"is this class of thing allowed at all\"; the bundle that owns the capability answers \"under what conditions\". Keeping the two apart means an operator can disable a whole capability without reading, or trusting, the policy that configures it.",
+      "properties": {
+        "external_side_effects": {
+          "default": false,
+          "description": "Allow nodes to take actions that reach outside the loop directory.",
+          "type": "boolean"
+        },
+        "human_approval": {
+          "default": true,
+          "description": "Honour `safety.limits.*.human_checkpoint`. On by default. Turning it off is refused outright in `prod`.",
+          "type": "boolean"
+        },
+        "marketplace_skills": {
+          "default": false,
+          "description": "Allow sub-agents to be acquired from the marketplace. Off by default — this is the supply-chain surface.",
+          "type": "boolean"
+        },
+        "parallel_execution": {
+          "default": true,
+          "description": "Allow independent nodes in a wave to run concurrently. On by default; turning it off forces strict sequential execution, which is the first thing to try when debugging a run that behaves differently under load.",
+          "type": "boolean"
+        },
+        "self_evolution": {
+          "default": false,
+          "description": "Allow the loop to propose and trial changes to itself. Off by default: self-modification is the capability most worth opting into knowingly.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "GateOutcome": {
+      "description": "What happens when a gate rule does not pass.",
+      "oneOf": [
+        {
+          "description": "End the run. Nothing further is dispatched.",
+          "enum": [
+            "stop"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Halt and record an escalation for a human to answer. Resumable.",
+          "enum": [
+            "escalate"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Halt without an escalation record. Resumable.",
+          "enum": [
+            "pause"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Restore the last good checkpoint and continue from there.",
+          "enum": [
+            "rollback"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Record it and carry on. The only non-blocking outcome.",
+          "enum": [
+            "warn"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "GateRule": {
+      "additionalProperties": false,
+      "description": "One checkpoint, decided by a detector.",
+      "properties": {
+        "detector": {
+          "$ref": "#/definitions/Detector"
+        },
+        "id": {
+          "type": "string"
+        },
+        "on_fail": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/GateOutcome"
+            }
+          ],
+          "default": "stop"
+        },
+        "statement": {
+          "description": "Natural-language statement of what this gate is for. Shown verbatim when the gate blocks, so it is the whole explanation a stopped operator gets — write it for them, not for the author.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "detector",
+        "id",
+        "statement"
+      ],
+      "type": "object"
+    },
+    "Gates": {
+      "additionalProperties": false,
+      "description": "Every gate the run is subject to.",
+      "properties": {
+        "approval": {
+          "default": [],
+          "description": "Checked after each iteration. A failing approval gate halts for a human rather than ending the run.",
+          "items": {
+            "$ref": "#/definitions/GateRule"
+          },
+          "type": "array"
+        },
+        "entry": {
+          "default": [],
+          "description": "Checked once, before the first iteration. A failing entry gate means the run never starts — which is the cheapest possible failure.",
+          "items": {
+            "$ref": "#/definitions/GateRule"
+          },
+          "type": "array"
+        },
+        "rollback": {
+          "default": [],
+          "description": "Checked after each iteration. A failing rollback gate restores the last good checkpoint — for the case where continuing is worse than undoing.",
+          "items": {
+            "$ref": "#/definitions/GateRule"
+          },
+          "type": "array"
+        },
+        "stop": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StopGates"
+            }
+          ],
+          "default": {
+            "max_cost_usd": null,
+            "max_iterations": 10,
+            "max_revisions_per_node": 3,
+            "max_tokens": null,
+            "max_wall_clock_seconds": null,
+            "no_progress_iterations": 3,
+            "no_progress_iterations_randomness": null,
+            "stop_on_overall_success": true
+          },
+          "description": "The ceilings that end a run. Formerly the whole of section F."
+        }
+      },
+      "type": "object"
+    },
+    "Goal": {
+      "additionalProperties": false,
+      "properties": {
+        "depends_on": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "description": {
+          "description": "Natural language. Subjective phrasing is allowed here; the validation is what has to be checkable.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "priority": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "description",
+        "name"
+      ],
+      "type": "object"
+    },
+    "GraphSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "concurrency": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Concurrency"
+            }
+          ],
+          "default": {
+            "cap": 16,
+            "min_marginal_gain": 0.05,
+            "mode": "auto"
+          },
+          "description": "How much parallelism to use. `auto` derives it from the graph itself."
+        },
+        "container_image": {
+          "default": null,
+          "description": "Default image for nodes whose isolation is `container` without one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "join": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Join"
+            }
+          ],
+          "default": {
+            "strategy": "wait_for_all"
+          },
+          "description": "What it takes for a wave to count as finished."
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/NodeSpec"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Guideline": {
+      "additionalProperties": false,
+      "properties": {
+        "guideline": {
+          "description": "The standing instruction for this phase, injected into the prompt of every node that declares `stage: <name>`.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "note": {
+          "default": null,
+          "description": "Optional note for the human reading the config.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "guideline",
+        "name"
+      ],
+      "type": "object"
+    },
+    "InfoItem": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "note": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Intent": {
+      "additionalProperties": false,
+      "description": "What the loop is for, and how anyone would know it worked.\n\nThis is the bundle a human writes first and reads most. Nothing in it describes machinery.",
+      "properties": {
+        "background": {
+          "default": [],
+          "description": "Static facts every node receives. Formerly section A, `information`.\n\nNot called `context`: 0.3 already used that word for the memory policy, and a markdown config headed `## Context` would then mean one thing in an old file and another in a new one, with no way for the parser to tell which.",
+          "items": {
+            "$ref": "#/definitions/InfoItem"
+          },
+          "type": "array"
+        },
+        "goals": {
+          "default": [],
+          "description": "Named goals. Formerly section C.",
+          "items": {
+            "$ref": "#/definitions/Goal"
+          },
+          "type": "array"
+        },
+        "prerequisites": {
+          "default": [],
+          "description": "Manual work that must be finished before automation is allowed to start. Formerly section B — and still the one section that makes a fresh config refuse to run, on the principle that you cannot automate a process you cannot yet describe.",
+          "items": {
+            "$ref": "#/definitions/WorkItem"
+          },
+          "type": "array"
+        },
+        "success": {
+          "default": [],
+          "description": "What counts as done. Formerly section E.",
+          "items": {
+            "$ref": "#/definitions/SuccessScenario"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Isolation": {
+      "description": "How much of the machine a node is kept away from.\n\nThe ladder is real but not linear in cost: `Worktree` is nearly free and is what makes parallel writers safe, while `Container` buys filesystem and network separation at the price of a Docker daemon and an image pull.\n\n`Container` degrades rather than fails. If Docker is not present the node runs under `Worktree` and the run records a warning — a config written on a machine with Docker must still work on one without, because the same loop directory gets checked out on developer laptops, CI runners and servers, and refusing to start there would make container isolation unusable in practice rather than merely unavailable.",
+      "oneOf": [
+        {
+          "description": "Runs directly in the loop directory. Correct for a single writer or a read-only node.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Runs in its own git worktree, published back on success. Required for parallel writers.",
+          "properties": {
+            "mode": {
+              "enum": [
+                "worktree"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Runs in a container over its own worktree.",
+          "properties": {
+            "image": {
+              "default": null,
+              "description": "Image to run in. Defaults to the loop-wide image when unset.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mode": {
+              "enum": [
+                "container"
+              ],
+              "type": "string"
+            },
+            "network": {
+              "default": false,
+              "description": "Allow the container to reach the network. Off by default: a node that does not need the network should not have it.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Join": {
+      "description": "What it takes for a wave to count as finished.\n\nThe default waits for every node, which is the only correct answer when later waves read every output. The other two exist for the fan-out shape the reference calls out: several nodes attacking the same question, where the run does not need all the answers to proceed.",
+      "oneOf": [
+        {
+          "description": "Every node in the wave must finish.",
+          "properties": {
+            "strategy": {
+              "enum": [
+                "wait_for_all"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "strategy"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Proceed once this many nodes have finished successfully. Nodes still running are left to finish; their output is used if it arrives in time.",
+          "properties": {
+            "count": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "strategy": {
+              "enum": [
+                "quorum"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "count",
+            "strategy"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Proceed as soon as any one node succeeds.",
+          "properties": {
+            "strategy": {
+              "enum": [
+                "first_success"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "strategy"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "MemoryPolicy": {
+      "additionalProperties": false,
+      "description": "The whole memory policy: carry-forward within a run, namespaces across runs.",
       "properties": {
         "carry_summaries": {
-          "type": "integer",
-          "minimum": 0,
           "default": 2,
-          "description": "How many previous iteration summaries a node's prompt carries. 0 disables carry-forward."
+          "description": "How many previous iteration summaries a node's prompt carries.\n\n`0` disables carry-forward entirely. The default of 2 is enough for a node to see what it just tried and what it tried before that, which is what \"do not repeat yourself\" needs, without the prompt growing with the run.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
         },
-        "summary_provider": {
-          "type": "string",
-          "description": "Provider id used to write the optional prose half of a summary. Omit it and summaries are still written - the deterministic facts are always present. This only buys narrative, and narrative costs tokens every iteration."
+        "max_retrieved": {
+          "default": 10,
+          "description": "Most records a single retrieval may return.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
         },
         "max_summary_chars": {
-          "type": "integer",
-          "minimum": 1,
           "default": 1200,
-          "description": "Ceiling on the narrative. A summary that grows without limit defeats the purpose of having one."
+          "description": "Ceiling on the narrative, in characters. A summary that grows without limit defeats the purpose of having one.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "namespaces": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Namespaces"
+            }
+          ],
+          "default": {
+            "episodic": {
+              "enabled": true,
+              "min_confidence": 0.75,
+              "promotion": {
+                "rule": "never"
+              },
+              "require_provenance": false,
+              "retention_days": null
+            },
+            "failure": {
+              "enabled": true,
+              "min_confidence": 0.75,
+              "promotion": {
+                "rule": "automatic"
+              },
+              "require_provenance": true,
+              "retention_days": null
+            },
+            "procedural": {
+              "enabled": true,
+              "min_confidence": 0.75,
+              "promotion": {
+                "rule": "repeated_validation",
+                "times": 3
+              },
+              "require_provenance": true,
+              "retention_days": null
+            },
+            "semantic": {
+              "enabled": true,
+              "min_confidence": 0.75,
+              "promotion": {
+                "rule": "repeated_validation",
+                "times": 3
+              },
+              "require_provenance": true,
+              "retention_days": null
+            }
+          },
+          "description": "Cross-run memory."
+        },
+        "summary_provider": {
+          "default": null,
+          "description": "Provider id used to write the optional narrative half of a summary.\n\nOmit it and summaries are still written — the deterministic facts are always there. This only buys prose, and prose costs tokens every iteration, so it is opt-in.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
-      }
-    }
-  },
-  "$defs": {
-    "mode": {
+      },
+      "type": "object"
+    },
+    "Mode": {
       "enum": [
         "subjective",
         "objective",
         "percentage"
       ],
-      "description": "How the check is expressed. The mode does not decide the rigour - the detector does."
+      "type": "string"
     },
-    "detector": {
-      "description": "How a validation is decided. Script, file_exists, regex_match, and threshold are deterministic; judge is a model verdict and requires an independent provider.",
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "command"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "script"
-            },
-            "command": {
-              "type": "string",
-              "minLength": 1
-            },
-            "args": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "expect_exit": {
-              "type": "integer",
-              "default": 0
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "path"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "file_exists"
-            },
-            "path": {
-              "type": "string",
-              "minLength": 1
-            },
-            "non_empty": {
-              "type": "boolean",
-              "default": false
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "artifact",
-            "pattern"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "regex_match"
-            },
-            "artifact": {
-              "type": "string",
-              "minLength": 1
-            },
-            "pattern": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "metric",
-            "op",
-            "value"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "threshold"
-            },
-            "metric": {
-              "type": "string",
-              "minLength": 1
-            },
-            "op": {
-              "enum": [
-                "gt",
-                "gte",
-                "lt",
-                "lte",
-                "eq"
-              ]
-            },
-            "value": {
-              "type": "number"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "standard"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "judge"
-            },
-            "standard": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Name the external standard the judge checks against. An unnamed standard is an opinion."
-            },
-            "min_score": {
-              "type": "number"
-            }
-          }
-        }
-      ]
-    },
-    "trigger": {
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "expr"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "cron"
-            },
-            "expr": {
-              "type": "string"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "seconds"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "interval"
-            },
-            "seconds": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Fire every N seconds. Timezone-independent, unlike cron, which loopsmith evaluates in UTC."
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "path"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "file_change"
-            },
-            "path": {
-              "type": "string"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type",
-            "goal"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "goal_satisfied"
-            },
-            "goal": {
-              "type": "string"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "type"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "const": "manual"
-            }
-          }
-        }
-      ]
-    },
-    "constraintSet": {
-      "type": "object",
+    "NamespacePolicy": {
       "additionalProperties": false,
+      "description": "Retention and promotion policy for one namespace.",
       "properties": {
-        "rules": {
-          "type": "array",
-          "items": {
-            "type": "string"
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "min_confidence": {
+          "default": 0.75,
+          "description": "A record below this confidence is never returned by retrieval.",
+          "format": "double",
+          "type": "number"
+        },
+        "promotion": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Promotion"
+            }
+          ],
+          "default": {
+            "rule": "repeated_validation",
+            "times": 3
           }
         },
-        "forbidden_paths": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+        "require_provenance": {
+          "default": true,
+          "description": "Refuse to write a record that cannot say where it came from.",
+          "type": "boolean"
         },
-        "forbidden_commands": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "max_tokens": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "max_seconds": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "human_checkpoint": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Irreversible actions. These stop and wait regardless of any permission grant."
-        }
-      }
-    },
-    "node": {
-      "type": "object",
-      "required": [
-        "id",
-        "role",
-        "instruction"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "role": {
-          "enum": [
-            "builder",
-            "judge",
-            "manager",
-            "adversary",
-            "researcher"
+        "retention_days": {
+          "default": null,
+          "description": "Drop records older than this. `None` keeps them for the life of the store, which is the right answer for episodic history and the wrong one for anything the loop acts on.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "Namespaces": {
+      "additionalProperties": false,
+      "description": "The four kinds of thing worth remembering.\n\nSplitting them is what makes differing retention defensible. Episodes are cheap and disposable; procedures are expensive and load-bearing. One retention policy across both either throws away what the loop learned or keeps every transcript forever.",
+      "properties": {
+        "episodic": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NamespacePolicy"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "min_confidence": 0.75,
+            "promotion": {
+              "rule": "never"
+            },
+            "require_provenance": false,
+            "retention_days": null
+          },
+          "description": "What happened: dispatches, outputs, verdicts. Written always, promoted never — an episode is evidence for a belief, not a belief."
         },
-        "instruction": {
-          "type": "string",
-          "minLength": 16,
-          "description": "Tight instructions produce tight output; vague ones produce whatever the model felt like."
+        "failure": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NamespacePolicy"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "min_confidence": 0.75,
+            "promotion": {
+              "rule": "automatic"
+            },
+            "require_provenance": true,
+            "retention_days": null
+          },
+          "description": "Known failure modes and what got past them. Promoted automatically: having hit a wall is self-evidencing, and the cost of re-learning it is the whole reason the section exists."
         },
+        "procedural": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NamespacePolicy"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "min_confidence": 0.75,
+            "promotion": {
+              "rule": "repeated_validation",
+              "times": 3
+            },
+            "require_provenance": true,
+            "retention_days": null
+          },
+          "description": "Reusable ways of doing things that have worked before."
+        },
+        "semantic": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/NamespacePolicy"
+            }
+          ],
+          "default": {
+            "enabled": true,
+            "min_confidence": 0.75,
+            "promotion": {
+              "rule": "repeated_validation",
+              "times": 3
+            },
+            "require_provenance": true,
+            "retention_days": null
+          },
+          "description": "Stable facts about the domain the loop works in."
+        }
+      },
+      "type": "object"
+    },
+    "NodeSpec": {
+      "additionalProperties": false,
+      "properties": {
         "depends_on": {
-          "type": "array",
+          "default": [],
+          "description": "Node ids this node genuinely reads the output of. Only list an edge if the answer to \"does this step read that step's output?\" is yes.",
           "items": {
             "type": "string"
           },
-          "description": "Only list a node whose output this node actually reads. An 'and then' that is not read is not an edge."
+          "type": "array"
         },
         "goals": {
-          "type": "array",
+          "default": [],
+          "description": "Goals this node advances.",
           "items": {
             "type": "string"
-          }
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "instruction": {
+          "description": "What this node is for, in natural language. Tight descriptions produce tight output; vague ones produce whatever the model felt like.",
+          "type": "string"
+        },
+        "isolation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Isolation"
+            }
+          ],
+          "default": {
+            "mode": "none"
+          },
+          "description": "How far this node is kept from the rest of the machine.\n\nThe 0.3 spelling was `isolated: true`, meaning a worktree. That spelling still parses and still means [`Isolation::Worktree`]; the migration rewrites it."
+        },
+        "provider": {
+          "default": null,
+          "description": "Pin a provider; otherwise routing picks by tier.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "$ref": "#/definitions/Role"
+        },
+        "skills": {
+          "default": [],
+          "description": "Skills this node needs. Acquired per the skill policy.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stage": {
+          "default": null,
+          "description": "Execution guideline (section I) this node belongs to. A node with a stage is not dispatched until that phase is active. A node without one is always eligible — unstaged work is not gated by a phase it never joined.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "tier": {
-          "enum": [
-            "cheap",
-            "standard",
-            "strong"
+          "allOf": [
+            {
+              "$ref": "#/definitions/Tier"
+            }
           ],
           "default": "standard"
         },
-        "provider": {
-          "type": "string",
-          "description": "Pin a provider. Judges should be pinned to a family different from the builder."
-        },
-        "skills": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "stage": {
-          "type": "string",
-          "description": "Execution guideline (section I) this node belongs to. The node is not dispatched until that phase is active. A node with no stage is always eligible."
-        },
         "weight": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "default": 1
-        },
-        "isolated": {
-          "type": "boolean",
-          "default": false,
-          "description": "Run in its own git worktree. Required for builders that may run in parallel."
+          "default": 1.0,
+          "description": "Relative cost weight used for critical-path calculation.",
+          "format": "double",
+          "type": "number"
         }
-      }
-    },
-    "defaultSkill": {
-      "type": "object",
-      "additionalProperties": false,
+      },
       "required": [
-        "name"
+        "id",
+        "instruction",
+        "role"
       ],
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Directory name the skill installs under, and the name nodes use in their `skills` list."
-        },
-        "source": {
-          "enum": [
-            "marketplace",
-            "github",
-            "local"
-          ],
-          "default": "marketplace",
-          "description": "`github` clones an https repo into the quarantine directory; `marketplace` uses the skills CLI; `local` is only checked for, never fetched."
-        },
-        "url": {
-          "type": "string",
-          "description": "Required for `github`, and it must be https - git://, ssh:// and file:// are refused. For `marketplace` it may be an owner/repo@skill spec. Ignored for `local`."
-        },
-        "init_command": {
-          "type": "string",
-          "description": "Setup step run inside the installed directory. This is an ARGV LINE, NOT A SHELL LINE: it is split on whitespace and executed directly, so &&, | and $(...) are literal arguments."
-        },
-        "note": {
-          "type": "string",
-          "description": "Why this loop needs it. For the human; never sent to a node."
-        }
-      }
+      "type": "object"
     },
-    "guideline": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "guideline"
-      ],
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Referenced by `graph.nodes[].stage` and by the `dependency` arrows."
-        },
-        "guideline": {
-          "type": "string",
-          "minLength": 12,
-          "description": "The standing instruction for this phase, injected into the prompt of every node that joins it. Say what the phase is for and what it must not do yet."
-        },
-        "note": {
-          "type": "string",
-          "description": "For the human reading the config. Not sent to any node."
-        }
-      }
-    },
-    "concurrency": {
+    "Promotion": {
+      "description": "What it takes for a record to move from observed to reusable.",
       "oneOf": [
         {
-          "type": "object",
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false,
+          "description": "Never reused beyond the run that wrote it.",
           "properties": {
-            "mode": {
-              "const": "sequential"
+            "rule": {
+              "enum": [
+                "never"
+              ],
+              "type": "string"
             }
-          }
+          },
+          "required": [
+            "rule"
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
-          "required": [
-            "mode",
-            "max_parallel"
-          ],
-          "additionalProperties": false,
+          "description": "Reusable as soon as it is written. Only appropriate where writing is itself the evidence — a recorded failure mode, for instance.",
           "properties": {
-            "mode": {
-              "const": "fixed"
-            },
-            "max_parallel": {
-              "type": "integer",
-              "minimum": 1
+            "rule": {
+              "enum": [
+                "automatic"
+              ],
+              "type": "string"
             }
-          }
+          },
+          "required": [
+            "rule"
+          ],
+          "type": "object"
         },
         {
-          "type": "object",
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false,
+          "description": "Reusable once the same record has been independently corroborated this many times.",
           "properties": {
-            "mode": {
-              "const": "auto"
+            "rule": {
+              "enum": [
+                "repeated_validation"
+              ],
+              "type": "string"
             },
-            "cap": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 16
-            },
-            "min_marginal_gain": {
-              "type": "number",
-              "minimum": 0,
-              "default": 0.05,
-              "description": "Stop adding workers once the next one buys less than this much additional Amdahl speedup."
+            "times": {
+              "default": 3,
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
             }
-          }
+          },
+          "required": [
+            "rule"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Reusable only after a human says so.",
+          "properties": {
+            "rule": {
+              "enum": [
+                "human_approval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "rule"
+          ],
+          "type": "object"
         }
       ]
     },
-    "provider": {
-      "type": "object",
-      "required": [
-        "id",
-        "kind",
-        "command"
+    "ProposalKind": {
+      "description": "What kind of change a proposal is asking for.\n\nThe list is closed, and deliberately does not include anything under `safety`. A proposal that wants to relax a limit is not a proposal; it is a request for a human to edit the config.",
+      "enum": [
+        "new_skill",
+        "skill_update",
+        "prompt_change",
+        "graph_change",
+        "provider_routing",
+        "validation_change",
+        "success_criteria"
       ],
+      "type": "string"
+    },
+    "Protected": {
       "additionalProperties": false,
+      "description": "The set of components evolution may not propose changes to.",
       "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1
+        "components": {
+          "default": [
+            "gates",
+            "limits",
+            "recovery",
+            "protected",
+            "approvals",
+            "credentials",
+            "audit",
+            "baselines",
+            "retention",
+            "environment"
+          ],
+          "items": {
+            "$ref": "#/definitions/ProtectedComponent"
+          },
+          "type": "array"
         },
-        "kind": {
+        "extra_paths": {
+          "default": [],
+          "description": "Extra dotted config paths to protect beyond the named components, for anything this enum does not anticipate.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ProtectedComponent": {
+      "description": "A part of the configuration that evolution proposals may not touch.",
+      "oneOf": [
+        {
+          "description": "`safety.gates` — the layered exits.",
+          "enum": [
+            "gates"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`safety.limits` — forbidden paths and commands, budget ceilings.",
+          "enum": [
+            "limits"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`safety.recovery` — how failures are answered.",
+          "enum": [
+            "recovery"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "This list itself. Always protected; see [`Protected::is_protected`].",
+          "enum": [
+            "protected"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Human checkpoints and approval requirements.",
+          "enum": [
+            "approvals"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Credential and secret configuration.",
+          "enum": [
+            "credentials"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The ledger and what is recorded in it.",
+          "enum": [
+            "audit"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`evolution.baseline` — what a proposal is measured against. A loop that can move its own baseline can declare any change an improvement.",
+          "enum": [
+            "baselines"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Memory retention and expiry policy.",
+          "enum": [
+            "retention"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`environment` and `features`.",
+          "enum": [
+            "environment"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ProviderKind": {
+      "description": "Provider families. Each variant accepts the spellings people actually write, because a config that rejects `openai` in favour of `open_ai` is a config that wastes the author's afternoon.",
+      "oneOf": [
+        {
           "enum": [
             "claude_code",
             "ollama",
@@ -892,61 +1635,1233 @@
             "grok_build",
             "hermes",
             "openai",
-            "gemini",
-            "byok",
-            "mcp"
+            "gemini"
           ],
-          "description": "Aliases are accepted: claude, grok, open_ai, google_gemini, custom, MCP."
-        },
-        "tiers": {
-          "type": "array",
-          "items": {
-            "enum": [
-              "cheap",
-              "standard",
-              "strong"
-            ]
-          }
-        },
-        "command": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Any executable. Placeholders {prompt} {system} {model} {tier} {node} are substituted in args."
-        },
-        "args": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "model": {
           "type": "string"
         },
-        "requires_env": {
-          "type": "array",
+        {
+          "description": "Any OpenAI-compatible or bespoke endpoint driven by a command.",
+          "enum": [
+            "byok"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "An MCP server spoken to over stdio.",
+          "enum": [
+            "mcp"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ProviderRouting": {
+      "additionalProperties": false,
+      "properties": {
+        "cascade": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Ordered fallback chain per tier. First reachable provider wins.",
+          "type": "object"
+        },
+        "enforce_judge_independence": {
+          "default": true,
+          "description": "A judge must not run on the provider that produced the work.",
+          "type": "boolean"
+        },
+        "providers": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ProviderSpec"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ProviderSpec": {
+      "additionalProperties": false,
+      "description": "Every provider is a command template. `{prompt}`, `{system}`, `{model}` and `{tier}` are substituted before spawn. This keeps BYOK support out of the Rust build entirely: if you can invoke it from a shell, loopsmith can route to it.",
+      "properties": {
+        "args": {
+          "default": [],
           "items": {
             "type": "string"
           },
-          "description": "Key names only. Values are never read, substituted, or logged."
+          "type": "array"
         },
-        "timeout_seconds": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "prompt_on_stdin": {
-          "type": "boolean",
-          "default": false
-        },
-        "usage_regex": {
-          "type": "string",
-          "description": "Regex with one capture group extracting a token count from the provider's output. Without it, usage is estimated at ~4 characters per token \u2014 enough to make a budget ceiling real, but not exact."
+        "command": {
+          "type": "string"
         },
         "cost_per_1k_tokens": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Price per thousand tokens, used by the max_cost_usd stop gate."
+          "default": null,
+          "description": "Price per thousand tokens, for the cost ceiling.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/ProviderKind"
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt_on_stdin": {
+          "default": false,
+          "description": "Send the prompt on stdin instead of substituting into args.",
+          "type": "boolean"
+        },
+        "requires_env": {
+          "default": [],
+          "description": "Environment variables that must be present. Values are never read by loopsmith, only checked for presence, so keys stay out of the ledger.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tiers": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/Tier"
+          },
+          "type": "array"
+        },
+        "timeout_seconds": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "usage_regex": {
+          "default": null,
+          "description": "Regex with one capture group pulling a token count out of the provider's own output. Without it, usage is estimated from character count, which is enough to make a budget ceiling real but is not exact.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
-      }
+      },
+      "required": [
+        "command",
+        "id",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Recovery": {
+      "additionalProperties": false,
+      "description": "The failure-class to action map.\n\nThe defaults encode the reference specification's recovery policy, which is also what the corpus arrived at independently: retry the world, revise the output, escalate a pattern, and never negotiate with a safety violation.",
+      "properties": {
+        "corrupted_state": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoveryAction"
+            }
+          ],
+          "default": {
+            "action": "restore_checkpoint"
+          },
+          "description": "The store failed to read back what it wrote."
+        },
+        "invalid_output": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoveryAction"
+            }
+          ],
+          "default": {
+            "action": "revise",
+            "max_attempts": 2
+          },
+          "description": "The node returned something, but it did not satisfy the contract — a malformed artifact, a missing file it claimed to write."
+        },
+        "repeated_failure": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoveryAction"
+            }
+          ],
+          "default": {
+            "action": "escalate"
+          },
+          "description": "The same node has failed `max_revisions_per_node` times."
+        },
+        "resource_exhaustion": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoveryAction"
+            }
+          ],
+          "default": {
+            "action": "pause"
+          },
+          "description": "A budget ceiling was reached mid-iteration."
+        },
+        "safety_violation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoveryAction"
+            }
+          ],
+          "default": {
+            "action": "stop"
+          },
+          "description": "A node attempted something `safety.limits` forbids."
+        },
+        "tool_unavailable": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoveryAction"
+            }
+          ],
+          "default": {
+            "action": "fallback"
+          },
+          "description": "A provider in the cascade is not installed or not reachable at all."
+        },
+        "transient_error": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RecoveryAction"
+            }
+          ],
+          "default": {
+            "action": "retry",
+            "backoff": "exponential",
+            "base_delay_seconds": 2,
+            "max_attempts": 3
+          },
+          "description": "The provider or a tool was briefly unavailable, timed out, or returned a rate-limit response."
+        }
+      },
+      "type": "object"
+    },
+    "RecoveryAction": {
+      "description": "What the run does when a given failure class occurs.",
+      "oneOf": [
+        {
+          "description": "Re-dispatch the same work unchanged. For failures that are about the world, not the output.",
+          "properties": {
+            "action": {
+              "enum": [
+                "retry"
+              ],
+              "type": "string"
+            },
+            "backoff": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Backoff"
+                }
+              ],
+              "default": "exponential"
+            },
+            "base_delay_seconds": {
+              "default": 2,
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "max_attempts": {
+              "default": 3,
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Re-dispatch, telling the node what was wrong with its last output. For failures that are about the output.",
+          "properties": {
+            "action": {
+              "enum": [
+                "revise"
+              ],
+              "type": "string"
+            },
+            "max_attempts": {
+              "default": 3,
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Move to the next provider in the tier's cascade.",
+          "properties": {
+            "action": {
+              "enum": [
+                "fallback"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Halt this node and record an escalation for a human to answer.",
+          "properties": {
+            "action": {
+              "enum": [
+                "escalate"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Halt the whole run but keep the state resumable.",
+          "properties": {
+            "action": {
+              "enum": [
+                "pause"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Roll the store back to the last good checkpoint and resume from there.",
+          "properties": {
+            "action": {
+              "enum": [
+                "restore_checkpoint"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Stop the run immediately. No further dispatch, no perturbation.",
+          "properties": {
+            "action": {
+              "enum": [
+                "stop"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Role": {
+      "oneOf": [
+        {
+          "description": "Produces the work. Most latitude, least constraint.",
+          "enum": [
+            "builder"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Evaluates the builder's output against a written standard. Must not be the same provider instance as the builder it judges.",
+          "enum": [
+            "judge"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Routes on the verdict and owns the stop condition.",
+          "enum": [
+            "manager"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Argues the other side. Cheap insurance against consensus.",
+          "enum": [
+            "adversary"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Gathers material without producing a deliverable.",
+          "enum": [
+            "researcher"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Safety": {
+      "additionalProperties": false,
+      "description": "What must not happen, and when this stops.\n\nEverything here is enforced by compiled code rather than asked of a model, and every part of it is a [`Protected`] component by default — the loop can propose changes to what it does, never to what constrains it.",
+      "properties": {
+        "checks": {
+          "default": [],
+          "description": "How each goal is checked. Formerly section D.\n\nNamed `checks` rather than `validations` because the old name read as a synonym for `success`, and authors routinely put success criteria here and detectors there.",
+          "items": {
+            "$ref": "#/definitions/Validation"
+          },
+          "type": "array"
+        },
+        "gates": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Gates"
+            }
+          ],
+          "default": {
+            "approval": [],
+            "entry": [],
+            "rollback": [],
+            "stop": {
+              "max_cost_usd": null,
+              "max_iterations": 10,
+              "max_revisions_per_node": 3,
+              "max_tokens": null,
+              "max_wall_clock_seconds": null,
+              "no_progress_iterations": 3,
+              "no_progress_iterations_randomness": null,
+              "stop_on_overall_success": true
+            }
+          },
+          "description": "The layered exits, plus the entry, approval and rollback checkpoints. Absorbs section F as `gates.stop`."
+        },
+        "limits": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Constraints"
+            }
+          ],
+          "default": {
+            "global": {
+              "forbidden_commands": [],
+              "forbidden_paths": [],
+              "human_checkpoint": [],
+              "max_seconds": null,
+              "max_tokens": null,
+              "rules": []
+            },
+            "per_node": {}
+          },
+          "description": "Rules, forbidden paths and commands, per-node ceilings, human checkpoints. Formerly section H."
+        },
+        "protected": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Protected"
+            }
+          ],
+          "default": {
+            "components": [
+              "gates",
+              "limits",
+              "recovery",
+              "protected",
+              "approvals",
+              "credentials",
+              "audit",
+              "baselines",
+              "retention",
+              "environment"
+            ],
+            "extra_paths": []
+          },
+          "description": "What evolution may never touch."
+        },
+        "recovery": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Recovery"
+            }
+          ],
+          "default": {
+            "corrupted_state": {
+              "action": "restore_checkpoint"
+            },
+            "invalid_output": {
+              "action": "revise",
+              "max_attempts": 2
+            },
+            "repeated_failure": {
+              "action": "escalate"
+            },
+            "resource_exhaustion": {
+              "action": "pause"
+            },
+            "safety_violation": {
+              "action": "stop"
+            },
+            "tool_unavailable": {
+              "action": "fallback"
+            },
+            "transient_error": {
+              "action": "retry",
+              "backoff": "exponential",
+              "base_delay_seconds": 2,
+              "max_attempts": 3
+            }
+          },
+          "description": "What to do about each class of failure."
+        }
+      },
+      "type": "object"
+    },
+    "SkillOrigin": {
+      "oneOf": [
+        {
+          "description": "`claudemarketplaces.com` or the `skills` CLI.",
+          "enum": [
+            "marketplace"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A git repository, cloned into the quarantine directory.",
+          "enum": [
+            "github"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Already on disk; only checked for, never fetched.",
+          "enum": [
+            "local"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SkillPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "acquisition_order": {
+          "default": [
+            "installed",
+            "marketplace",
+            "generate"
+          ],
+          "description": "Order in which a missing sub-agent is sourced.",
+          "items": {
+            "$ref": "#/definitions/AcquisitionSource"
+          },
+          "type": "array"
+        },
+        "allow_external_side_effects": {
+          "default": false,
+          "description": "Allow a sub-agent to take effects outside the loop directory. Requires [`TrustLevel::Approved`] on the skill itself.",
+          "type": "boolean"
+        },
+        "explore": {
+          "default": false,
+          "description": "Try a candidate sub-agent that is *not* in the config, so the loop can discover that something helps rather than only confirming what it was told. Off by default: exploration spends real money.",
+          "type": "boolean"
+        },
+        "explore_candidates": {
+          "default": [],
+          "description": "Candidates to try when exploring, in order. Each is trialled until it has enough runs to judge.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "min_marketplace_stars": {
+          "default": 100,
+          "description": "Minimum stars before a marketplace skill is eligible.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "min_trials": {
+          "default": 3,
+          "description": "Trials needed before a candidate can be proposed or dismissed.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "min_trust_level": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/TrustLevel"
+            }
+          ],
+          "default": "reviewed",
+          "description": "Lowest trust a fetched sub-agent may carry and still be used.\n\n`Reviewed` by default, which means a freshly fetched skill — which is [`TrustLevel::Untrusted`] until someone says otherwise — is acquired into quarantine but not dispatched to. That is the intended friction: the loop can find a sub-agent on its own, but a human decides whether it runs."
+        },
+        "quarantine_dir": {
+          "default": "generated-skills",
+          "description": "Where auto-created skills land before a human promotes them.",
+          "type": "string"
+        },
+        "require_checksum": {
+          "default": false,
+          "description": "Refuse a fetched sub-agent that has no `checksum` pinned.\n\nOff by default because it makes discovery impossible — nothing newly found has a checksum yet. Turn it on once a loop's sub-agents have settled, and in `prod` it is the expected setting.",
+          "type": "boolean"
+        },
+        "require_human_promotion": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "StopGates": {
+      "additionalProperties": false,
+      "properties": {
+        "max_cost_usd": {
+          "default": null,
+          "description": "Currency budget for the whole run.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "max_iterations": {
+          "default": 10,
+          "description": "Hard ceiling on whole-loop iterations.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_revisions_per_node": {
+          "default": 3,
+          "description": "Per-node revision ceiling. A node that has been dispatched this many times without its goals being satisfied stops being dispatched, so one stuck node cannot burn the whole iteration budget.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_tokens": {
+          "default": null,
+          "description": "Token budget for the whole run, summed across providers.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_wall_clock_seconds": {
+          "default": null,
+          "description": "Wall-clock budget for the whole run.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "no_progress_iterations": {
+          "default": 3,
+          "description": "Halt when this many consecutive iterations produce no measurable change. Jidoka: stop the line rather than spin.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "no_progress_iterations_randomness": {
+          "default": null,
+          "description": "Perturb the run after this many stalled iterations, instead of waiting to halt at `no_progress_iterations`.\n\nMust be strictly less than `no_progress_iterations`: the point is to try something different *before* giving up, and a threshold at or past the halt point never fires. Leave it unset to halt without ever varying — perturbation costs a provider call and changes what the loop does, so it is opt-in.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stop_on_overall_success": {
+          "default": true,
+          "description": "Stop as soon as every `overall` success scenario is met.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SuccessScenario": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/definitions/Mode"
+        },
+        "name": {
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        },
+        "target": {
+          "description": "Goal name, or `overall`.",
+          "type": "string"
+        },
+        "threshold": {
+          "default": null,
+          "description": "Fraction of blocking validations that must pass, when mode is `percentage`. Ignored otherwise.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "mode",
+        "name",
+        "statement",
+        "target"
+      ],
+      "type": "object"
+    },
+    "Tier": {
+      "oneOf": [
+        {
+          "enum": [
+            "standard"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "High volume, low judgment. Extraction, classification, formatting.",
+          "enum": [
+            "cheap"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Low volume, high judgment. Final review, multi-hop reasoning.",
+          "enum": [
+            "strong"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Trigger": {
+      "oneOf": [
+        {
+          "description": "Five-field cron expression.",
+          "properties": {
+            "expr": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "cron"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "expr",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Fire every N seconds. Timezone-independent, which makes it the right choice for cadence that does not need to land at a wall-clock time.",
+          "properties": {
+            "seconds": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "interval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "seconds",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Fire when a path changes.",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "file_change"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Fire when a named upstream goal becomes satisfied.",
+          "properties": {
+            "goal": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "goal_satisfied"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "goal",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Fire on demand only.",
+          "properties": {
+            "type": {
+              "enum": [
+                "manual"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TriggerPolicy": {
+      "additionalProperties": false,
+      "description": "The triggers and the re-entrancy guards around them.",
+      "properties": {
+        "dedup_window_seconds": {
+          "default": 300,
+          "description": "Two firings with the same idempotency key this many seconds apart are treated as one.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_depth": {
+          "default": 5,
+          "description": "How many times a run may be started by a run that was itself started by a trigger. Depth 0 is a run a human started.\n\nReaching the cap stops the chain and records why. Without it a self-reachable trigger has no bound at all.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "triggers": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/TriggerSpec"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "TriggerSpec": {
+      "additionalProperties": false,
+      "description": "A trigger plus the bookkeeping that makes firing it safe.\n\nThe trigger is nested under `on:` rather than flattened into this struct. Flattening would read more naturally and would have let the 0.3 spelling parse untouched, but serde refuses `deny_unknown_fields` on any struct with a flattened field — and losing that here would mean a misspelled `idempotency_kye` is silently dropped, leaving a trigger with no dedup and no warning. The legacy transform wraps old bare triggers in `on:` instead, which costs one line there and keeps the guard everywhere.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Skip this trigger without deleting it.",
+          "type": "boolean"
+        },
+        "idempotency_key": {
+          "default": null,
+          "description": "Stable identity for a firing. Two firings sharing a key inside the dedup window are the same firing, and the second is dropped.\n\nLeft unset, one is derived from the trigger and its payload, which is right for cron and interval. Set it explicitly when the natural payload is noisier than the event — a `file_change` on a directory where six files land together is one event, not six.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on": {
+          "$ref": "#/definitions/Trigger"
+        }
+      },
+      "required": [
+        "on"
+      ],
+      "type": "object"
+    },
+    "TrustLevel": {
+      "description": "How far a sub-agent from outside this repository is trusted.\n\nA sub-agent is code that runs on the author's machine with the loop's own permissions. Before this existed, `min_marketplace_stars` was the only thing standing between a loop and arbitrary third-party code — and stars measure popularity, not intent. The ladder below measures review instead.",
+      "oneOf": [
+        {
+          "description": "Nobody has looked at it. The default for anything newly fetched.",
+          "enum": [
+            "untrusted"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A human has read what it does and what it may reach.",
+          "enum": [
+            "reviewed"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Reviewed, and cleared for use where side effects leave the loop directory.",
+          "enum": [
+            "approved"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Validation": {
+      "additionalProperties": false,
+      "properties": {
+        "blocking": {
+          "default": true,
+          "description": "A validation that must pass for the target to be satisfied. Non-blocking validations are recorded but do not hold the gate shut.",
+          "type": "boolean"
+        },
+        "detector": {
+          "$ref": "#/definitions/Detector"
+        },
+        "mode": {
+          "$ref": "#/definitions/Mode"
+        },
+        "name": {
+          "type": "string"
+        },
+        "statement": {
+          "description": "Natural-language statement of what is being checked.",
+          "type": "string"
+        },
+        "target": {
+          "description": "Goal name, or `overall`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "detector",
+        "mode",
+        "name",
+        "statement",
+        "target"
+      ],
+      "type": "object"
+    },
+    "WorkItem": {
+      "additionalProperties": false,
+      "properties": {
+        "done": {
+          "default": false,
+          "description": "Must be true before the loop is allowed to run. This encodes the corpus rule that you cannot automate a process you cannot describe.",
+          "type": "boolean"
+        },
+        "evidence": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "step": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "step"
+      ],
+      "type": "object"
     }
-  }
+  },
+  "properties": {
+    "description": {
+      "default": "",
+      "type": "string"
+    },
+    "environment": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Environment"
+        }
+      ],
+      "default": "dev",
+      "description": "Which deployment this config describes. Read before anything else, because it decides how strictly the rest is enforced."
+    },
+    "evolution": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Evolution"
+        }
+      ],
+      "default": {
+        "allowed_kinds": [
+          "new_skill",
+          "skill_update",
+          "prompt_change",
+          "validation_change"
+        ],
+        "baseline": null,
+        "enabled": false,
+        "keep_rollback": true,
+        "max_regression": 0.02,
+        "require_approval": true,
+        "require_sandbox": true
+      },
+      "description": "How the loop is allowed to change itself."
+    },
+    "execution": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Execution"
+        }
+      ],
+      "default": {
+        "default_skills": [],
+        "graph": {
+          "concurrency": {
+            "cap": 16,
+            "min_marginal_gain": 0.05,
+            "mode": "auto"
+          },
+          "container_image": null,
+          "join": {
+            "strategy": "wait_for_all"
+          },
+          "nodes": []
+        },
+        "memory": {
+          "carry_summaries": 2,
+          "max_retrieved": 10,
+          "max_summary_chars": 1200,
+          "namespaces": {
+            "episodic": {
+              "enabled": true,
+              "min_confidence": 0.75,
+              "promotion": {
+                "rule": "never"
+              },
+              "require_provenance": false,
+              "retention_days": null
+            },
+            "failure": {
+              "enabled": true,
+              "min_confidence": 0.75,
+              "promotion": {
+                "rule": "automatic"
+              },
+              "require_provenance": true,
+              "retention_days": null
+            },
+            "procedural": {
+              "enabled": true,
+              "min_confidence": 0.75,
+              "promotion": {
+                "rule": "repeated_validation",
+                "times": 3
+              },
+              "require_provenance": true,
+              "retention_days": null
+            },
+            "semantic": {
+              "enabled": true,
+              "min_confidence": 0.75,
+              "promotion": {
+                "rule": "repeated_validation",
+                "times": 3
+              },
+              "require_provenance": true,
+              "retention_days": null
+            }
+          },
+          "summary_provider": null
+        },
+        "phases": {
+          "dependency": [],
+          "items": []
+        },
+        "providers": {
+          "cascade": {},
+          "enforce_judge_independence": false,
+          "providers": []
+        },
+        "skills": {
+          "acquisition_order": [
+            "installed",
+            "marketplace",
+            "generate"
+          ],
+          "allow_external_side_effects": false,
+          "explore": false,
+          "explore_candidates": [],
+          "min_marketplace_stars": 100,
+          "min_trials": 3,
+          "min_trust_level": "reviewed",
+          "quarantine_dir": "generated-skills",
+          "require_checksum": false,
+          "require_human_promotion": true
+        },
+        "triggers": {
+          "dedup_window_seconds": 300,
+          "max_depth": 5,
+          "triggers": []
+        }
+      },
+      "description": "How the work gets done."
+    },
+    "features": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Features"
+        }
+      ],
+      "default": {
+        "external_side_effects": false,
+        "human_approval": true,
+        "marketplace_skills": false,
+        "parallel_execution": true,
+        "self_evolution": false
+      },
+      "description": "Coarse capability switches, each defaulting to the safe answer."
+    },
+    "intent": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Intent"
+        }
+      ],
+      "default": {
+        "background": [],
+        "goals": [],
+        "prerequisites": [],
+        "success": []
+      },
+      "description": "What the loop is for, and how anyone would know it worked."
+    },
+    "name": {
+      "description": "Loop identity. Becomes the generated skill name.",
+      "type": "string"
+    },
+    "safety": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Safety"
+        }
+      ],
+      "default": {
+        "checks": [],
+        "gates": {
+          "approval": [],
+          "entry": [],
+          "rollback": [],
+          "stop": {
+            "max_cost_usd": null,
+            "max_iterations": 10,
+            "max_revisions_per_node": 3,
+            "max_tokens": null,
+            "max_wall_clock_seconds": null,
+            "no_progress_iterations": 3,
+            "no_progress_iterations_randomness": null,
+            "stop_on_overall_success": true
+          }
+        },
+        "limits": {
+          "global": {
+            "forbidden_commands": [],
+            "forbidden_paths": [],
+            "human_checkpoint": [],
+            "max_seconds": null,
+            "max_tokens": null,
+            "rules": []
+          },
+          "per_node": {}
+        },
+        "protected": {
+          "components": [
+            "gates",
+            "limits",
+            "recovery",
+            "protected",
+            "approvals",
+            "credentials",
+            "audit",
+            "baselines",
+            "retention",
+            "environment"
+          ],
+          "extra_paths": []
+        },
+        "recovery": {
+          "corrupted_state": {
+            "action": "restore_checkpoint"
+          },
+          "invalid_output": {
+            "action": "revise",
+            "max_attempts": 2
+          },
+          "repeated_failure": {
+            "action": "escalate"
+          },
+          "resource_exhaustion": {
+            "action": "pause"
+          },
+          "safety_violation": {
+            "action": "stop"
+          },
+          "tool_unavailable": {
+            "action": "fallback"
+          },
+          "transient_error": {
+            "action": "retry",
+            "backoff": "exponential",
+            "base_delay_seconds": 2,
+            "max_attempts": 3
+          }
+        }
+      },
+      "description": "What must not happen, and when this stops."
+    },
+    "version": {
+      "default": "0.1.0",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "LoopConfig",
+  "type": "object"
 }

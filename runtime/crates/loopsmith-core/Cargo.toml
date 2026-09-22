@@ -13,10 +13,11 @@ readme = "README.md"
 # `config/loop.schema.json` from the repository root, which no crate tarball can
 # contain, so shipping them would hand a published crate tests that cannot pass.
 include = ["/src/**/*", "/README.md"]
-description = "Config model and A-H validation for loopsmith loops"
+description = "Config model and validation for loopsmith loops"
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+schemars = { workspace = true }

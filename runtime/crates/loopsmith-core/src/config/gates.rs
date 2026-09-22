@@ -1,9 +1,25 @@
-//! Section F — the layered exits.
+//! The layered exits, and the three checkpoints either side of them.
+//!
+//! `stop` is the original section F: the ceilings that end a run. The three
+//! lists beside it answer questions a ceiling cannot — may this run start at
+//! all, does this need a human before it proceeds, and has something gone
+//! badly enough to undo.
+//!
+//! All four reuse [`Detector`] rather than introducing an expression language.
+//! That is the whole design: a gate condition is the same kind of object as a
+//! validation condition, so it is evaluated by the same compiled code, obeys
+//! the same independence rules, and an author who has learned one has learned
+//! both. The reference specification models gate conditions as strings like
+//! `"risk_score < 0.40"`; parsing those would mean a new evaluator, a new
+//! failure surface, and a second answer to "how is a condition decided".
 
-use super::yes;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use super::validation::Detector;
+use super::yes;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StopGates {
     /// Hard ceiling on whole-loop iterations.
@@ -65,4 +81,122 @@ fn default_max_revisions() -> u32 {
 }
 fn default_no_progress() -> u32 {
     3
+}
+
+/// What happens when a gate rule does not pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GateOutcome {
+    /// End the run. Nothing further is dispatched.
+    Stop,
+    /// Halt and record an escalation for a human to answer. Resumable.
+    Escalate,
+    /// Halt without an escalation record. Resumable.
+    Pause,
+    /// Restore the last good checkpoint and continue from there.
+    Rollback,
+    /// Record it and carry on. The only non-blocking outcome.
+    Warn,
+}
+
+impl GateOutcome {
+    /// Whether this outcome stops the run from proceeding.
+    pub fn is_blocking(self) -> bool {
+        !matches!(self, GateOutcome::Warn)
+    }
+}
+
+/// One checkpoint, decided by a detector.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GateRule {
+    pub id: String,
+    /// Natural-language statement of what this gate is for. Shown verbatim
+    /// when the gate blocks, so it is the whole explanation a stopped operator
+    /// gets — write it for them, not for the author.
+    pub statement: String,
+    pub detector: Detector,
+    #[serde(default = "default_on_fail")]
+    pub on_fail: GateOutcome,
+}
+
+fn default_on_fail() -> GateOutcome {
+    GateOutcome::Stop
+}
+
+/// Every gate the run is subject to.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Gates {
+    /// The ceilings that end a run. Formerly the whole of section F.
+    #[serde(default)]
+    pub stop: StopGates,
+    /// Checked once, before the first iteration. A failing entry gate means
+    /// the run never starts — which is the cheapest possible failure.
+    #[serde(default)]
+    pub entry: Vec<GateRule>,
+    /// Checked after each iteration. A failing approval gate halts for a human
+    /// rather than ending the run.
+    #[serde(default)]
+    pub approval: Vec<GateRule>,
+    /// Checked after each iteration. A failing rollback gate restores the last
+    /// good checkpoint — for the case where continuing is worse than undoing.
+    #[serde(default)]
+    pub rollback: Vec<GateRule>,
+}
+
+impl Gates {
+    /// Every rule across the three lists, with the list it came from.
+    pub fn rules(&self) -> impl Iterator<Item = (GateKind, &GateRule)> {
+        self.entry
+            .iter()
+            .map(|r| (GateKind::Entry, r))
+            .chain(self.approval.iter().map(|r| (GateKind::Approval, r)))
+            .chain(self.rollback.iter().map(|r| (GateKind::Rollback, r)))
+    }
+}
+
+/// Which list a rule came from, and therefore when it is checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GateKind {
+    Entry,
+    Approval,
+    Rollback,
+}
+
+impl GateKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GateKind::Entry => "entry",
+            GateKind::Approval => "approval",
+            GateKind::Rollback => "rollback",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_gate_defaults_to_blocking() {
+        // The safe default. A gate the author forgot to annotate should stop
+        // the run, not shrug.
+        assert_eq!(default_on_fail(), GateOutcome::Stop);
+        assert!(default_on_fail().is_blocking());
+    }
+
+    #[test]
+    fn only_warn_is_non_blocking() {
+        for o in [
+            GateOutcome::Stop,
+            GateOutcome::Escalate,
+            GateOutcome::Pause,
+            GateOutcome::Rollback,
+        ] {
+            assert!(o.is_blocking(), "{o:?} must block");
+        }
+        assert!(!GateOutcome::Warn.is_blocking());
+    }
 }

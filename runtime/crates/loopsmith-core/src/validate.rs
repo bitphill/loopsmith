@@ -74,12 +74,12 @@ pub fn validate(cfg: &LoopConfig) -> ValidationReport {
     if cfg.name.trim().is_empty() {
         r.issues.push(Issue::err("name", "must not be empty"));
     }
-    if cfg.goals.is_empty() {
+    if cfg.intent.goals.is_empty() {
         r.issues
             .push(Issue::err("goals", "a loop needs at least one goal"));
     }
 
-    let goal_names: BTreeSet<&str> = cfg.goals.iter().map(|g| g.name.as_str()).collect();
+    let goal_names: BTreeSet<&str> = cfg.intent.goals.iter().map(|g| g.name.as_str()).collect();
     check_goals(cfg, &goal_names, &mut r);
     check_pre_execution(cfg, &mut r);
     check_validations(cfg, &goal_names, &mut r);
@@ -95,7 +95,7 @@ pub fn validate(cfg: &LoopConfig) -> ValidationReport {
 /// far cheaper to say so now than to discover it when the first arrow turns out
 /// to point at a typo three hours into an unattended run.
 fn check_execution_guidelines(cfg: &LoopConfig, r: &mut ValidationReport) {
-    let g = &cfg.execution_guidelines;
+    let g = &cfg.execution.phases;
 
     let mut seen = BTreeSet::new();
     for (i, item) in g.items.iter().enumerate() {
@@ -158,7 +158,7 @@ fn check_execution_guidelines(cfg: &LoopConfig, r: &mut ValidationReport) {
     }
 
     // A node pointing at a phase that does not exist would simply never run.
-    for (i, n) in cfg.graph.nodes.iter().enumerate() {
+    for (i, n) in cfg.execution.graph.nodes.iter().enumerate() {
         if let Some(stage) = &n.stage {
             if !seen.contains(stage.as_str()) {
                 r.issues.push(Issue::err(
@@ -222,7 +222,7 @@ fn topo_order(phases: &[crate::Phase]) -> Result<(), String> {
 
 fn check_goals(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationReport) {
     let mut seen = BTreeSet::new();
-    for (i, g) in cfg.goals.iter().enumerate() {
+    for (i, g) in cfg.intent.goals.iter().enumerate() {
         let f = format!("goals[{i}]");
         if g.name.trim().is_empty() {
             r.issues.push(Issue::err(format!("{f}.name"), "must not be empty"));
@@ -261,7 +261,7 @@ fn check_goals(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationRepor
 }
 
 fn check_pre_execution(cfg: &LoopConfig, r: &mut ValidationReport) {
-    if cfg.pre_execution.is_empty() {
+    if cfg.intent.prerequisites.is_empty() {
         r.issues.push(Issue::warn(
             "pre_execution",
             "empty. The corpus rule is to do the task manually first — the manual runs are the spec",
@@ -269,7 +269,8 @@ fn check_pre_execution(cfg: &LoopConfig, r: &mut ValidationReport) {
         return;
     }
     let undone: Vec<&str> = cfg
-        .pre_execution
+        .intent
+        .prerequisites
         .iter()
         .filter(|w| !w.done)
         .map(|w| w.step.as_str())
@@ -295,7 +296,7 @@ fn check_pre_execution(cfg: &LoopConfig, r: &mut ValidationReport) {
 /// check was never wired up".
 fn available_artifacts(cfg: &LoopConfig) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    for v in &cfg.validations {
+    for v in &cfg.safety.checks {
         if let Detector::FileExists { path, .. } = &v.detector {
             if let Some(stem) = std::path::Path::new(path)
                 .file_stem()
@@ -312,7 +313,7 @@ fn available_artifacts(cfg: &LoopConfig) -> BTreeSet<String> {
 fn check_validations(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationReport) {
     let artifacts = available_artifacts(cfg);
     let mut covered: BTreeMap<&str, usize> = BTreeMap::new();
-    for (i, v) in cfg.validations.iter().enumerate() {
+    for (i, v) in cfg.safety.checks.iter().enumerate() {
         let f = format!("validations[{i}]");
         if v.target != OVERALL && !names.contains(v.target.as_str()) {
             r.issues.push(Issue::err(
@@ -373,7 +374,7 @@ fn check_validations(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut Validatio
         }
     }
 
-    for g in &cfg.goals {
+    for g in &cfg.intent.goals {
         if covered.get(g.name.as_str()).copied().unwrap_or(0) == 0 {
             r.issues.push(Issue::err(
                 format!("validations[target={}]", g.name),
@@ -390,7 +391,7 @@ fn check_validations(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut Validatio
 }
 
 fn check_success(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationReport) {
-    for (i, s) in cfg.success.iter().enumerate() {
+    for (i, s) in cfg.intent.success.iter().enumerate() {
         let f = format!("success[{i}]");
         if s.target != OVERALL && !names.contains(s.target.as_str()) {
             r.issues.push(Issue::err(
@@ -413,7 +414,7 @@ fn check_success(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut ValidationRep
 }
 
 fn check_stop_gates(cfg: &LoopConfig, r: &mut ValidationReport) {
-    let g = &cfg.stop_gates;
+    let g = &cfg.safety.gates.stop;
     if g.max_iterations == 0 {
         r.issues
             .push(Issue::err("stop_gates.max_iterations", "must be at least 1"));
@@ -462,8 +463,8 @@ fn check_stop_gates(cfg: &LoopConfig, r: &mut ValidationReport) {
 }
 
 fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut ValidationReport) {
-    let ids: BTreeSet<&str> = cfg.graph.nodes.iter().map(|n| n.id.as_str()).collect();
-    if cfg.graph.nodes.is_empty() {
+    let ids: BTreeSet<&str> = cfg.execution.graph.nodes.iter().map(|n| n.id.as_str()).collect();
+    if cfg.execution.graph.nodes.is_empty() {
         r.issues.push(Issue::warn(
             "graph.nodes",
             "no nodes; the loop will run a single implicit builder per goal",
@@ -472,7 +473,7 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
     }
     let mut seen = BTreeSet::new();
     let mut has_judge = false;
-    for (i, n) in cfg.graph.nodes.iter().enumerate() {
+    for (i, n) in cfg.execution.graph.nodes.iter().enumerate() {
         let f = format!("graph.nodes[{i}]");
         if !seen.insert(n.id.as_str()) {
             r.issues
@@ -522,7 +523,7 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
             "no judge node; verification will fall back to detectors only",
         ));
     }
-    if let Concurrency::Fixed { max_parallel } = cfg.graph.concurrency {
+    if let Concurrency::Fixed { max_parallel } = cfg.execution.graph.concurrency {
         if max_parallel == 0 {
             r.issues.push(Issue::err(
                 "graph.concurrency.max_parallel",
@@ -534,15 +535,16 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
     // that can actually overlap. Two unisolated builders in a dependency chain
     // never run at the same time, and warning about them trains the reader to
     // ignore the warning that matters.
-    let parallel_possible = !matches!(cfg.graph.concurrency, Concurrency::Sequential);
+    let parallel_possible = !matches!(cfg.execution.graph.concurrency, Concurrency::Sequential);
     if parallel_possible {
-        let levels = wave_levels(&cfg.graph.nodes);
+        let levels = wave_levels(&cfg.execution.graph.nodes);
         let mut by_wave: BTreeMap<usize, Vec<&str>> = BTreeMap::new();
         for n in cfg
+            .execution
             .graph
             .nodes
             .iter()
-            .filter(|n| !n.isolated && matches!(n.role, Role::Builder))
+            .filter(|n| !n.isolation.needs_worktree() && matches!(n.role, Role::Builder))
         {
             let wave = levels.get(n.id.as_str()).copied().unwrap_or(0);
             by_wave.entry(wave).or_default().push(n.id.as_str());
@@ -596,7 +598,7 @@ fn wave_levels(nodes: &[NodeSpec]) -> BTreeMap<&str, usize> {
 }
 
 fn check_providers(cfg: &LoopConfig, r: &mut ValidationReport) {
-    if cfg.providers.providers.is_empty() {
+    if cfg.execution.providers.providers.is_empty() {
         r.issues.push(Issue::warn(
             "providers.providers",
             "none declared; nodes cannot be dispatched until at least one exists",
@@ -604,7 +606,7 @@ fn check_providers(cfg: &LoopConfig, r: &mut ValidationReport) {
         return;
     }
     let mut seen = BTreeSet::new();
-    for (i, p) in cfg.providers.providers.iter().enumerate() {
+    for (i, p) in cfg.execution.providers.providers.iter().enumerate() {
         let f = format!("providers.providers[{i}]");
         if !seen.insert(p.id.as_str()) {
             r.issues
@@ -615,7 +617,7 @@ fn check_providers(cfg: &LoopConfig, r: &mut ValidationReport) {
                 .push(Issue::err(format!("{f}.command"), "must not be empty"));
         }
     }
-    for (tier, ids) in &cfg.providers.cascade {
+    for (tier, ids) in &cfg.execution.providers.cascade {
         if !matches!(tier.as_str(), "cheap" | "standard" | "strong") {
             r.issues.push(Issue::err(
                 format!("providers.cascade.{tier}"),
@@ -631,8 +633,9 @@ fn check_providers(cfg: &LoopConfig, r: &mut ValidationReport) {
             }
         }
     }
-    if cfg.providers.enforce_judge_independence {
+    if cfg.execution.providers.enforce_judge_independence {
         let distinct: BTreeSet<&str> = cfg
+            .execution
             .providers
             .providers
             .iter()
@@ -686,7 +689,7 @@ pre_execution:
         // for the life of the loop, which reads as "the work is not done"
         // rather than as "this check was never wired up".
         let mut c = minimal();
-        c.validations.push(crate::Validation {
+        c.safety.checks.push(crate::Validation {
             target: "g1".into(),
             name: "cited".into(),
             mode: Mode::Objective,
@@ -709,7 +712,7 @@ pre_execution:
     #[test]
     fn a_regex_over_a_file_the_config_declares_is_accepted() {
         let mut c = minimal();
-        c.validations.push(crate::Validation {
+        c.safety.checks.push(crate::Validation {
             target: "g1".into(),
             name: "notes-exist".into(),
             mode: Mode::Objective,
@@ -723,7 +726,7 @@ pre_execution:
         // Both spellings resolve: the file's stem and its full path.
         for artifact in ["notes", "out/notes.md"] {
             let mut c = c.clone();
-            c.validations.push(crate::Validation {
+            c.safety.checks.push(crate::Validation {
                 target: "g1".into(),
                 name: "cited".into(),
                 mode: Mode::Objective,
@@ -742,7 +745,7 @@ pre_execution:
     #[test]
     fn goal_without_blocking_validation_is_an_error() {
         let mut c = minimal();
-        c.validations[0].blocking = false;
+        c.safety.checks[0].blocking = false;
         let r = validate(&c);
         assert!(r.has_errors());
         assert!(r.render().contains("no blocking validation"));
@@ -760,7 +763,7 @@ pre_execution:
             stage: None,
             skills: vec![],
             weight: 1.0,
-            isolated: false,
+            isolation: Isolation::None,
         }
     }
 
@@ -769,12 +772,12 @@ pre_execution:
         // `make-media -> publish` cannot overlap, so warning about it trains the
         // reader to ignore the warning that matters.
         let mut c = minimal();
-        c.graph.nodes = vec![
+        c.execution.graph.nodes = vec![
             builder("draft", &[]),
             builder("make-media", &["draft"]),
             builder("publish", &["make-media"]),
         ];
-        c.graph.concurrency = Concurrency::Auto {
+        c.execution.graph.concurrency = Concurrency::Auto {
             cap: 4,
             min_marginal_gain: 0.05,
         };
@@ -788,12 +791,12 @@ pre_execution:
     #[test]
     fn builders_that_really_can_overlap_are_still_reported() {
         let mut c = minimal();
-        c.graph.nodes = vec![
+        c.execution.graph.nodes = vec![
             builder("survey", &[]),
             builder("refactor-a", &["survey"]),
             builder("refactor-b", &["survey"]),
         ];
-        c.graph.concurrency = Concurrency::Auto {
+        c.execution.graph.concurrency = Concurrency::Auto {
             cap: 4,
             min_marginal_gain: 0.05,
         };
@@ -809,8 +812,8 @@ pre_execution:
     #[test]
     fn sequential_concurrency_silences_the_warning_entirely() {
         let mut c = minimal();
-        c.graph.nodes = vec![builder("a", &[]), builder("b", &[])];
-        c.graph.concurrency = Concurrency::Sequential;
+        c.execution.graph.nodes = vec![builder("a", &[]), builder("b", &[])];
+        c.execution.graph.concurrency = Concurrency::Sequential;
         assert!(!validate(&c).render().contains("without worktree isolation"));
     }
 
@@ -844,15 +847,15 @@ pre_execution:
         // At or past `no_progress_iterations` the loop halts first, so the
         // perturbation would never fire and the author would never find out.
         let mut c = minimal();
-        c.stop_gates.no_progress_iterations = 3;
+        c.safety.gates.stop.no_progress_iterations = 3;
         for at in [3u32, 4] {
-            c.stop_gates.no_progress_iterations_randomness = Some(at);
+            c.safety.gates.stop.no_progress_iterations_randomness = Some(at);
             let r = validate(&c);
             assert!(r.has_errors(), "{at} should be refused against a halt of 3");
             assert!(r.render().contains("must be less than no_progress_iterations"));
         }
 
-        c.stop_gates.no_progress_iterations_randomness = Some(2);
+        c.safety.gates.stop.no_progress_iterations_randomness = Some(2);
         assert!(
             !validate(&c)
                 .render()
@@ -864,8 +867,8 @@ pre_execution:
     #[test]
     fn randomness_is_refused_when_staleness_is_never_counted() {
         let mut c = minimal();
-        c.stop_gates.no_progress_iterations = 0;
-        c.stop_gates.no_progress_iterations_randomness = Some(1);
+        c.safety.gates.stop.no_progress_iterations = 0;
+        c.safety.gates.stop.no_progress_iterations_randomness = Some(1);
         let r = validate(&c);
         assert!(r.has_errors());
         assert!(r.render().contains("staleness is never counted"));
@@ -874,7 +877,7 @@ pre_execution:
     #[test]
     fn an_execution_guideline_cycle_is_refused() {
         let mut c = minimal();
-        c.execution_guidelines = ExecutionGuidelines {
+        c.execution.phases = ExecutionGuidelines {
             items: vec![
                 Guideline {
                     name: "a".into(),
@@ -897,7 +900,7 @@ pre_execution:
     #[test]
     fn an_unknown_guideline_name_in_an_arrow_is_refused() {
         let mut c = minimal();
-        c.execution_guidelines = ExecutionGuidelines {
+        c.execution.phases = ExecutionGuidelines {
             items: vec![Guideline {
                 name: "gather".into(),
                 guideline: "collect the sources first".into(),
@@ -913,7 +916,7 @@ pre_execution:
     #[test]
     fn undone_pre_execution_blocks_the_run() {
         let mut c = minimal();
-        c.pre_execution[0].done = false;
+        c.intent.prerequisites[0].done = false;
         let r = validate(&c);
         assert!(r.has_errors());
         assert!(r.render().contains("not marked done"));
@@ -922,7 +925,7 @@ pre_execution:
     #[test]
     fn overall_is_reserved_as_a_goal_name() {
         let mut c = minimal();
-        c.goals[0].name = OVERALL.into();
+        c.intent.goals[0].name = OVERALL.into();
         let r = validate(&c);
         assert!(r.has_errors());
         assert!(r.render().contains("reserved"));
@@ -931,7 +934,7 @@ pre_execution:
     #[test]
     fn unknown_validation_target_is_an_error() {
         let mut c = minimal();
-        c.validations[0].target = "nope".into();
+        c.safety.checks[0].target = "nope".into();
         let r = validate(&c);
         assert!(r.has_errors());
         assert!(r.render().contains("unknown target"));
@@ -940,7 +943,7 @@ pre_execution:
     #[test]
     fn judge_detector_requires_a_named_standard() {
         let mut c = minimal();
-        c.validations[0].detector = Detector::Judge {
+        c.safety.checks[0].detector = Detector::Judge {
             standard: "  ".into(),
             min_score: None,
         };

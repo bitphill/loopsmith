@@ -26,9 +26,10 @@
 //!     - gather -> draft -> review
 //! ```
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionGuidelines {
     #[serde(default)]
@@ -42,7 +43,7 @@ pub struct ExecutionGuidelines {
     pub dependency: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Guideline {
     pub name: String,
