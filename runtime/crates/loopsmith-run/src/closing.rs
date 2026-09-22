@@ -115,6 +115,9 @@ pub(crate) fn close<S: Store>(
         None
     };
 
+    if outcome == RunState::Succeeded {
+        crate::remembering::procedure(&run, it);
+    }
     let metrics = crate::metrics::measure(&run, &progress);
     let baseline = judge_against_baseline(&run, &metrics, outcome, it);
 

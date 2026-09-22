@@ -142,6 +142,9 @@ pub struct NodeContext<'a> {
     /// What was wrong with this node's previous attempt in the same
     /// iteration, when recovery is asking it again.
     pub revision: Option<&'a str>,
+    /// Promoted cross-run memory: failure modes, procedures, and facts that
+    /// cleared their namespace's bar.
+    pub learned: &'a [String],
 }
 
 /// Dispatch one node. Pure with respect to the store so it is safe to call

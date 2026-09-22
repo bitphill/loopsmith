@@ -640,6 +640,7 @@ dependencies = [
 name = "loopsmith-memory"
 version = "0.3.1"
 dependencies = [
+ "loopsmith-core",
  "loopsmith-util",
  "serde",
  "serde_json",

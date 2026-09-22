@@ -229,6 +229,11 @@ pub enum Command {
     },
     /// Show what the loop wants changed about itself. It cannot apply these.
     Proposals { config: PathBuf, run_id: String },
+    /// What this loop remembers across runs, and the human half of promotion.
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
     /// Remove the git worktrees this loop created.
     Prune { config: PathBuf },
     /// Serve the local MCP server on stdio.
@@ -266,6 +271,30 @@ pub enum Command {
         /// Print the URL instead of opening a browser tab.
         #[arg(long)]
         no_open: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum MemoryAction {
+    /// Every record, promoted or not, with where it came from.
+    List {
+        config: PathBuf,
+        /// semantic, procedural, or failure. Omit for all three.
+        #[arg(long)]
+        namespace: Option<String>,
+    },
+    /// Promote a record so later runs reuse it. The only way a namespace whose
+    /// rule is `human_approval` ever promotes anything.
+    Promote {
+        config: PathBuf,
+        namespace: String,
+        key: String,
+    },
+    /// Delete a record.
+    Forget {
+        config: PathBuf,
+        namespace: String,
+        key: String,
     },
 }
 

@@ -48,6 +48,7 @@ pub(crate) fn plan<S: Store>(run: &mut Run<S>) -> Result<Planned, String> {
     if run.opts.acquire_skills && !run.opts.dry_run {
         install_default_skills(cfg, run.root(), &run.rec);
     }
+    crate::remembering::expire(run);
 
     Ok(Planned { graph, phases })
 }

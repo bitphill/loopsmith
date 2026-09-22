@@ -1229,6 +1229,11 @@ impl Store for Flaky {
     fn proposals(&self, r: &str) -> R<Vec<loopsmith_memory::Proposal>> { self.inner.proposals(r) }
     fn runs(&self) -> R<Vec<String>> { self.inner.runs() }
     fn flush(&self) -> R<()> { self.inner.flush() }
+    fn put_record(&self, r: &loopsmith_memory::Record) -> R<()> { self.inner.put_record(r) }
+    fn record(&self, ns: loopsmith_memory::Namespace, k: &str) -> R<Option<loopsmith_memory::Record>> { self.inner.record(ns, k) }
+    fn records(&self, ns: loopsmith_memory::Namespace) -> R<Vec<loopsmith_memory::Record>> { self.inner.records(ns) }
+    fn remove_record(&self, ns: loopsmith_memory::Namespace, k: &str) -> R<()> { self.inner.remove_record(ns, k) }
+    fn prune_episodes(&self, before: u64) -> R<usize> { self.inner.prune_episodes(before) }
 }
 
 #[test]
@@ -1395,5 +1400,50 @@ fn a_checkpoint_that_cannot_be_saved_halts_the_run_rather_than_run_on_undurable(
     assert_eq!(out.state, RunState::Failed, "restore_checkpoint has nothing to restore");
     assert_eq!(out.iterations, 1);
     assert!(out.stop.describe().contains("could not be saved"), "{}", out.stop.describe());
+    let _ = std::fs::remove_dir_all(d);
+}
+
+// --- cross-run memory ---------------------------------------------------------------
+
+#[test]
+fn a_failure_one_run_hit_is_in_the_next_runs_prompt() {
+    let (s, d) = store("memory-failure");
+    let mut broken = failing(cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n"));
+    provider_script(&mut broken, "echo \"error: unexpected argument '--quiet'\" >&2; exit 2");
+    let _ = execute(&broken, &s, &opts("first", &d)).unwrap();
+    assert!(ledger_says(&s, "first", LedgerKind::Remembered, "promoted to failure memory"));
+
+    // A later run, with a provider that keeps the prompt it was given.
+    let mut fixed = cfg("");
+    let p = &mut fixed.execution.providers.providers[0];
+    p.command = "sh".into();
+    p.args = vec![
+        "-c".into(),
+        "printf '%s' \"$1\" > last_prompt; echo ok".into(),
+        "sh".into(),
+        "{{prompt}}".into(),
+    ];
+    let _ = execute(&fixed, &s, &opts("second", &d)).unwrap();
+    let prompt = std::fs::read_to_string(d.join("last_prompt")).unwrap();
+    assert!(
+        prompt.contains("What earlier runs of this loop established")
+            && prompt.contains("`build`: tool unavailable"),
+        "{prompt}"
+    );
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_procedure_is_promoted_only_when_three_certified_runs_agree() {
+    let (s, d) = store("memory-procedure");
+    let c = cfg("");
+    for (run, promoted) in [("one", false), ("two", false), ("three", true)] {
+        let _ = execute(&c, &s, &opts(run, &d)).unwrap();
+        assert_eq!(
+            ledger_says(&s, run, LedgerKind::Remembered, "promoted to procedural memory"),
+            promoted,
+            "after run `{run}`"
+        );
+    }
     let _ = std::fs::remove_dir_all(d);
 }

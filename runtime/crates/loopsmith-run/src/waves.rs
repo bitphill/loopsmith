@@ -177,6 +177,7 @@ impl<'scope, 'env, 'c: 'env> Launcher<'scope, 'env, 'c> {
                             perturbation: shared.inputs.perturbation.as_ref(),
                             published: &job.given.published,
                             revision: job.revision.as_deref(),
+                            learned: &shared.inputs.learned,
                         },
                     )
                 }))
@@ -441,6 +442,7 @@ fn handle<'c, S: Store>(
                 iteration: it,
             };
             let response = recovering::answer(&run.rec, &run.cfg.safety.recovery, &failure, false);
+            crate::remembering::failure(run, &node.id, class, &why, it);
             apply_final(run, progress, q, node, response, why, it);
         }
         return;
@@ -493,6 +495,7 @@ fn handle<'c, S: Store>(
 
     let unusable = (class == FailureClass::InvalidOutput).then_some(detail.as_str());
     let _ = record_outcome(run, progress, out, outcome, it, unusable);
+    crate::remembering::failure(run, &node.id, class, &detail, it);
     finish(run, progress, q, wave, false, it);
     apply_final(run, progress, q, node, response, detail, it);
     settle(run, q);

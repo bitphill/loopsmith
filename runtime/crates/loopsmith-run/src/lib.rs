@@ -47,6 +47,7 @@ mod context;
 mod evidence;
 mod planning;
 mod recovering;
+mod remembering;
 mod rules;
 mod running;
 mod validating;

@@ -11,7 +11,8 @@
 //! directly avoids taking an async runtime as a dependency for one server.
 
 use loopsmith_gate::{Evidence, TargetVerdict};
-use loopsmith_memory::{Episode, LedgerEntry, Store};
+use loopsmith_memory::namespaces::{self, Note, Remembered};
+use loopsmith_memory::{Episode, LedgerEntry, Namespace, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -134,6 +135,35 @@ pub fn tools() -> Value {
                 },
                 "required": ["run_id", "key"]
             }
+        },
+        {
+            "name": "loopsmith_remember",
+            "description": "Record something this loop should know across runs: a fact about the domain (semantic), a way of doing things that worked (procedural), or a failure mode (failure). Writing the same key from another run corroborates it. A record is only reused once it clears its namespace's promotion rule, and a namespace that requires provenance refuses a record that cannot say where it came from.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "config_path": { "type": "string", "description": "Path to the loop config; its memory policy decides retention and promotion." },
+                    "run_id": { "type": "string" },
+                    "namespace": { "type": "string", "enum": ["semantic", "procedural", "failure"] },
+                    "key": { "type": "string" },
+                    "content": { "type": "string" },
+                    "provenance": { "type": "string", "description": "Where this came from: a source, a run, an observation." },
+                    "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+                },
+                "required": ["config_path", "run_id", "namespace", "key", "content"]
+            }
+        },
+        {
+            "name": "loopsmith_recall",
+            "description": "Promoted cross-run records: what this loop has established, filtered by each namespace's confidence floor. Unpromoted records are not returned.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "config_path": { "type": "string" },
+                    "namespace": { "type": "string", "enum": ["semantic", "procedural", "failure"] }
+                },
+                "required": ["config_path"]
+            }
         }
     ])
 }
@@ -179,6 +209,8 @@ impl<S: Store> Server<S> {
             "loopsmith_goal_states" => self.tool_goal_states(&args),
             "loopsmith_record_episode" => self.tool_record(&args),
             "loopsmith_scratchpad" => self.tool_scratchpad(&args),
+            "loopsmith_remember" => self.tool_remember(&args),
+            "loopsmith_recall" => self.tool_recall(&args),
             other => Err(format!("unknown tool `{other}`")),
         };
 
@@ -285,6 +317,46 @@ impl<S: Store> Server<S> {
         Ok(json!({ "recorded": true, "seq": seq }))
     }
 
+    fn tool_remember(&self, args: &Value) -> Result<Value, String> {
+        let cfg = loopsmith_core::load(str_arg(args, "config_path")?).map_err(|e| e.to_string())?;
+        let namespace = memory_namespace(args)?
+            .ok_or_else(|| "missing required argument `namespace`".to_string())?;
+        let (run_id, key, content) = (
+            str_arg(args, "run_id")?,
+            str_arg(args, "key")?,
+            str_arg(args, "content")?,
+        );
+        let note = Note {
+            namespace,
+            key: &key,
+            content: &content,
+            provenance: args.get("provenance").and_then(|v| v.as_str()),
+            confidence: args.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.8),
+            run_id: &run_id,
+        };
+        match namespaces::remember(&self.store, &cfg.execution.memory, &note)
+            .map_err(|e| e.to_string())?
+        {
+            Remembered::Written { promoted, .. } => Ok(json!({ "written": true, "promoted": promoted })),
+            Remembered::Refused(why) => Err(why),
+            Remembered::Disabled => Err(format!(
+                "the {} namespace is switched off in this loop's memory policy",
+                namespace.as_str()
+            )),
+        }
+    }
+
+    fn tool_recall(&self, args: &Value) -> Result<Value, String> {
+        let cfg = loopsmith_core::load(str_arg(args, "config_path")?).map_err(|e| e.to_string())?;
+        let wanted = match memory_namespace(args)? {
+            Some(ns) => vec![ns],
+            None => vec![Namespace::Semantic, Namespace::Procedural, Namespace::Failure],
+        };
+        let records = namespaces::recall(&self.store, &cfg.execution.memory, &wanted)
+            .map_err(|e| e.to_string())?;
+        Ok(json!({ "records": records }))
+    }
+
     fn tool_scratchpad(&self, args: &Value) -> Result<Value, String> {
         let run = str_arg(args, "run_id")?;
         let key = str_arg(args, "key")?;
@@ -328,6 +400,21 @@ impl<S: Store> Server<S> {
     }
 }
 
+/// The `namespace` argument, if given. Episodic is not writable here: an
+/// episode is recorded with `loopsmith_record_episode`, as what happened, not
+/// as something believed.
+fn memory_namespace(args: &Value) -> Result<Option<Namespace>, String> {
+    let Some(name) = args.get("namespace").and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
+    match Namespace::parse(name) {
+        Some(Namespace::Episodic) | None => Err(format!(
+            "`{name}` is not a memory namespace; use semantic, procedural, or failure"
+        )),
+        Some(ns) => Ok(Some(ns)),
+    }
+}
+
 fn str_arg(args: &Value, key: &str) -> Result<String, String> {
     args.get(key)
         .and_then(|v| v.as_str())
@@ -367,6 +454,46 @@ mod tests {
 
     fn is_error(r: &Response) -> bool {
         r.result.as_ref().unwrap()["isError"].as_bool().unwrap()
+    }
+
+    #[test]
+    fn an_agent_can_remember_a_fact_but_not_promote_it_by_saying_so() {
+        let (s, d) = server();
+        let cfg = d.join("loop.yaml");
+        std::fs::write(
+            &cfg,
+            "name: t\nintent:\n  goals:\n    - name: g\n      description: a sufficiently long goal\n",
+        )
+        .unwrap();
+        let path = cfg.display().to_string();
+
+        let unsourced = s.handle(&call(
+            "loopsmith_remember",
+            json!({ "config_path": path, "run_id": "r1", "namespace": "semantic",
+                    "key": "api", "content": "the API paginates at 100" }),
+        ));
+        assert!(is_error(&unsourced), "semantic memory requires provenance");
+
+        let sourced = s.handle(&call(
+            "loopsmith_remember",
+            json!({ "config_path": path, "run_id": "r1", "namespace": "semantic",
+                    "key": "api", "content": "the API paginates at 100",
+                    "provenance": "docs/api.md" }),
+        ));
+        assert!(!is_error(&sourced), "{}", text_of(&sourced));
+        assert!(text_of(&sourced).contains("\"promoted\": false"));
+
+        // One run's say-so is not enough for a fact to be reused.
+        let recalled = s.handle(&call("loopsmith_recall", json!({ "config_path": path })));
+        assert!(text_of(&recalled).contains("\"records\": []"), "{}", text_of(&recalled));
+
+        let episodic = s.handle(&call(
+            "loopsmith_remember",
+            json!({ "config_path": path, "run_id": "r1", "namespace": "episodic",
+                    "key": "k", "content": "c", "provenance": "p" }),
+        ));
+        assert!(is_error(&episodic), "episodes are recorded as episodes");
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]

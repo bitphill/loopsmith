@@ -136,6 +136,8 @@ pub(crate) struct Inputs {
     pub explore_now: Option<String>,
     pub perturbation: Option<perturb::Perturbation>,
     pub seed: u64,
+    /// Promoted cross-run memory, one line per record.
+    pub learned: Vec<String>,
 }
 
 /// What one iteration dispatched, before the gate ruled on it.
@@ -440,6 +442,7 @@ fn prepare<S: Store>(run: &Run<S>, progress: &Progress, it: u32) -> Inputs {
         explore_now,
         perturbation,
         seed,
+        learned: crate::remembering::recall(run),
     }
 }
 

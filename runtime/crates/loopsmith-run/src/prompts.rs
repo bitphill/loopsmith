@@ -102,6 +102,18 @@ pub fn build_node_prompt(cfg: &LoopConfig, node: &NodeSpec, ctx: &NodeContext) -
         }
     }
 
+    // What earlier runs established, promoted past its namespace's bar. Never
+    // handed to a judge, for the same reason as a perturbation: the thing that
+    // checks the work is held to the standard it was given, not to what the
+    // loop has come to believe.
+    if node.role != Role::Judge && !ctx.learned.is_empty() {
+        s.push_str("## What earlier runs of this loop established\n");
+        for line in ctx.learned {
+            s.push_str(&format!("- {line}\n"));
+        }
+        s.push('\n');
+    }
+
     // Compressed history, not raw episodes. This is the only thing standing
     // between a week-long run and a prompt that grows until it is unaffordable.
     if !ctx.carried.is_empty() {

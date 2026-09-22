@@ -3,7 +3,7 @@
 //! Every command returns `Result<ExitCode, String>` rather than exiting, so a
 //! command is testable and the exit code is decided in one place.
 
-use crate::cli::{Command, SkillsAction};
+use crate::cli::{Command, MemoryAction, SkillsAction};
 use loopsmith_run::RunOutcome;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -13,6 +13,7 @@ pub mod doctor;
 pub mod gate;
 pub mod ledger;
 pub mod mcp;
+pub mod memory;
 pub mod new;
 pub mod permissions;
 pub mod plan;
@@ -178,6 +179,19 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
             check,
         } => watch::execute(&config, max_runs, check),
         Command::Schedule { config, install } => schedule::execute(&config, install),
+        Command::Memory { action } => match action {
+            MemoryAction::List { config, namespace } => memory::list(&config, namespace.as_deref()),
+            MemoryAction::Promote {
+                config,
+                namespace,
+                key,
+            } => memory::promote(&config, &namespace, &key),
+            MemoryAction::Forget {
+                config,
+                namespace,
+                key,
+            } => memory::forget(&config, &namespace, &key),
+        },
         Command::Skills { action } => match action {
             SkillsAction::List { config, all } => skills::list(&config, all),
             SkillsAction::Search {

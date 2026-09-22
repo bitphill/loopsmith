@@ -15,8 +15,8 @@
 //! ```
 
 use crate::{
-    Checkpoint, Episode, GoalState, IterationSummary, LedgerEntry, MemError, Proposal, Result,
-    SkillTrial, Store,
+    Checkpoint, Episode, GoalState, IterationSummary, LedgerEntry, MemError, Namespace, Proposal,
+    Record, Result, SkillTrial, Store,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -285,6 +285,61 @@ impl Store for SledStore {
             .flush()
             .map_err(|e| MemError::Backend(e.to_string()))?;
         Ok(())
+    }
+
+    fn put_record(&self, r: &Record) -> Result<()> {
+        if r.key.trim().is_empty() {
+            return Err(MemError::Rejected("a record needs a key".into()));
+        }
+        if !(0.0..=1.0).contains(&r.confidence) {
+            return Err(MemError::Rejected(format!(
+                "confidence {} is outside 0 to 1",
+                r.confidence
+            )));
+        }
+        self.put(
+            format!("mr/{}/{}", r.namespace.as_str(), r.key),
+            serde_json::to_vec(r)?,
+        )
+    }
+
+    fn record(&self, ns: Namespace, key: &str) -> Result<Option<Record>> {
+        let v = self
+            .db
+            .get(format!("mr/{}/{key}", ns.as_str()).as_bytes())
+            .map_err(|e| MemError::Backend(e.to_string()))?;
+        match v {
+            Some(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn records(&self, ns: Namespace) -> Result<Vec<Record>> {
+        self.scan(&format!("mr/{}/", ns.as_str()))
+    }
+
+    fn remove_record(&self, ns: Namespace, key: &str) -> Result<()> {
+        self.db
+            .remove(format!("mr/{}/{key}", ns.as_str()).as_bytes())
+            .map_err(|e| MemError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    fn prune_episodes(&self, before_ms: u64) -> Result<usize> {
+        let mut doomed = Vec::new();
+        for item in self.db.scan_prefix(b"ep/") {
+            let (k, v) = item.map_err(|e| MemError::Backend(e.to_string()))?;
+            let ep: Episode = serde_json::from_slice(&v)?;
+            if ep.created_ms < before_ms {
+                doomed.push(k);
+            }
+        }
+        for k in &doomed {
+            self.db
+                .remove(k)
+                .map_err(|e| MemError::Backend(e.to_string()))?;
+        }
+        Ok(doomed.len())
     }
 }
 
