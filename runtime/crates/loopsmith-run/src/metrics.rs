@@ -84,7 +84,11 @@ pub(crate) fn watch<S: Store>(run: &Run<S>, progress: &mut Progress, it: u32) {
     }
     let now = measure(run, progress);
     for alert in &run.cfg.safety.alerts {
-        if progress.alerts.iter().any(|a| a.id == alert.id) {
+        // Once per run, and a resume is the same run: the checkpoint remembers
+        // what fired before this process started.
+        if progress.alerts.iter().any(|a| a.id == alert.id)
+            || run.checkpoint.alerts_raised.contains(&alert.id)
+        {
             continue;
         }
         let Some(value) = now.get(alert.metric) else {

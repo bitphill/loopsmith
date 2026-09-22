@@ -256,7 +256,7 @@ impl Fired {
 
 /// Whether a firing becomes a run.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Admission {
+pub enum Decision {
     /// Start a run at this depth: 0 for a run the clock started, one more
     /// than the last run for a run the last run's own output started.
     Run { depth: u32 },
@@ -283,7 +283,14 @@ pub struct Watcher {
     admitted: BTreeMap<String, i64>,
     /// Depth of the most recent run this watcher started.
     depth: u32,
+    /// When that run started and, once it has, finished — Unix seconds.
+    last_run: Option<(i64, Option<i64>)>,
 }
+
+/// How long after a run ends a change to a file it wrote can still be
+/// attributed to it: filesystems stamp mtimes coarsely, and a run's last
+/// write can land a moment after the engine returns.
+const ATTRIBUTION_GRACE_SECONDS: i64 = 5;
 
 impl Watcher {
     /// A watcher that also ignores these directory names.
@@ -384,29 +391,59 @@ impl Watcher {
     /// that chain is `max_depth` long — which is the difference between a
     /// `goal_satisfied` trigger that re-runs a loop and one that re-runs it
     /// forever.
-    pub fn admit(&mut self, policy: &TriggerPolicy, fired: &Fired, now: i64) -> Admission {
+    pub fn admit(&mut self, policy: &TriggerPolicy, fired: &Fired, now: i64) -> Decision {
         let key = self.key_for(policy, fired, now);
         if let Some(&at) = self.admitted.get(&key) {
             if now - at < policy.dedup_window_seconds as i64 {
-                return Admission::Duplicate { key };
+                return Decision::Duplicate { key };
             }
         }
-        let depth = if fired.is_self_reachable() {
+        let depth = if self.caused_by_last_run(fired) {
             if !policy.may_chain(self.depth) {
-                return Admission::DepthCapped { depth: self.depth };
+                return Decision::DepthCapped { depth: self.depth };
             }
             self.depth + 1
         } else {
             0
         };
         self.admitted.insert(key, now);
-        Admission::Run { depth }
+        Decision::Run { depth }
     }
 
-    /// Record that a run was started at `depth`, so the next self-reachable
-    /// firing is measured against it.
-    pub fn started(&mut self, depth: u32) {
+    /// Whether this firing is the last run's own doing.
+    ///
+    /// Only a self-reachable trigger can be, and only when it plausibly came
+    /// from that run: a goal it satisfied, or a file whose new mtime falls
+    /// inside its window. A file a human drops into a watched directory an
+    /// hour later is a fresh cause, starts a fresh chain at depth 0, and is
+    /// never refused by a cap that exists to stop the loop feeding itself.
+    fn caused_by_last_run(&self, fired: &Fired) -> bool {
+        let Some((start, end)) = self.last_run else {
+            return false;
+        };
+        match fired {
+            Fired::GoalSatisfied(_) => true,
+            Fired::FileChange(p) => {
+                let mtime = self.last_mtime.get(p).copied().unwrap_or(0) as i64;
+                let until = end.map_or(i64::MAX, |e| e + ATTRIBUTION_GRACE_SECONDS);
+                (start..=until).contains(&mtime)
+            }
+            Fired::Cron(_) | Fired::Interval(_) => false,
+        }
+    }
+
+    /// Record that a run started at `depth`, so a firing it causes is
+    /// measured against it.
+    pub fn started(&mut self, depth: u32, now: i64) {
         self.depth = depth;
+        self.last_run = Some((now, None));
+    }
+
+    /// Record that the run most recently started has finished.
+    pub fn finished(&mut self, now: i64) {
+        if let Some((start, _)) = self.last_run {
+            self.last_run = Some((start, Some(now)));
+        }
     }
 
     fn key_for(&self, policy: &TriggerPolicy, fired: &Fired, now: i64) -> String {
@@ -554,14 +591,14 @@ mod tests {
         let p = policy(&["on: { type: file_change, path: inbox }\nidempotency_key: inbox\n"], 5);
         let mut w = Watcher::default();
         let f = Fired::FileChange("inbox".into());
-        assert!(matches!(w.admit(&p, &f, 1_000), Admission::Run { .. }));
+        assert!(matches!(w.admit(&p, &f, 1_000), Decision::Run { .. }));
         assert_eq!(
             w.admit(&p, &f, 1_010),
-            Admission::Duplicate { key: "inbox".into() },
+            Decision::Duplicate { key: "inbox".into() },
             "six files landing together are one event"
         );
         assert!(
-            matches!(w.admit(&p, &f, 1_400), Admission::Run { .. }),
+            matches!(w.admit(&p, &f, 1_400), Decision::Run { .. }),
             "outside the window it is a new event"
         );
     }
@@ -571,8 +608,8 @@ mod tests {
         let p = policy(&["on: { type: interval, seconds: 60 }\n"], 5);
         let mut w = Watcher::default();
         let f = Fired::Interval(60);
-        assert!(matches!(w.admit(&p, &f, 600), Admission::Run { .. }));
-        assert!(matches!(w.admit(&p, &f, 660), Admission::Run { .. }));
+        assert!(matches!(w.admit(&p, &f, 600), Decision::Run { .. }));
+        assert!(matches!(w.admit(&p, &f, 660), Decision::Run { .. }));
     }
 
     #[test]
@@ -586,21 +623,57 @@ mod tests {
         );
         let mut w = Watcher::default();
         let goal = Fired::GoalSatisfied("g".into());
+        let clock = Fired::Cron("0 * * * *".into());
+
+        // Something outside the loop starts the chain: the clock.
+        assert_eq!(w.admit(&p, &clock, 0), Decision::Run { depth: 0 });
+        w.started(0, 0);
+        w.finished(5);
         for (now, want) in [(10, 1), (20, 2)] {
             match w.admit(&p, &goal, now) {
-                Admission::Run { depth } => {
+                Decision::Run { depth } => {
                     assert_eq!(depth, want);
-                    w.started(depth);
+                    w.started(depth, now);
+                    w.finished(now + 5);
                 }
                 other => panic!("expected a run at depth {want}, got {other:?}"),
             }
         }
-        assert_eq!(w.admit(&p, &goal, 30), Admission::DepthCapped { depth: 2 });
+        assert_eq!(w.admit(&p, &goal, 30), Decision::DepthCapped { depth: 2 });
 
-        let clock = Fired::Cron("0 * * * *".into());
-        assert_eq!(w.admit(&p, &clock, 3_600), Admission::Run { depth: 0 });
-        w.started(0);
-        assert_eq!(w.admit(&p, &goal, 3_610), Admission::Run { depth: 1 });
+        assert_eq!(w.admit(&p, &clock, 3_600), Decision::Run { depth: 0 });
+        w.started(0, 3_600);
+        w.finished(3_605);
+        assert_eq!(w.admit(&p, &goal, 3_610), Decision::Run { depth: 1 });
+    }
+
+    #[test]
+    fn a_file_a_human_drops_later_is_never_capped() {
+        // The loop's own write lands inside its run and extends the chain; a
+        // file arriving long after starts a new one. With a cap of 1, a
+        // watcher that counted every file change as self-caused would refuse
+        // the human's second file forever.
+        let p = policy(&["on: { type: file_change, path: inbox }\n"], 1);
+        let mut w = Watcher::default();
+        let f = Fired::FileChange("inbox".into());
+
+        w.last_mtime.insert("inbox".into(), 100);
+        assert_eq!(w.admit(&p, &f, 100), Decision::Run { depth: 0 }, "no run yet: a human did it");
+        w.started(0, 101);
+        w.last_mtime.insert("inbox".into(), 103); // the run wrote into its own inbox
+        w.finished(104);
+        assert_eq!(w.admit(&p, &f, 106), Decision::Run { depth: 1 });
+        w.started(1, 106);
+        w.last_mtime.insert("inbox".into(), 108);
+        w.finished(109);
+        assert_eq!(w.admit(&p, &f, 110), Decision::DepthCapped { depth: 1 });
+
+        for later in [4_000_i64, 9_000] {
+            w.last_mtime.insert("inbox".into(), later as u64);
+            assert_eq!(w.admit(&p, &f, later), Decision::Run { depth: 0 });
+            w.started(0, later);
+            w.finished(later + 3);
+        }
     }
 
     fn civil(y: i64, mo: u32, d: u32, h: u32, mi: u32, wd: u32) -> Civil {

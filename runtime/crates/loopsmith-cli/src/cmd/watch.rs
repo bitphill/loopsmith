@@ -73,17 +73,17 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
         let mut why: Vec<String> = Vec::new();
         for f in &fired {
             match watcher.admit(policy, f, now) {
-                schedule::Admission::Run { depth: d } => {
+                schedule::Decision::Run { depth: d } => {
                     depth = Some(depth.map_or(d, |x| x.min(d)));
                     why.push(f.describe());
                 }
-                schedule::Admission::Duplicate { key } => println!(
+                schedule::Decision::Duplicate { key } => println!(
                     "  skipped: {} — the same firing (key `{key}`) already ran inside the \
                      {}s dedup window",
                     f.describe(),
                     policy.dedup_window_seconds
                 ),
-                schedule::Admission::DepthCapped { depth: d } => println!(
+                schedule::Decision::DepthCapped { depth: d } => println!(
                     "  refused: {} — it would be run {} in a chain this loop started itself, \
                      and `max_depth` is {}",
                     f.describe(),
@@ -94,7 +94,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
         }
 
         if let Some(depth) = depth {
-            watcher.started(depth);
+            watcher.started(depth, now);
             let run_id = format!("run-{}", loopsmith_memory::now_ms());
             println!(
                 "\n[{}] {} — starting {run_id}{}",
@@ -120,6 +120,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
                     // per-run log file is where the detail belongs.
                     verbose: false,
                     config_file: config_file_name(config),
+                    answer_escalations: false,
                 },
             ) {
                 Ok(out) => report_outcome(&out),
@@ -128,6 +129,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
                 Err(e) => eprintln!("run failed: {e}"),
             }
 
+            watcher.finished(schedule::now_unix());
             runs += 1;
             if let Some(limit) = max_runs {
                 if runs >= limit {

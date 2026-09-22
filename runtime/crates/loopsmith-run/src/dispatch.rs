@@ -44,6 +44,32 @@ pub struct NodeOutcome {
     pub containment: Containment,
 }
 
+impl NodeOutcome {
+    /// A dispatch that never produced a provider response: a retry that was
+    /// cancelled, a worker that panicked.
+    pub fn failed(node: &NodeSpec, error: String, class: FailureClass) -> Self {
+        NodeOutcome {
+            node_id: node.id.clone(),
+            role: node.role,
+            provider_id: String::new(),
+            prompt_digest: String::new(),
+            output: String::new(),
+            tokens: None,
+            tokens_estimated: false,
+            cost_usd: None,
+            duration_ms: 0,
+            skipped: vec![],
+            error: Some(error),
+            failure: Some(class),
+            seeded: vec![],
+            isolation: Isolation::Shared {
+                reason: "never dispatched".into(),
+            },
+            containment: Containment::Host,
+        }
+    }
+}
+
 /// Resolve the sub-agents a node declares, acquiring what is missing.
 pub fn ensure_skills<S: Store>(
     cfg: &LoopConfig,
@@ -152,7 +178,7 @@ pub fn run_node(
         _ => node.tier,
     };
 
-    let probed = if matches!(node.isolation, loopsmith_core::Isolation::Container { .. }) {
+    let probed = if node.isolation.is_container() {
         Some(container::probe())
     } else {
         None
@@ -208,7 +234,7 @@ pub fn run_node(
             duration_ms: 0,
             skipped: vec![],
             error: Some(e.to_string()),
-            failure: Some(e.class()),
+            failure: Some(e.failure_class()),
             seeded,
             isolation: iso,
             containment,

@@ -43,6 +43,12 @@ pub fn collect_evidence(
     ev
 }
 
+/// Evidence as the loop root holds it, with `metrics.json` as the metrics
+/// file — the one arrangement every state that consults the gate uses.
+pub(crate) fn at_root(cfg: &LoopConfig, root: &Path, judgments: Vec<Judgment>) -> Evidence {
+    collect_evidence(cfg, root, Some(&root.join("metrics.json")), judgments)
+}
+
 /// Every file the config's `file_exists` detectors name.
 ///
 /// That set is the config's own answer to "what is this loop supposed to

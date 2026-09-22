@@ -35,23 +35,19 @@ use crate::judgment;
 use crate::perturb;
 use crate::planning::Planned;
 use crate::publish;
-use crate::recovering::{self, Response};
+use crate::recovering::{self, Failure, Response};
 use crate::running::{Dispatched, Inputs, Progress};
-use crate::state::RunState;
+use crate::state::{Halt, RunState};
 use crate::evolve;
 use loopsmith_core::{FailureClass, Join, LoopConfig, NodeSpec, Role};
-use loopsmith_memory::{now_ms, Episode, LedgerKind, Store};
+use loopsmith_memory::{now_ms, Episode, Escalation, LedgerKind, Store};
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread::Scope;
 use std::time::Duration;
-
-/// Why dispatch stopped the run, when it did.
-pub(crate) struct Halt {
-    pub state: RunState,
-    pub why: String,
-}
 
 /// How far one wave has got.
 struct Tally {
@@ -106,64 +102,110 @@ struct Report<'c> {
     outcome: NodeOutcome,
     /// This dispatch was a recovery retry or revision, not the first try.
     retry: bool,
+    /// A retry that woke from its delay to find dispatch stopped, and so was
+    /// never sent. Its outcome is a stand-in, not a provider's answer.
+    cancelled: bool,
 }
 
-/// Everything a worker needs to run one node, owned or borrowed for the whole
-/// dispatch so the thread can outlive the loop iteration that started it.
-struct Job<'c> {
-    wave: usize,
-    node: &'c NodeSpec,
+/// What a node was launched with, kept so a retry is the same dispatch.
+#[derive(Clone)]
+struct Given {
     skills: Vec<(String, String)>,
     guideline: Option<String>,
     published: Arc<BTreeMap<String, String>>,
+}
+
+/// One dispatch for a worker to make.
+struct Job<'c> {
+    wave: usize,
+    node: &'c NodeSpec,
+    given: Given,
     revision: Option<String>,
     delay: Duration,
     retry: bool,
 }
 
-/// The borrowed, read-only half of a dispatch: what every worker shares.
+/// The read-only half of a dispatch: what every worker shares.
 struct Shared<'c> {
     cfg: &'c LoopConfig,
     root: &'c Path,
     run_id: &'c str,
     inputs: &'c Inputs,
+    /// Set once dispatch stops for the iteration — a halt, a budget ceiling.
+    /// A retry sleeping out its backoff checks it on waking, so a delay
+    /// scheduled before the stop cannot spend money after it.
+    stopped: AtomicBool,
 }
 
-fn launch<'scope, 'env, 'c: 'env>(
-    s: &'scope Scope<'scope, 'env>,
-    tx: &mpsc::Sender<Report<'c>>,
+/// Starts workers. Owns nothing; bundles what every launch needs.
+struct Launcher<'scope, 'env, 'c> {
+    scope: &'scope Scope<'scope, 'env>,
+    tx: mpsc::Sender<Report<'c>>,
     shared: &'env Shared<'c>,
-    job: Job<'c>,
-) {
-    let tx = tx.clone();
-    s.spawn(move || {
-        if !job.delay.is_zero() {
-            std::thread::sleep(job.delay);
-        }
-        let outcome = run_node(
-            shared.cfg,
-            job.node,
-            shared.root,
-            shared.run_id,
-            &NodeContext {
-                scratch: &shared.inputs.scratch,
-                skills: &job.skills,
-                guideline: job.guideline.as_deref(),
-                carried: &shared.inputs.carried,
-                perturbation: shared.inputs.perturbation.as_ref(),
-                published: &job.published,
-                revision: job.revision.as_deref(),
-            },
-        );
-        // The receiver outlives every worker; a send can only fail if the
-        // dispatcher panicked, and then there is nobody to tell.
-        let _ = tx.send(Report {
-            wave: job.wave,
-            node: job.node,
-            outcome,
-            retry: job.retry,
+}
+
+impl<'scope, 'env, 'c: 'env> Launcher<'scope, 'env, 'c> {
+    fn launch(&self, job: Job<'c>) {
+        let tx = self.tx.clone();
+        let shared = self.shared;
+        self.scope.spawn(move || {
+            if !job.delay.is_zero() {
+                std::thread::sleep(job.delay);
+            }
+            let cancelled = job.retry && shared.stopped.load(Ordering::SeqCst);
+            let outcome = if cancelled {
+                NodeOutcome::failed(
+                    job.node,
+                    "retry not sent: dispatch had stopped for this iteration".into(),
+                    FailureClass::ToolUnavailable,
+                )
+            } else {
+                // A worker that panics would never report, and the dispatcher
+                // would wait for it forever. Caught here, a panic is one node's
+                // failure like any other.
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    run_node(
+                        shared.cfg,
+                        job.node,
+                        shared.root,
+                        shared.run_id,
+                        &NodeContext {
+                            scratch: &shared.inputs.scratch,
+                            skills: &job.given.skills,
+                            guideline: job.given.guideline.as_deref(),
+                            carried: &shared.inputs.carried,
+                            perturbation: shared.inputs.perturbation.as_ref(),
+                            published: &job.given.published,
+                            revision: job.revision.as_deref(),
+                        },
+                    )
+                }))
+                .unwrap_or_else(|panic| {
+                    NodeOutcome::failed(
+                        job.node,
+                        format!("dispatch panicked: {}", panic_message(&panic)),
+                        FailureClass::ToolUnavailable,
+                    )
+                })
+            };
+            // The receiver outlives every worker; a send can only fail if the
+            // dispatcher itself panicked, and then there is nobody to tell.
+            let _ = tx.send(Report {
+                wave: job.wave,
+                node: job.node,
+                outcome,
+                retry: job.retry,
+                cancelled,
+            });
         });
-    });
+    }
+}
+
+fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no message".into())
 }
 
 /// The dispatcher's own mutable state for one iteration.
@@ -178,12 +220,8 @@ struct Queue {
     /// A budget ceiling was reached mid-iteration: finish what is running,
     /// start nothing more.
     spent: bool,
-    /// What each launched node was given, so a retry is the same dispatch.
-    jobs: BTreeMap<String, JobInputs>,
+    given: BTreeMap<String, Given>,
 }
-
-/// What a node was launched with, kept so a retry is the same dispatch.
-type JobInputs = (Vec<(String, String)>, Option<String>, Arc<BTreeMap<String, String>>);
 
 impl Queue {
     fn may_launch(&self) -> bool {
@@ -206,6 +244,7 @@ pub(crate) fn dispatch<S: Store>(
         root: run.root(),
         run_id: run.opts.run_id.as_str(),
         inputs,
+        stopped: AtomicBool::new(false),
     };
     let width = planned.graph.concurrency.max(1);
     let join = cfg.execution.graph.join;
@@ -217,11 +256,25 @@ pub(crate) fn dispatch<S: Store>(
         attempts: BTreeMap::new(),
         halt: None,
         spent: false,
-        jobs: BTreeMap::new(),
+        given: BTreeMap::new(),
     };
 
     std::thread::scope(|s| {
         let (tx, rx) = mpsc::channel::<Report>();
+        let launcher = Launcher {
+            scope: s,
+            tx,
+            shared: &shared,
+        };
+        // Every report goes through here, so every stop is seen by the
+        // sleeping retries the moment it happens.
+        let next = |run: &mut Run<S>, progress: &mut Progress, out: &mut Dispatched, q: &mut Queue| {
+            let report = rx.recv().expect("a launched node always reports back");
+            handle(run, progress, out, q, &launcher, report, it);
+            if !q.may_launch() {
+                shared.stopped.store(true, Ordering::SeqCst);
+            }
+        };
 
         'waves: for (w, wave) in planned.graph.waves.iter().enumerate() {
             if !q.may_launch() {
@@ -260,27 +313,20 @@ pub(crate) fn dispatch<S: Store>(
             loop {
                 while q.in_flight < width && !q.tallies[w].released() && q.may_launch() {
                     let Some(n) = queue.next() else { break };
-                    let skills = out.node_skills.get(&n.id).cloned().unwrap_or_default();
-                    let guideline = planned.phases.guideline_for(n).map(str::to_string);
-                    q.jobs.insert(
-                        n.id.clone(),
-                        (skills.clone(), guideline.clone(), published.clone()),
-                    );
-                    launch(
-                        s,
-                        &tx,
-                        &shared,
-                        Job {
-                            wave: w,
-                            node: n,
-                            skills,
-                            guideline,
-                            published: published.clone(),
-                            revision: None,
-                            delay: Duration::ZERO,
-                            retry: false,
-                        },
-                    );
+                    let given = Given {
+                        skills: out.node_skills.get(&n.id).cloned().unwrap_or_default(),
+                        guideline: planned.phases.guideline_for(n).map(str::to_string),
+                        published: published.clone(),
+                    };
+                    q.given.insert(n.id.clone(), given.clone());
+                    launcher.launch(Job {
+                        wave: w,
+                        node: n,
+                        given,
+                        revision: None,
+                        delay: Duration::ZERO,
+                        retry: false,
+                    });
                     q.in_flight += 1;
                     q.tallies[w].launched += 1;
                 }
@@ -290,8 +336,7 @@ pub(crate) fn dispatch<S: Store>(
                 if t.released() || (nothing_left && t.finished == t.launched) {
                     break;
                 }
-                let report = rx.recv().expect("a launched node always reports back");
-                handle(run, progress, out, &mut q, s, &tx, &shared, report, it);
+                next(run, progress, out, &mut q);
             }
 
             let t = &q.tallies[w];
@@ -330,27 +375,28 @@ pub(crate) fn dispatch<S: Store>(
 
         // Stragglers from released waves, and any retries still pending.
         while q.in_flight > 0 {
-            let report = rx.recv().expect("a launched node always reports back");
-            handle(run, progress, out, &mut q, s, &tx, &shared, report, it);
+            next(run, progress, out, &mut q);
         }
     });
 
-    if run.life.state() == RunState::Retrying {
-        let _ = run.enter(RunState::Running, "retries settled");
-    }
+    settle(run, &q);
     q.halt
 }
 
+/// Leave `retrying` once no retry is outstanding.
+fn settle<S: Store>(run: &mut Run<S>, q: &Queue) {
+    if q.retrying == 0 && run.life.state() == RunState::Retrying {
+        let _ = run.enter(RunState::Running, "retries settled");
+    }
+}
+
 /// Decide what one report means: record it, or send the node round again.
-#[allow(clippy::too_many_arguments)]
-fn handle<'scope, 'env, 'c: 'env, S: Store>(
+fn handle<'c, S: Store>(
     run: &mut Run<S>,
     progress: &mut Progress,
     out: &mut Dispatched,
     q: &mut Queue,
-    s: &'scope Scope<'scope, 'env>,
-    tx: &mpsc::Sender<Report<'c>>,
-    shared: &'env Shared<'c>,
+    launcher: &Launcher<'_, '_, 'c>,
     report: Report<'c>,
     it: u32,
 ) {
@@ -359,88 +405,97 @@ fn handle<'scope, 'env, 'c: 'env, S: Store>(
         node,
         outcome,
         retry,
+        cancelled,
     } = report;
     q.in_flight -= 1;
     if retry {
         q.retrying -= 1;
     }
 
+    if cancelled {
+        run.rec.entry(
+            it,
+            LedgerKind::NodeFailed,
+            format!(
+                "`{}`: its retry was not sent — dispatch stopped for this iteration while it \
+                 waited out its backoff",
+                node.id
+            ),
+            Some(node.id.clone()),
+        );
+        finish(run, progress, q, wave, false, it);
+        settle(run, q);
+        return;
+    }
+
     let Some((class, detail)) = failure_of(node, &outcome) else {
-        let violation = record_outcome(run, progress, out, outcome, it);
+        let violation = record_outcome(run, progress, out, outcome, it, None);
         finish(run, progress, q, wave, violation.is_none(), it);
         if let Some((class, why)) = violation {
-            answer_final(run, progress, q, node, class, why, it);
+            let failure = Failure {
+                class,
+                attempt: 1,
+                subject: format!("`{}`", node.id),
+                detail: why.clone(),
+                node: Some(node.id.clone()),
+                iteration: it,
+            };
+            let response = recovering::answer(&run.rec, &run.cfg.safety.recovery, &failure, false);
+            apply_final(run, progress, q, node, response, why, it);
         }
         return;
     };
 
     let attempt = q.attempts.entry(node.id.clone()).or_insert(0);
     *attempt += 1;
-    let attempt = *attempt;
-    let mut response = recovering::respond(&run.cfg.safety.recovery, class, attempt);
-    if matches!(response, Response::Retry { .. } | Response::Revise) && !q.may_launch() {
-        response = Response::Continue;
-    }
-    run.rec.entry(
-        it,
-        LedgerKind::Recovered,
-        format!(
-            "`{}`: {detail} — {}",
-            node.id,
-            recovering::describe(class, &response, attempt)
-        ),
-        Some(node.id.clone()),
-    );
+    let failure = Failure {
+        class,
+        attempt: *attempt,
+        subject: format!("`{}`", node.id),
+        detail: detail.clone(),
+        node: Some(node.id.clone()),
+        iteration: it,
+    };
+    let response = recovering::answer(&run.rec, &run.cfg.safety.recovery, &failure, q.may_launch());
 
-    match response {
-        Response::Retry { .. } | Response::Revise => {
-            let (delay, revision) = match response {
-                Response::Retry { delay_seconds } => (Duration::from_secs(delay_seconds), None),
-                _ => (Duration::ZERO, Some(detail.clone())),
-            };
-            // A revised dispatch was a real dispatch: what it spent is charged
-            // now, even though its output is being thrown away.
-            charge(run, progress, &outcome);
-            let (skills, guideline, published) = q
-                .jobs
-                .get(&node.id)
-                .cloned()
-                .unwrap_or_else(|| (Vec::new(), None, Arc::new(BTreeMap::new())));
-            if q.retrying == 0 && run.life.state() == RunState::Running {
-                let _ = run.enter(
-                    RunState::Retrying,
-                    format!("`{}` hit a {}", node.id, recovering::class_name(class)),
-                );
-            }
-            q.retrying += 1;
-            progress.retries += 1;
-            launch(
-                s,
-                tx,
-                shared,
-                Job {
-                    wave,
-                    node,
-                    skills,
-                    guideline,
-                    published,
-                    revision,
-                    delay,
-                    retry: true,
-                },
+    if response.redispatches() {
+        let (delay, revision) = match response {
+            Response::Retry { delay_seconds } => (Duration::from_secs(delay_seconds), None),
+            _ => (Duration::ZERO, Some(detail)),
+        };
+        // A revised dispatch was a real dispatch: what it spent is charged
+        // now, even though its output is being thrown away.
+        charge(run, progress, &outcome);
+        let given = q.given.get(&node.id).cloned().unwrap_or_else(|| Given {
+            skills: Vec::new(),
+            guideline: None,
+            published: Arc::new(BTreeMap::new()),
+        });
+        if q.retrying == 0 && run.life.state() == RunState::Running {
+            let _ = run.enter(
+                RunState::Retrying,
+                format!("`{}` hit a {}", node.id, recovering::class_name(class)),
             );
-            q.in_flight += 1;
         }
-        other => {
-            let _ = record_outcome(run, progress, out, outcome, it);
-            finish(run, progress, q, wave, false, it);
-            apply_final(run, progress, q, node, other, detail, it);
-        }
+        q.retrying += 1;
+        progress.retries += 1;
+        launcher.launch(Job {
+            wave,
+            node,
+            given,
+            revision,
+            delay,
+            retry: true,
+        });
+        q.in_flight += 1;
+        return;
     }
 
-    if q.retrying == 0 && run.life.state() == RunState::Retrying {
-        let _ = run.enter(RunState::Running, "retries settled");
-    }
+    let unusable = (class == FailureClass::InvalidOutput).then_some(detail.as_str());
+    let _ = record_outcome(run, progress, out, outcome, it, unusable);
+    finish(run, progress, q, wave, false, it);
+    apply_final(run, progress, q, node, response, detail, it);
+    settle(run, q);
 }
 
 /// Mark a node's final report against its wave, and check the budget.
@@ -470,35 +525,6 @@ fn finish<S: Store>(
             );
         }
     }
-}
-
-/// A failure found after the node was recorded — today, a safety violation.
-/// There is nothing to retry: the dispatch already happened.
-#[allow(clippy::too_many_arguments)]
-fn answer_final<S: Store>(
-    run: &mut Run<S>,
-    progress: &mut Progress,
-    q: &mut Queue,
-    node: &NodeSpec,
-    class: FailureClass,
-    why: String,
-    it: u32,
-) {
-    let response = match recovering::respond(&run.cfg.safety.recovery, class, 1) {
-        Response::Retry { .. } | Response::Revise => Response::Continue,
-        r => r,
-    };
-    run.rec.entry(
-        it,
-        LedgerKind::Recovered,
-        format!(
-            "`{}`: {why} — {}",
-            node.id,
-            recovering::describe(class, &response, 1)
-        ),
-        Some(node.id.clone()),
-    );
-    apply_final(run, progress, q, node, response, why, it);
 }
 
 /// Carry out a response that ends this node's part in the iteration.
@@ -543,7 +569,11 @@ pub(crate) fn escalate<S: Store>(
         format!("{question}; it is not dispatched again until a human resumes the run"),
         Some(node_id.to_string()),
     );
-    run.checkpoint.escalations.push(question);
+    run.checkpoint.escalations.push(Escalation {
+        node_id: Some(node_id.to_string()),
+        question,
+        iteration: it,
+    });
 }
 
 /// The class of a report that did not do its job, and why.
@@ -555,7 +585,7 @@ fn failure_of(node: &NodeSpec, o: &NodeOutcome) -> Option<(FailureClass, String)
     if let Some(err) = &o.error {
         return Some((o.failure.unwrap_or(FailureClass::ToolUnavailable), err.clone()));
     }
-    if node.role == Role::Judge && judgment::parse(&o.output, "", "").is_empty() {
+    if node.role == Role::Judge && !judgment::has_verdict(&o.output) {
         return Some((
             FailureClass::InvalidOutput,
             "the response contained no `VERDICT:` block, so the gate could not read it. \
@@ -685,6 +715,7 @@ fn record_outcome<S: Store>(
     out: &mut Dispatched,
     o: NodeOutcome,
     it: u32,
+    unusable: Option<&str>,
 ) -> Option<(FailureClass, String)> {
     let cfg = run.cfg;
     if let Containment::Degraded(why) = &o.containment {
@@ -742,9 +773,24 @@ fn record_outcome<S: Store>(
         created_ms: now_ms(),
     });
     run.checkpoint.completed_nodes.push(o.node_id.clone());
+    // A dispatch that ran but whose output the gate cannot use — a judge that
+    // ignored the output contract through every revision — is recorded as the
+    // failure it is, not as a node that succeeded.
+    if let Some(why) = unusable {
+        run.rec.entry(
+            it,
+            LedgerKind::NodeFailed,
+            format!("ran on `{}`, but its output could not be used: {why}", o.provider_id),
+            Some(o.node_id.clone()),
+        );
+    }
     run.rec.entry(
         it,
-        LedgerKind::NodeSucceeded,
+        if unusable.is_some() {
+            LedgerKind::NodeDispatched
+        } else {
+            LedgerKind::NodeSucceeded
+        },
         format!(
             "served by `{}` in {}ms, {} tokens{}; {}",
             o.provider_id,

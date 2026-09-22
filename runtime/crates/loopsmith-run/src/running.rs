@@ -9,12 +9,13 @@
 //! amount of confident output from a node can extend a run past its ceiling.
 
 use crate::context::Run;
-use crate::evidence::{collect_evidence, failing_checks};
+use crate::evidence::{self, failing_checks};
 use crate::planning::Planned;
-use crate::recovering::{self, Response};
+use crate::recovering::{self, Failure, Response};
 use crate::state::RunState;
 use crate::stop::{progress_signature, should_stop, StopInputs, StopReason};
-use crate::waves::{self, Halt};
+use crate::state::Halt;
+use crate::waves;
 use crate::{evolve, perturb, rules, summary};
 use loopsmith_core::{FailureClass, GateKind, Role};
 use loopsmith_gate::{Evidence, TargetVerdict};
@@ -68,9 +69,14 @@ impl Progress {
             revisions: cp.revisions.clone(),
             previous_verdicts: restore_verdicts(cp),
             published_paths: BTreeMap::new(),
-            escalated_nodes: BTreeSet::new(),
-            failed_dispatches: 0,
-            retries: 0,
+            // Held across a resume until someone answers for them.
+            escalated_nodes: cp
+                .escalations
+                .iter()
+                .filter_map(|e| e.node_id.clone())
+                .collect(),
+            failed_dispatches: cp.failed_dispatches,
+            retries: cp.retries,
             alerts: Vec::new(),
             degraded: BTreeSet::new(),
         }
@@ -85,6 +91,13 @@ impl Progress {
         cp.revisions = self.revisions.clone();
         cp.stale_iterations = self.stale_iterations;
         cp.last_signature = self.last_signature.clone();
+        cp.retries = self.retries;
+        cp.failed_dispatches = self.failed_dispatches;
+        for a in &self.alerts {
+            if !cp.alerts_raised.contains(&a.id) {
+                cp.alerts_raised.push(a.id.clone());
+            }
+        }
         if !verdicts.is_empty() {
             cp.verdicts_json = serde_json::to_string(verdicts).ok();
         }
@@ -200,8 +213,23 @@ pub(crate) fn iterate<S: Store>(
             it,
         );
         let (current, phases_closed, ev) = rule(run, planned, it);
+
+        // Rollback rules run after every ruling, even one that follows a halt:
+        // a halt decides how the run ends, a rollback decides whether what
+        // this iteration achieved is kept, and one does not answer the other.
+        let rollback = rules::apply(run, GateKind::Rollback, &ev, it);
+        let rolled_back = [&halt, &rollback]
+            .into_iter()
+            .flatten()
+            .any(|h| h.state == RunState::RolledBack);
         if halt.is_none() {
-            halt = rules::apply(run, GateKind::Rollback, &ev, it);
+            halt = rollback;
+        }
+        // The rulings reach the store only once no rollback rule has refused
+        // them. Written earlier, `status` and a `goal_satisfied` trigger would
+        // both act on a ruling the run has already thrown away.
+        if !rolled_back {
+            persist_rulings(run, &current, it);
         }
 
         compress(run, progress, &dispatched, &current, &phases_closed, it);
@@ -231,7 +259,7 @@ pub(crate) fn iterate<S: Store>(
         );
 
         if let Some(Halt { state, why }) = halt {
-            let verdicts = if state == RunState::RolledBack {
+            let verdicts = if rolled_back {
                 roll_back(run, progress, before, &dispatched, it)
             } else {
                 current
@@ -250,7 +278,22 @@ pub(crate) fn iterate<S: Store>(
         }
 
         progress.store_into(&mut run.checkpoint, &current);
-        run.save();
+        if let Some(Halt { state, why }) = run.save_or_halt() {
+            return Stopped {
+                reason: StopReason::Halted { state, why },
+                verdicts: current,
+            };
+        }
+    }
+}
+
+/// Write the gate's rulings to the store, where `status`, the MCP server,
+/// and `goal_satisfied` triggers read them.
+fn persist_rulings<S: Store>(run: &Run<S>, verdicts: &BTreeMap<String, TargetVerdict>, it: u32) {
+    for v in verdicts.values() {
+        let _ = run
+            .store
+            .set_goal_state(&run.opts.run_id, &v.to_goal_state(it));
     }
 }
 
@@ -299,7 +342,15 @@ fn answer_repeated_failures<S: Store>(
             "revised {} times without satisfying its goals",
             run.cfg.safety.gates.stop.max_revisions_per_node
         );
-        match recovering::respond(&run.cfg.safety.recovery, FailureClass::RepeatedFailure, 1) {
+        let failure = Failure {
+            class: FailureClass::RepeatedFailure,
+            attempt: 1,
+            subject: format!("`{node}`"),
+            detail: why.clone(),
+            node: Some(node.clone()),
+            iteration: it,
+        };
+        match recovering::answer(&run.rec, &run.cfg.safety.recovery, &failure, false) {
             Response::Escalate => waves::escalate(run, progress, node, &why, it),
             Response::Halt(state) => {
                 halt.get_or_insert(Halt {
@@ -414,12 +465,9 @@ fn rule<S: Store>(
         );
     }
 
-    let ev = collect_evidence(cfg, root, Some(&root.join("metrics.json")), judgments);
+    let ev = evidence::at_root(cfg, root, judgments);
     let current = loopsmith_gate::evaluate_all(cfg, &ev);
     for (target, v) in &current {
-        let _ = run
-            .store
-            .set_goal_state(&run.opts.run_id, &v.to_goal_state(it));
         run.rec.entry(
             it,
             if v.satisfied {

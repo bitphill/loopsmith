@@ -101,10 +101,10 @@ pub fn resolve(
     graph_image: Option<&str>,
     runtime: Result<&Runtime, &str>,
 ) -> Containment {
-    let Isolation::Container { image, network } = iso else {
+    let Isolation::Container { network, .. } = iso else {
         return Containment::Host;
     };
-    let Some(image) = image.as_deref().or(graph_image).filter(|s| !s.trim().is_empty()) else {
+    let Some(image) = iso.container_image(graph_image) else {
         return Containment::Degraded(
             "no image is named on the node or in `execution.graph.container_image`".into(),
         );

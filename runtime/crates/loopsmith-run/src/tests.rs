@@ -60,6 +60,7 @@ fn opts(run: &str, dir: &Path) -> RunOptions {
         acquire_skills: false,
         verbose: false,
         config_file: "loop.yaml".into(),
+        answer_escalations: false,
     }
 }
 
@@ -830,6 +831,10 @@ fn a_failed_rollback_rule_discards_the_iterations_progress_but_not_its_spend() {
     let cp = s.checkpoint("rollback").unwrap().unwrap();
     assert!(cp.completed_nodes.is_empty(), "the iteration's progress is discarded");
     assert!(cp.tokens_used > 0, "what it spent is not refunded");
+    assert!(
+        s.goal_states("rollback").unwrap().is_empty(),
+        "a ruling the run threw away must not be left for `status` or a trigger to read"
+    );
     let _ = std::fs::remove_dir_all(d);
 }
 
@@ -935,7 +940,7 @@ providers:
 }
 
 #[test]
-fn a_node_out_of_revisions_is_escalated_and_a_resume_answers_it() {
+fn a_node_out_of_revisions_is_escalated_and_only_an_answer_releases_it() {
     let (s, d) = store("escalate");
     let mut c = failing(cfg(
         "stop_gates:\n  max_iterations: 4\n  max_revisions_per_node: 1\n  no_progress_iterations: 0\n",
@@ -946,8 +951,23 @@ fn a_node_out_of_revisions_is_escalated_and_a_resume_answers_it() {
     assert_eq!(out.state, RunState::Escalated, "but a human is what it waits on");
     assert_eq!(s.checkpoint("escalate").unwrap().unwrap().escalations.len(), 1);
 
+    // A plain resume — a scheduler's, say — answers nothing.
+    let before = s.episodes("escalate").unwrap().len();
+    c.safety.gates.stop.max_iterations = 6;
     let _ = execute(&c, &s, &resumed("escalate", &d)).unwrap();
+    assert_eq!(s.episodes("escalate").unwrap().len(), before, "still held");
+    assert!(ledger_says(&s, "escalate", LedgerKind::Escalated, "still open"));
+
+    // A human's answer does, and the node gets to run again.
+    c.safety.gates.stop.max_iterations = 8;
+    let mut answered = resumed("escalate", &d);
+    answered.answer_escalations = true;
+    let _ = execute(&c, &s, &answered).unwrap();
     assert!(ledger_says(&s, "escalate", LedgerKind::Escalated, "resuming answers 1"));
+    assert!(
+        s.episodes("escalate").unwrap().len() > before,
+        "answering the escalation must let the node run again, or the answer changes nothing"
+    );
     let _ = std::fs::remove_dir_all(d);
 }
 
@@ -1160,6 +1180,7 @@ fn a_container_node_without_an_image_degrades_to_a_worktree_and_still_runs() {
 struct Flaky {
     inner: SledStore,
     failures: std::sync::atomic::AtomicU32,
+    save_failures: std::sync::atomic::AtomicU32,
 }
 
 impl Flaky {
@@ -1167,6 +1188,7 @@ impl Flaky {
         Flaky {
             inner,
             failures: std::sync::atomic::AtomicU32::new(failures),
+            save_failures: std::sync::atomic::AtomicU32::new(0),
         }
     }
 }
@@ -1181,7 +1203,14 @@ impl Store for Flaky {
     fn goal_states(&self, r: &str) -> R<BTreeMap<String, loopsmith_memory::GoalState>> { self.inner.goal_states(r) }
     fn append_ledger(&self, e: &loopsmith_memory::LedgerEntry) -> R<u64> { self.inner.append_ledger(e) }
     fn ledger(&self, r: &str) -> R<Vec<loopsmith_memory::LedgerEntry>> { self.inner.ledger(r) }
-    fn save_checkpoint(&self, cp: &Checkpoint) -> R<()> { self.inner.save_checkpoint(cp) }
+    fn save_checkpoint(&self, cp: &Checkpoint) -> R<()> {
+        use std::sync::atomic::Ordering;
+        if self.save_failures.load(Ordering::SeqCst) > 0 {
+            self.save_failures.fetch_sub(1, Ordering::SeqCst);
+            return Err(loopsmith_memory::MemError::Backend("disk full".into()));
+        }
+        self.inner.save_checkpoint(cp)
+    }
     fn checkpoint(&self, r: &str) -> R<Option<Checkpoint>> {
         use std::sync::atomic::Ordering;
         if self.failures.load(Ordering::SeqCst) > 0 {
@@ -1228,5 +1257,143 @@ fn a_checkpoint_read_that_fails_once_is_retried_when_the_policy_says_so() {
     };
     let out = execute(&c, &s, &resumed("corrupt-retry", &d)).unwrap();
     assert_eq!(out.state, RunState::Succeeded);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+// --- review fixes ------------------------------------------------------------------
+
+#[test]
+fn a_retry_waiting_out_its_backoff_is_not_sent_once_dispatch_has_stopped() {
+    // `flaky` fails at once and schedules a retry a second out; `spender` then
+    // finishes and puts the run over its token budget. The retry must wake,
+    // see dispatch has stopped, and not call its provider.
+    let (s, d) = store("retry-stop");
+    let mut c = failing(cfg("stop_gates:\n  max_tokens: 1\n  max_iterations: 3\n"));
+    c.execution.providers.providers = serde_yaml::from_str(
+        "- id: flaky\n  kind: byok\n  command: sh\n  \
+         args: [\"-c\", \"echo x >> calls; echo '429 Too Many Requests' >&2; exit 1\"]\n\
+         - id: spender\n  kind: byok\n  command: sh\n  args: [\"-c\", \"sleep 0.3; echo spent\"]\n",
+    )
+    .unwrap();
+    c.execution.providers.cascade.clear();
+    let base = c.execution.graph.nodes[0].clone();
+    c.execution.graph.nodes = vec![
+        loopsmith_core::NodeSpec {
+            id: "flaky".into(),
+            provider: Some("flaky".into()),
+            ..base.clone()
+        },
+        loopsmith_core::NodeSpec {
+            id: "spender".into(),
+            provider: Some("spender".into()),
+            ..base
+        },
+    ];
+    c.execution.graph.concurrency = loopsmith_core::Concurrency::Fixed { max_parallel: 2 };
+    c.safety.recovery.transient_error = loopsmith_core::RecoveryAction::Retry {
+        max_attempts: 3,
+        base_delay_seconds: 1,
+        backoff: loopsmith_core::Backoff::Fixed,
+    };
+
+    let out = execute(&c, &s, &opts("retry-stop", &d)).unwrap();
+    assert_eq!(out.stop, StopReason::TokenBudget(1));
+    let calls = std::fs::read_to_string(d.join("calls")).unwrap_or_default();
+    assert_eq!(calls.lines().count(), 1, "the retry spent money after the stop");
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn an_alert_that_fired_before_a_resume_does_not_fire_again() {
+    let (s, d) = store("alert-resume");
+    let mut c = failing(cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n"));
+    c.safety.alerts =
+        serde_yaml::from_str("- id: chatty\n  metric: tokens_used\n  above: 1\n").unwrap();
+    assert_eq!(execute(&c, &s, &opts("alert-resume", &d)).unwrap().alerts.len(), 1);
+    c.safety.gates.stop.max_iterations = 2;
+    let again = execute(&c, &s, &resumed("alert-resume", &d)).unwrap();
+    assert!(again.alerts.is_empty(), "once per run, and a resume is the same run");
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_judge_whose_output_never_becomes_usable_is_recorded_as_a_failure() {
+    let (s, d) = store("judge-unusable");
+    let mut c = loopsmith_core::parse_str(
+        r#"
+name: t
+goals:
+  - name: g1
+    description: a sufficiently long goal description
+pre_execution:
+  - step: done
+    done: true
+validations:
+  - target: g1
+    name: prose
+    mode: subjective
+    statement: reads well
+    detector: { type: judge, standard: "the house style guide" }
+  - target: overall
+    name: prose-overall
+    mode: subjective
+    statement: reads well
+    detector: { type: judge, standard: "the house style guide" }
+stop_gates:
+  max_iterations: 1
+  no_progress_iterations: 0
+graph:
+  nodes:
+    - id: build
+      role: builder
+      instruction: write the thing described in the goal
+      goals: [g1]
+      provider: maker
+    - id: review
+      role: judge
+      instruction: check the draft against the named standard and report
+      depends_on: [build]
+      goals: [g1]
+      provider: checker
+providers:
+  providers:
+    - id: maker
+      kind: byok
+      command: echo
+      args: ["a draft"]
+    - id: checker
+      kind: byok
+      command: echo
+      args: ["looks fine to me"]
+  cascade:
+    standard: [maker]
+"#,
+        "test",
+    )
+    .unwrap();
+    c.safety.recovery.invalid_output = loopsmith_core::RecoveryAction::Revise { max_attempts: 2 };
+    let _ = execute(&c, &s, &opts("judge-unusable", &d)).unwrap();
+    assert!(ledger_says(&s, "judge-unusable", LedgerKind::NodeFailed, "could not be used"));
+    let succeeded = s
+        .ledger("judge-unusable")
+        .unwrap()
+        .into_iter()
+        .any(|e| e.kind == LedgerKind::NodeSucceeded && e.node_id.as_deref() == Some("review"));
+    assert!(!succeeded, "an unusable judgment is not a node that succeeded");
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_checkpoint_that_cannot_be_saved_halts_the_run_rather_than_run_on_undurable() {
+    let (s, d) = store("save-fail");
+    let s = Flaky::new(s, 0);
+    // One failure is absorbed by entering `running`; the second is the save
+    // at the end of the first iteration, which the policy answers.
+    s.save_failures.store(2, std::sync::atomic::Ordering::SeqCst);
+    let c = failing(cfg("stop_gates:\n  max_iterations: 3\n  no_progress_iterations: 0\n"));
+    let out = execute(&c, &s, &opts("save-fail", &d)).unwrap();
+    assert_eq!(out.state, RunState::Failed, "restore_checkpoint has nothing to restore");
+    assert_eq!(out.iterations, 1);
+    assert!(out.stop.describe().contains("could not be saved"), "{}", out.stop.describe());
     let _ = std::fs::remove_dir_all(d);
 }

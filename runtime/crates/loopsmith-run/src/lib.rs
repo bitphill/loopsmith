@@ -56,7 +56,7 @@ pub use evidence::collect_evidence;
 pub use loopsmith_gate::BaselineVerdict;
 pub use metrics::{RaisedAlert, RunMetrics};
 pub use planning::install_default_skills;
-pub use state::{IllegalTransition, Lifecycle, RunState};
+pub use state::{Halt, IllegalTransition, Lifecycle, RunState};
 pub use stop::StopReason;
 
 use loopsmith_core::LoopConfig;
@@ -78,6 +78,14 @@ pub struct RunOptions {
     pub verbose: bool,
     /// Config file name, for the scripts written into a success export.
     pub config_file: String,
+    /// A human has dealt with the run's open escalations: clear them, and give
+    /// each escalated node its revisions back. Only meaningful with `resume`.
+    ///
+    /// Separate from `resume` on purpose. A resume can be a scheduler's doing,
+    /// and one that silently answered every question — and refunded every
+    /// stuck node's revision budget — would let a loop that pauses on a
+    /// schedule retry a node forever.
+    pub answer_escalations: bool,
 }
 
 pub struct RunOutcome {
@@ -116,10 +124,13 @@ pub fn execute<S: Store>(
     opts: &RunOptions,
 ) -> Result<RunOutcome, String> {
     let mut run = context::Run::open(cfg, store, opts)?;
-    let mut progress = running::Progress::from_checkpoint(&run.checkpoint);
 
     run.enter(RunState::Validating, if opts.resume { "resuming" } else { "" })?;
-    if let Some(halt) = validating::validate(&mut run) {
+    let halt = validating::validate(&mut run);
+    // Built after validation, which is where answering an escalation hands a
+    // node back its revisions; built before, the counters would be stale.
+    let mut progress = running::Progress::from_checkpoint(&run.checkpoint);
+    if let Some(halt) = halt {
         return closing::close(run, progress, halted(halt));
     }
 
@@ -142,7 +153,7 @@ pub fn execute<S: Store>(
 }
 
 /// A run stopped by a rule before its first iteration: no rulings to report.
-fn halted(h: waves::Halt) -> running::Stopped {
+fn halted(h: state::Halt) -> running::Stopped {
     running::Stopped {
         reason: StopReason::Halted {
             state: h.state,

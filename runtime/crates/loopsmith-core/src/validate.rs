@@ -529,19 +529,40 @@ fn check_gate_rules(cfg: &LoopConfig, r: &mut ValidationReport) {
 
 /// Container isolation that has nothing to run in.
 fn check_containers(cfg: &LoopConfig, r: &mut ValidationReport) {
-    for (i, n) in cfg.execution.graph.nodes.iter().enumerate() {
-        if let crate::Isolation::Container { image, .. } = &n.isolation {
-            let named = image.as_deref().or(cfg.execution.graph.container_image.as_deref());
-            if named.map_or(true, |s| s.trim().is_empty()) {
-                r.issues.push(Issue::warn(
-                    format!("execution.graph.nodes[{i}].isolation"),
-                    format!(
-                        "`{}` asks for a container but no image is named here or in \
-                         `execution.graph.container_image`; it will run in a worktree instead",
-                        n.id
-                    ),
-                ));
-            }
+    let graph = &cfg.execution.graph;
+    for (i, n) in graph.nodes.iter().enumerate() {
+        let crate::Isolation::Container { network, .. } = &n.isolation else {
+            continue;
+        };
+        let field = format!("execution.graph.nodes[{i}].isolation");
+        if n.isolation.container_image(graph.container_image.as_deref()).is_none() {
+            r.issues.push(Issue::warn(
+                field.clone(),
+                format!(
+                    "`{}` asks for a container but no image is named here or in \
+                     `execution.graph.container_image`; it will run in a worktree instead",
+                    n.id
+                ),
+            ));
+        }
+        // A container has no network unless asked for one, and every hosted
+        // agent CLI needs one to reach its model. Only a local model can
+        // answer from inside a sealed container.
+        let hosted = cfg
+            .cascade_for(n.tier)
+            .iter()
+            .chain(n.provider.as_deref().and_then(|id| cfg.provider(id)).iter())
+            .any(|p| p.kind != crate::ProviderKind::Ollama);
+        if !network && hosted {
+            r.issues.push(Issue::warn(
+                format!("{field}.network"),
+                format!(
+                    "`{}` runs in a container with no network, but a provider it can be \
+                     routed to is hosted and needs one to reach its model; set `network: true` \
+                     or route it to a local model",
+                    n.id
+                ),
+            ));
         }
     }
 }
@@ -588,23 +609,13 @@ fn check_alerts(cfg: &LoopConfig, r: &mut ValidationReport) {
 fn check_recovery(cfg: &LoopConfig, r: &mut ValidationReport) {
     use crate::RecoveryAction;
     let rec = &cfg.safety.recovery;
-    let rows = [
-        ("transient_error", rec.transient_error),
-        ("invalid_output", rec.invalid_output),
-        ("tool_unavailable", rec.tool_unavailable),
-        ("repeated_failure", rec.repeated_failure),
-        ("safety_violation", rec.safety_violation),
-        ("resource_exhaustion", rec.resource_exhaustion),
-        ("corrupted_state", rec.corrupted_state),
-    ];
-    for (name, action) in rows {
-        let field = format!("safety.recovery.{name}");
+    for class in crate::FailureClass::ALL {
         if let RecoveryAction::Retry { max_attempts, .. } | RecoveryAction::Revise { max_attempts } =
-            action
+            rec.action_for(class)
         {
             if max_attempts <= 1 {
                 r.issues.push(Issue::warn(
-                    field.clone(),
+                    format!("safety.recovery.{}", class.key()),
                     "max_attempts counts dispatches, so 1 or 0 never tries a second time",
                 ));
             }
@@ -892,6 +903,27 @@ pre_execution:
         let mut c = minimal();
         c.safety.alerts = serde_yaml::from_str("- id: a\n  metric: cost_usd\n").unwrap();
         assert_eq!(errors_on(&c, "safety.alerts[0]"), 1);
+    }
+
+    #[test]
+    fn a_sealed_container_in_front_of_a_hosted_model_is_warned_about() {
+        let mut c = minimal();
+        c.execution.providers.providers = serde_yaml::from_str(
+            "- id: hosted\n  kind: claude_code\n  command: claude\n",
+        )
+        .unwrap();
+        c.execution.graph.container_image = Some("img".into());
+        c.execution.graph.nodes = serde_yaml::from_str(
+            "- id: b\n  role: builder\n  instruction: do the thing well\n  \
+             isolation: { mode: container }\n",
+        )
+        .unwrap();
+        assert_eq!(warnings_on(&c, "execution.graph.nodes[0].isolation.network"), 1);
+        c.execution.graph.nodes[0].isolation = crate::Isolation::Container {
+            image: None,
+            network: true,
+        };
+        assert_eq!(warnings_on(&c, "execution.graph.nodes[0].isolation.network"), 0);
     }
 
     #[test]

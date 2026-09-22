@@ -76,15 +76,8 @@ pub fn report_outcome(out: &RunOutcome) {
     for a in &out.alerts {
         println!("alert:       `{}` {} (iteration {})", a.id, a.message, a.iteration);
     }
-    match &out.baseline {
-        loopsmith_run::BaselineVerdict::Off => {}
-        loopsmith_run::BaselineVerdict::NoBaseline => {
-            println!("baseline:    none frozen; proposals are recorded, not adoptable")
-        }
-        loopsmith_run::BaselineVerdict::Held => println!("baseline:    held"),
-        loopsmith_run::BaselineVerdict::Regressed(r) => {
-            println!("baseline:    REGRESSED — {}", r.join("; "))
-        }
+    if let Some(line) = out.baseline.describe() {
+        println!("baseline:    {line}");
     }
     if out.proposals > 0 {
         println!(
@@ -163,7 +156,8 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
             config,
             run_id,
             verbose,
-        } => resume::execute(&config, run_id, verbose),
+            answer,
+        } => resume::execute(&config, run_id, verbose, answer),
         Command::Status { config, run_id } => status::execute(&config, &run_id),
         Command::Ledger {
             config,

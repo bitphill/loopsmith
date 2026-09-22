@@ -61,6 +61,10 @@ pub(crate) fn close<S: Store>(
         !run.checkpoint.escalations.is_empty(),
     );
 
+    // Wall clock and spend can cross an alert's line in the last moments of a
+    // run, so the alerts get a final look at the numbers the outcome reports —
+    // before the counters are stored, so a resume knows what already fired.
+    crate::metrics::watch(&run, &mut progress, run.checkpoint.iteration);
     progress.store_into(&mut run.checkpoint, &verdicts);
     run.enter(outcome, reason.describe())?;
 
@@ -111,9 +115,6 @@ pub(crate) fn close<S: Store>(
         None
     };
 
-    // Wall clock and spend can cross an alert's line in the last moments of a
-    // run, so the alerts get a final look at the numbers the outcome reports.
-    crate::metrics::watch(&run, &mut progress, it);
     let metrics = crate::metrics::measure(&run, &progress);
     let baseline = judge_against_baseline(&run, &metrics, outcome, it);
 
@@ -159,15 +160,8 @@ fn judge_against_baseline<S: Store>(
         measured_at: None,
     };
     let verdict = loopsmith_gate::compare_to_baseline(run.cfg, &measured);
-    let line = match &verdict {
-        BaselineVerdict::Off => return verdict,
-        BaselineVerdict::NoBaseline => {
-            "no evolution baseline is frozen, so this run cannot show an improvement — \
-             proposals are recorded, not adoptable"
-                .to_string()
-        }
-        BaselineVerdict::Held => "held the evolution baseline on every metric it names".into(),
-        BaselineVerdict::Regressed(r) => format!("regressed against the evolution baseline: {}", r.join("; ")),
+    let Some(line) = verdict.describe() else {
+        return verdict;
     };
     run.rec.entry(it, LedgerKind::GateEvaluated, line, None);
     verdict

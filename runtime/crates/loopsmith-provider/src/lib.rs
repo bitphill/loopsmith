@@ -60,7 +60,7 @@ impl ProviderError {
     /// configured, being unable to do the job: a wrong flag or a missing login
     /// fails identically on the second try, and retrying it with backoff only
     /// spends the wall-clock budget learning that.
-    pub fn class(&self) -> FailureClass {
+    pub fn failure_class(&self) -> FailureClass {
         match self {
             ProviderError::NoneAvailable { class, .. } => *class,
             ProviderError::Spawn { .. } => FailureClass::ToolUnavailable,
@@ -420,7 +420,7 @@ pub fn dispatch(
         match invoke(spec, req) {
             Ok(resp) => return Ok((resp, skipped)),
             Err(e) => {
-                if e.class() == FailureClass::TransientError {
+                if e.failure_class() == FailureClass::TransientError {
                     class = FailureClass::TransientError;
                 }
                 skipped.push(format!("{}: {e}", spec.id));
@@ -674,15 +674,15 @@ mod tests {
             stderr: stderr.into(),
         };
         assert_eq!(
-            failed("Error: 429 Too Many Requests").class(),
+            failed("Error: 429 Too Many Requests").failure_class(),
             FailureClass::TransientError
         );
         assert_eq!(
-            failed("upstream is overloaded, please try again").class(),
+            failed("upstream is overloaded, please try again").failure_class(),
             FailureClass::TransientError
         );
         assert_eq!(
-            failed("error: unexpected argument '--quiet'").class(),
+            failed("error: unexpected argument '--quiet'").failure_class(),
             FailureClass::ToolUnavailable
         );
     }
@@ -691,10 +691,10 @@ mod tests {
     fn a_timeout_is_transient_and_a_missing_binary_is_not() {
         let mut s = spec("sleeper", "sleep", &["30"]);
         s.timeout_seconds = Some(1);
-        assert_eq!(invoke(&s, &req()).unwrap_err().class(), FailureClass::TransientError);
+        assert_eq!(invoke(&s, &req()).unwrap_err().failure_class(), FailureClass::TransientError);
 
         let missing = spec("ghost", "loopsmith-no-such-binary-xyzzy", &[]);
-        assert_eq!(invoke(&missing, &req()).unwrap_err().class(), FailureClass::ToolUnavailable);
+        assert_eq!(invoke(&missing, &req()).unwrap_err().failure_class(), FailureClass::ToolUnavailable);
     }
 
     #[test]

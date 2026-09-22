@@ -166,6 +166,11 @@ pub enum Command {
         /// Mirror the run log to stderr as it is written.
         #[arg(short, long)]
         verbose: bool,
+        /// The run's open escalations have been dealt with: clear them, and
+        /// give each escalated node its revisions back. Without this a resume
+        /// leaves them open and the nodes held.
+        #[arg(long)]
+        answer: bool,
     },
     /// Current gate rulings for a run.
     Status { config: PathBuf, run_id: String },

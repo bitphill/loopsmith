@@ -32,8 +32,8 @@ pub fn execute(config: &Path, run_id: &str) -> Result<ExitCode, String> {
     if let Some(cp) = store.checkpoint(run_id).map_err(|e| e.to_string())? {
         println!("\ncheckpoint: iteration {}", cp.iteration);
         println!("state:      {}", describe_state(&cp));
-        for q in &cp.escalations {
-            println!("  waiting on a human: {q}");
+        for e in &cp.escalations {
+            println!("  waiting on a human: {}", e.question);
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -43,9 +43,12 @@ pub fn execute(config: &Path, run_id: &str) -> Result<ExitCode, String> {
 /// closed — the old engine had no other way to stop — so it says that rather
 /// than "unknown".
 fn describe_state(cp: &loopsmith_memory::Checkpoint) -> String {
-    match (cp.state.as_deref(), cp.outcome.as_deref()) {
-        (Some("closed"), Some(outcome)) => format!("closed ({outcome})"),
+    use loopsmith_run::RunState;
+    let state = cp.state.as_deref().and_then(RunState::parse);
+    let outcome = cp.outcome.as_deref().and_then(RunState::parse);
+    match (state, outcome) {
+        (Some(RunState::Closed), Some(outcome)) => format!("closed ({outcome})"),
         (Some(state), _) => state.to_string(),
-        (None, _) => "closed".to_string(),
+        (None, _) => RunState::Closed.to_string(),
     }
 }

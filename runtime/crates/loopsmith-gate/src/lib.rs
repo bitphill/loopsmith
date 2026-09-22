@@ -272,7 +272,7 @@ pub fn check_rules(cfg: &LoopConfig, kind: GateKind, ev: &Evidence) -> Vec<RuleV
 }
 
 /// Evaluate one rule.
-pub fn check_rule(cfg: &LoopConfig, kind: GateKind, rule: &GateRule, ev: &Evidence) -> RuleVerdict {
+fn check_rule(cfg: &LoopConfig, kind: GateKind, rule: &GateRule, ev: &Evidence) -> RuleVerdict {
     let (passed, evidence) = match run_detector(cfg, &rule.id, &rule.detector, ev) {
         Ok(pair) => pair,
         Err(e) => (false, format!("detector error: {e}")),
@@ -384,6 +384,23 @@ pub enum BaselineVerdict {
     Held,
     /// Worse than tolerated, one line per metric.
     Regressed(Vec<String>),
+}
+
+impl BaselineVerdict {
+    /// One line for a ledger or a terminal. `None` when evolution is off,
+    /// because then there is nothing to say.
+    pub fn describe(&self) -> Option<String> {
+        Some(match self {
+            BaselineVerdict::Off => return None,
+            BaselineVerdict::NoBaseline => "no evolution baseline is frozen, so this run cannot \
+                show an improvement; proposals are recorded, not adoptable"
+                .to_string(),
+            BaselineVerdict::Held => "held the evolution baseline on every metric it names".into(),
+            BaselineVerdict::Regressed(r) => {
+                format!("regressed against the evolution baseline: {}", r.join("; "))
+            }
+        })
+    }
 }
 
 /// The regression gate: compare what a run measured against the frozen

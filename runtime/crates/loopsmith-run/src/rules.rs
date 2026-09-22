@@ -8,7 +8,7 @@
 
 use crate::context::Run;
 use crate::state::RunState;
-use crate::waves::Halt;
+use crate::state::Halt;
 use loopsmith_core::{GateKind, GateOutcome};
 use loopsmith_gate::Evidence;
 use loopsmith_memory::{LedgerKind, Store};

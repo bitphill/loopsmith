@@ -313,7 +313,28 @@ pub struct Checkpoint {
     /// node that ran out of revisions, a gate that said a person must decide.
     /// Carried across a resume so an escalation is not forgotten by pausing.
     #[serde(default)]
-    pub escalations: Vec<String>,
+    pub escalations: Vec<Escalation>,
+    /// Dispatches recovery sent round again, across every resume of the run.
+    #[serde(default)]
+    pub retries: u32,
+    /// Final dispatch failures, across every resume of the run.
+    #[serde(default)]
+    pub failed_dispatches: u32,
+    /// Ids of the alerts that have fired. An alert fires once per run, and a
+    /// resume is the same run.
+    #[serde(default)]
+    pub alerts_raised: Vec<String>,
+}
+
+/// A question the run put to a human.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Escalation {
+    /// The node it concerns, when it concerns one. Kept structurally so that
+    /// answering the escalation can give that node its revisions back.
+    #[serde(default)]
+    pub node_id: Option<String>,
+    pub question: String,
+    pub iteration: u32,
 }
 
 impl Checkpoint {
@@ -334,6 +355,9 @@ impl Checkpoint {
             state: None,
             outcome: None,
             escalations: Vec::new(),
+            retries: 0,
+            failed_dispatches: 0,
+            alerts_raised: Vec::new(),
         }
     }
 }

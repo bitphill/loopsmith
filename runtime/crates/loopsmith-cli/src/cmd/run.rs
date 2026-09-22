@@ -23,6 +23,7 @@ pub fn execute(
             acquire_skills: !no_acquire,
             verbose,
             config_file: config_file_name(config),
+            answer_escalations: false,
         },
     )?;
     Ok(exit_code(&out))

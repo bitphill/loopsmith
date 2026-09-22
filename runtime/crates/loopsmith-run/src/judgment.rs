@@ -35,6 +35,13 @@ SCORE: <0-10, optional>
 A verdict without evidence cannot be acted on. If you cannot check something,\n\
 say FAIL and give the reason as evidence rather than passing it by default.";
 
+/// Whether judge output contains at least one `VERDICT:` block the gate can
+/// read. Independent of which providers produced it, which only matters once
+/// the verdicts are counted.
+pub fn has_verdict(text: &str) -> bool {
+    !parse(text, "", "").is_empty()
+}
+
 /// Parse judge output into judgments.
 ///
 /// `judge_provider` and `builder_provider` come from the episode record, not

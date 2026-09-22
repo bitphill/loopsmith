@@ -72,15 +72,20 @@ pub struct CostView {
 }
 
 /// Parse, validate, plan, and price a config the browser is holding.
+/// A config the browser posted, read the way the file loader reads one.
+///
+/// Through the same legacy transform, never `serde_json::from_value`: the
+/// browser can post a config it loaded from an example or pasted from an
+/// older loop, and a direct deserialize would refuse every 0.3 key in it —
+/// making the web UI disagree with `loopsmith validate` on the very file it
+/// is showing.
+pub fn parse_value(value: &serde_json::Value) -> Result<LoopConfig, String> {
+    let text = serde_json::to_string(value).map_err(|e| e.to_string())?;
+    loopsmith_core::parse_str(&text, "browser").map_err(|e| e.to_string())
+}
+
 pub fn review(value: &serde_json::Value) -> Review {
-    // Through the same legacy transform the file loader uses. The browser can
-    // post a config it loaded from an example or pasted from an older loop, and
-    // refusing those here would make the review panel disagree with
-    // `loopsmith validate` on the very file it is previewing.
-    let cfg: LoopConfig = match serde_json::to_string(value)
-        .map_err(|e| e.to_string())
-        .and_then(|text| loopsmith_core::parse_str(&text, "browser").map_err(|e| e.to_string()))
-    {
+    let cfg: LoopConfig = match parse_value(value) {
         Ok(c) => c,
         Err(e) => {
             return Review {

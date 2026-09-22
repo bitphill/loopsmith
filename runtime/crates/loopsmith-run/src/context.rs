@@ -6,8 +6,8 @@
 //! can this state touch" has one answer.
 
 use crate::logging::{Recorder, RunLog};
-use crate::recovering::{self, Response};
-use crate::state::{Lifecycle, RunState};
+use crate::recovering::{self, Failure, Response};
+use crate::state::{Halt, Lifecycle, RunState};
 use crate::RunOptions;
 use loopsmith_core::{FailureClass, LoopConfig};
 use loopsmith_memory::{now_ms, Checkpoint, LedgerKind, Store};
@@ -106,7 +106,18 @@ impl<'a, S: Store> Run<'a, S> {
             next,
             RunState::Running | RunState::Retrying | RunState::AwaitingApproval | RunState::Closed
         ) {
-            self.save();
+            // A transition that cannot be persisted is still a transition: the
+            // run is in `next` whatever the disk says. What is lost is only
+            // the crash report a later resume could have given, so it is
+            // written down and the run goes on.
+            if let Err(e) = self.save() {
+                self.rec.entry(
+                    self.checkpoint.iteration,
+                    LedgerKind::Recovered,
+                    format!("the checkpoint could not be saved on entering `{next}`: {e}"),
+                    None,
+                );
+            }
         } else {
             self.stamp();
         }
@@ -114,9 +125,57 @@ impl<'a, S: Store> Run<'a, S> {
     }
 
     /// Persist the checkpoint as it stands, stamped with the current state.
-    pub fn save(&mut self) {
+    pub fn save(&mut self) -> Result<(), String> {
         self.stamp();
-        let _ = self.store.save_checkpoint(&self.checkpoint);
+        self.store
+            .save_checkpoint(&self.checkpoint)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Persist the end of an iteration, answering a failed save with the
+    /// `corrupted_state` policy. Returns the halt the policy calls for, if
+    /// any.
+    ///
+    /// `restore_checkpoint` restores nothing here — the store keeps one
+    /// checkpoint per run and it is the one that just failed to write — so it
+    /// fails the run rather than carry on without a resume point.
+    pub fn save_or_halt(&mut self) -> Option<Halt> {
+        let mut attempt = 0u32;
+        loop {
+            let err = match self.save() {
+                Ok(()) => return None,
+                Err(e) => e,
+            };
+            attempt += 1;
+            let failure = Failure {
+                class: FailureClass::CorruptedState,
+                attempt,
+                subject: "the checkpoint".into(),
+                detail: format!("could not be saved ({err})"),
+                node: None,
+                iteration: self.checkpoint.iteration,
+            };
+            let why = format!("the checkpoint could not be saved: {err}");
+            match recovering::answer(&self.rec, &self.cfg.safety.recovery, &failure, true) {
+                Response::Retry { delay_seconds } => {
+                    std::thread::sleep(std::time::Duration::from_secs(delay_seconds));
+                }
+                Response::Revise | Response::Continue => return None,
+                Response::Escalate => {
+                    return Some(Halt {
+                        state: RunState::Escalated,
+                        why,
+                    })
+                }
+                Response::Halt(RunState::RolledBack) => {
+                    return Some(Halt {
+                        state: RunState::Failed,
+                        why: format!("{why}; no earlier checkpoint is kept to restore"),
+                    })
+                }
+                Response::Halt(state) => return Some(Halt { state, why }),
+            }
+        }
     }
 
     /// Stamp the in-memory checkpoint with the current state, without saving.
@@ -150,18 +209,15 @@ fn read_checkpoint<S: Store>(
             Err(e) => e,
         };
         attempt += 1;
-        let class = FailureClass::CorruptedState;
-        let response = recovering::respond(&cfg.safety.recovery, class, attempt);
-        rec.entry(
-            0,
-            LedgerKind::Recovered,
-            format!(
-                "the checkpoint for `{run_id}` could not be read ({err}) — {}",
-                recovering::describe(class, &response, attempt)
-            ),
-            None,
-        );
-        match response {
+        let failure = Failure {
+            class: FailureClass::CorruptedState,
+            attempt,
+            subject: format!("the checkpoint for `{run_id}`"),
+            detail: format!("could not be read ({err})"),
+            node: None,
+            iteration: 0,
+        };
+        match recovering::answer(rec, &cfg.safety.recovery, &failure, true) {
             Response::Retry { delay_seconds } => {
                 std::thread::sleep(std::time::Duration::from_secs(delay_seconds));
             }

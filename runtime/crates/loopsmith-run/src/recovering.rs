@@ -13,8 +13,10 @@
 //! the decision pure is what lets every row of the table be tested without
 //! running a provider.
 
+use crate::logging::Recorder;
 use crate::state::RunState;
 use loopsmith_core::{FailureClass, Recovery, RecoveryAction};
+use loopsmith_memory::{LedgerKind, Store};
 
 /// What the engine does next about one failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +33,56 @@ pub(crate) enum Response {
     Escalate,
     /// Stop the run in this state.
     Halt(RunState),
+}
+
+impl Response {
+    /// Whether this response sends the node round again.
+    pub(crate) fn redispatches(&self) -> bool {
+        matches!(self, Response::Retry { .. } | Response::Revise)
+    }
+}
+
+/// Decide the response to a failure and write it to the ledger, in one step,
+/// so no call site can do one without the other.
+///
+/// `may_redispatch` is false once dispatch has stopped for the iteration — a
+/// halt, a budget ceiling — and turns a retry or revision into `Continue`: the
+/// policy asked for another attempt, and there is no longer an attempt to
+/// give. The ledger line says which was decided.
+pub(crate) fn answer<S: Store>(
+    rec: &Recorder<S>,
+    policy: &Recovery,
+    failure: &Failure,
+    may_redispatch: bool,
+) -> Response {
+    let mut response = respond(policy, failure.class, failure.attempt);
+    if response.redispatches() && !may_redispatch {
+        response = Response::Continue;
+    }
+    rec.entry(
+        failure.iteration,
+        LedgerKind::Recovered,
+        format!(
+            "{}: {} — {}",
+            failure.subject,
+            failure.detail,
+            describe(failure.class, &response, failure.attempt)
+        ),
+        failure.node.clone(),
+    );
+    response
+}
+
+/// One failure, as `answer` needs to see it.
+pub(crate) struct Failure {
+    pub class: FailureClass,
+    /// How many times this has now happened, 1-based.
+    pub attempt: u32,
+    /// What failed, as the ledger names it: "`build`", "the checkpoint".
+    pub subject: String,
+    pub detail: String,
+    pub node: Option<String>,
+    pub iteration: u32,
 }
 
 /// The response to a failure that has now happened `attempt` times.
@@ -97,16 +149,9 @@ pub(crate) fn describe(class: FailureClass, response: &Response, attempt: u32) -
     }
 }
 
-pub(crate) fn class_name(class: FailureClass) -> &'static str {
-    match class {
-        FailureClass::TransientError => "transient error",
-        FailureClass::InvalidOutput => "invalid output",
-        FailureClass::ToolUnavailable => "tool unavailable",
-        FailureClass::RepeatedFailure => "repeated failure",
-        FailureClass::SafetyViolation => "safety violation",
-        FailureClass::ResourceExhaustion => "resource exhaustion",
-        FailureClass::CorruptedState => "corrupted state",
-    }
+/// The class in prose: its config key with the underscores spoken.
+pub(crate) fn class_name(class: FailureClass) -> String {
+    class.key().replace('_', " ")
 }
 
 #[cfg(test)]

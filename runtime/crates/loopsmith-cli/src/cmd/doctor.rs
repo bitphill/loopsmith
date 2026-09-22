@@ -199,7 +199,7 @@ fn uses_containers(path: &Path) -> bool {
                 .graph
                 .nodes
                 .iter()
-                .any(|n| matches!(n.isolation, loopsmith_core::Isolation::Container { .. }))
+                .any(|n| n.isolation.is_container())
         })
         .unwrap_or(false)
 }

@@ -148,6 +148,15 @@ impl std::fmt::Display for RunState {
     }
 }
 
+/// Something other than a stop gate ending the run: a failed rule, or a
+/// failure the recovery policy answers with a halt. `state` is the outcome it
+/// sends the run to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Halt {
+    pub state: RunState,
+    pub why: String,
+}
+
 /// A move the table does not allow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IllegalTransition {

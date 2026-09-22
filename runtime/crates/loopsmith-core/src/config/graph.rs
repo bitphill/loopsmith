@@ -74,6 +74,22 @@ impl Isolation {
     }
 
     /// What this becomes when Docker is unavailable.
+    pub fn is_container(&self) -> bool {
+        matches!(self, Isolation::Container { .. })
+    }
+
+    /// The image a container node runs in: its own, or the graph's default.
+    /// `None` for a non-container node, or when neither names one.
+    pub fn container_image<'a>(&'a self, graph_default: Option<&'a str>) -> Option<&'a str> {
+        match self {
+            Isolation::Container { image, .. } => image
+                .as_deref()
+                .or(graph_default)
+                .filter(|s| !s.trim().is_empty()),
+            _ => None,
+        }
+    }
+
     pub fn without_container(&self) -> Isolation {
         match self {
             Isolation::Container { .. } => Isolation::Worktree,

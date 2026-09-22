@@ -287,8 +287,7 @@ fn yaml_format() -> assemble::Format {
 }
 
 async fn render(Json(b): Json<RenderBody>) -> ApiResult<Value> {
-    let cfg: loopsmith_core::LoopConfig =
-        serde_json::from_value(b.config).map_err(|e| e.to_string())?;
+    let cfg = assemble::parse_value(&b.config)?;
     let text = assemble::render(&cfg, b.format)?;
     Ok(Json(json!({ "text": text, "file_name": b.format.file_name() })))
 }
@@ -362,8 +361,7 @@ async fn start_job(
     // rather than trusting a path from the browser, is what stops the API from
     // being a way to feed an arbitrary file to `loopsmith new`.
     if let Some(draft) = b.draft.take() {
-        let cfg: loopsmith_core::LoopConfig =
-            serde_json::from_value(draft.config).map_err(|e| e.to_string())?;
+        let cfg = assemble::parse_value(&draft.config)?;
         let text = assemble::render(&cfg, draft.format)?;
         let scratch = assemble::write_scratch(&text, draft.format)?;
         if let exec::Action::Create { config_file, .. } = &mut b.action {

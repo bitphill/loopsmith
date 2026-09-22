@@ -5,12 +5,12 @@
 //! means paying for the discovery.
 
 use crate::context::Run;
-use crate::evidence::collect_evidence;
+use crate::evidence;
 use crate::logging::Recorder;
 use crate::phases::Phases;
 use crate::rules;
 use crate::state::RunState;
-use crate::waves::Halt;
+use crate::state::Halt;
 use loopsmith_core::{GateKind, LoopConfig};
 use loopsmith_memory::{LedgerKind, Store};
 use std::path::Path;
@@ -77,7 +77,7 @@ pub(crate) fn approve<S: Store>(run: &mut Run<S>) -> Result<Option<Halt>, String
     }
     run.enter(RunState::AwaitingApproval, format!("{n} approval rule(s)"))?;
     let root = run.root();
-    let ev = collect_evidence(cfg, root, Some(&root.join("metrics.json")), vec![]);
+    let ev = evidence::at_root(cfg, root, vec![]);
     Ok(rules::apply(run, GateKind::Approval, &ev, it))
 }
 

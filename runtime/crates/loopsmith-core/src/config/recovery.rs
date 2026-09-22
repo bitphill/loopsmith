@@ -26,7 +26,9 @@ pub enum Backoff {
 }
 
 impl Backoff {
-    /// Delay before attempt `n` (1-based), given a base delay in seconds.
+    /// Delay before retry `n` (1-based), given a base delay in seconds. The
+    /// first retry waits exactly `base` under every strategy; they differ in
+    /// how the wait grows after that.
     pub fn delay_seconds(self, base: u64, attempt: u32) -> u64 {
         let n = attempt.max(1);
         match self {
@@ -35,7 +37,7 @@ impl Backoff {
             // Shift rather than pow so a large attempt count cannot overflow
             // into a tiny delay. Capped at 2^16 × base, which is already far
             // past any sane wall-clock budget.
-            Backoff::Exponential => base.saturating_mul(1u64 << n.min(16)),
+            Backoff::Exponential => base.saturating_mul(1u64 << (n - 1).min(16)),
         }
     }
 }
@@ -173,6 +175,31 @@ pub enum FailureClass {
     CorruptedState,
 }
 
+impl FailureClass {
+    pub const ALL: [FailureClass; 7] = [
+        FailureClass::TransientError,
+        FailureClass::InvalidOutput,
+        FailureClass::ToolUnavailable,
+        FailureClass::RepeatedFailure,
+        FailureClass::SafetyViolation,
+        FailureClass::ResourceExhaustion,
+        FailureClass::CorruptedState,
+    ];
+
+    /// The name the config uses for this class.
+    pub fn key(self) -> &'static str {
+        match self {
+            FailureClass::TransientError => "transient_error",
+            FailureClass::InvalidOutput => "invalid_output",
+            FailureClass::ToolUnavailable => "tool_unavailable",
+            FailureClass::RepeatedFailure => "repeated_failure",
+            FailureClass::SafetyViolation => "safety_violation",
+            FailureClass::ResourceExhaustion => "resource_exhaustion",
+            FailureClass::CorruptedState => "corrupted_state",
+        }
+    }
+}
+
 impl Recovery {
     /// The configured action for a class.
     pub fn action_for(&self, class: FailureClass) -> RecoveryAction {
@@ -200,6 +227,23 @@ mod tests {
         let big = Backoff::Exponential.delay_seconds(2, 4096);
         let small = Backoff::Exponential.delay_seconds(2, 4);
         assert!(big >= small, "{big} should not be shorter than {small}");
+    }
+
+    #[test]
+    fn the_first_retry_waits_the_base_delay_under_every_strategy() {
+        for b in [Backoff::Fixed, Backoff::Linear, Backoff::Exponential] {
+            assert_eq!(b.delay_seconds(3, 1), 3, "{b:?}");
+        }
+        assert_eq!(Backoff::Exponential.delay_seconds(3, 2), 6);
+        assert_eq!(Backoff::Exponential.delay_seconds(3, 3), 12);
+    }
+
+    #[test]
+    fn every_class_is_named_as_the_config_spells_it() {
+        for class in FailureClass::ALL {
+            let json = serde_json::to_string(&class).unwrap();
+            assert_eq!(json.trim_matches('"'), class.key());
+        }
     }
 
     #[test]
