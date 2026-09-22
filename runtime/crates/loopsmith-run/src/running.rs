@@ -53,6 +53,9 @@ pub(crate) struct Progress {
     pub retries: u32,
     /// Alerts raised this run. Each fires at most once.
     pub alerts: Vec<crate::metrics::RaisedAlert>,
+    /// Container nodes already told they are running in a worktree instead,
+    /// so the ledger says it once per run rather than once per iteration.
+    pub degraded: BTreeSet<String>,
 }
 
 impl Progress {
@@ -69,6 +72,7 @@ impl Progress {
             failed_dispatches: 0,
             retries: 0,
             alerts: Vec::new(),
+            degraded: BTreeSet::new(),
         }
     }
 

@@ -107,6 +107,51 @@ pub struct InvokeRequest {
     pub prompt: String,
     pub tier: Tier,
     pub workdir: PathBuf,
+    /// Run the provider inside a container rather than on the host.
+    pub container: Option<Container>,
+}
+
+/// A container to run a provider in.
+///
+/// The provider's own command runs inside `image`, with the node's working
+/// directory mounted at `/work`. The provider CLI must therefore exist in the
+/// image — the host's copy is not visible in there, which is the point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Container {
+    pub image: String,
+    /// Give the container a network. Off means `--network none`.
+    pub network: bool,
+    /// The container runtime: `docker`, or anything CLI-compatible with it.
+    pub runtime: PathBuf,
+}
+
+/// The full command line for a provider call in a container.
+///
+/// Environment variables the provider requires are passed through **by name**
+/// (`-e KEY`), so the runtime reads each value from this process's
+/// environment. A value never appears on a command line, where any user on the
+/// machine could read it from the process table.
+pub fn container_argv(spec: &ProviderSpec, req: &InvokeRequest, c: &Container, args: &[String]) -> Vec<String> {
+    let mut argv: Vec<String> = vec!["run".into(), "--rm".into()];
+    if spec.prompt_on_stdin {
+        argv.push("-i".into());
+    }
+    if !c.network {
+        argv.extend(["--network".into(), "none".into()]);
+    }
+    argv.extend([
+        "-v".into(),
+        format!("{}:/work", req.workdir.display()),
+        "-w".into(),
+        "/work".into(),
+    ]);
+    for key in &spec.requires_env {
+        argv.extend(["-e".into(), key.clone()]);
+    }
+    argv.push(c.image.clone());
+    argv.push(spec.command.clone());
+    argv.extend(args.iter().cloned());
+    argv
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,8 +283,19 @@ pub fn invoke(spec: &ProviderSpec, req: &InvokeRequest) -> Result<InvokeResponse
 
     let args: Vec<String> = spec.args.iter().map(|a| render(a, &vars)).collect();
 
-    let mut cmd = Command::new(&spec.command);
-    cmd.args(&args)
+    let mut cmd = match &req.container {
+        None => {
+            let mut c = Command::new(&spec.command);
+            c.args(&args);
+            c
+        }
+        Some(container) => {
+            let mut c = Command::new(&container.runtime);
+            c.args(container_argv(spec, req, container, &args));
+            c
+        }
+    };
+    cmd
         .current_dir(&req.workdir)
         .stdin(if spec.prompt_on_stdin {
             Stdio::piped()
@@ -351,7 +407,12 @@ pub fn dispatch(
     let mut skipped = Vec::new();
     let mut class = FailureClass::ToolUnavailable;
     for spec in &candidates {
-        let av = availability(spec);
+        let mut av = availability(spec);
+        // In a container the provider's binary is the image's business; what
+        // must exist on this machine is the runtime.
+        if let Some(c) = &req.container {
+            av.on_path = which(&c.runtime.to_string_lossy()).is_some();
+        }
         if !av.ok() {
             skipped.push(format!("{} ({})", spec.id, av.why_not()));
             continue;
@@ -500,6 +561,7 @@ mod tests {
             prompt: "hello".into(),
             tier: Tier::Standard,
             workdir: std::env::temp_dir(),
+            container: None,
         }
     }
 
@@ -573,6 +635,35 @@ mod tests {
         let s = spec("failer", "false", &[]);
         let e = invoke(&s, &req()).unwrap_err();
         assert!(matches!(e, ProviderError::Failed { .. }));
+    }
+
+    #[test]
+    fn a_container_call_mounts_the_workdir_and_passes_secrets_by_name_only() {
+        let mut s = spec("claude", "claude", &["-p", "{{prompt}}"]);
+        s.requires_env = vec!["ANTHROPIC_API_KEY".into()];
+        let r = req();
+        let c = Container {
+            image: "ghcr.io/example/agent:1".into(),
+            network: false,
+            runtime: "docker".into(),
+        };
+        let argv = container_argv(&s, &r, &c, &["-p".into(), "hi".into()]);
+        let joined = argv.join(" ");
+        assert!(joined.starts_with("run --rm --network none -v "), "{joined}");
+        assert!(joined.contains(":/work -w /work"), "{joined}");
+        assert!(joined.contains("-e ANTHROPIC_API_KEY ghcr.io/example/agent:1 claude -p hi"), "{joined}");
+        assert!(!joined.contains('='), "a secret's value must never reach the command line");
+    }
+
+    #[test]
+    fn a_container_with_network_does_not_disable_it() {
+        let s = spec("p", "echo", &[]);
+        let c = Container {
+            image: "img".into(),
+            network: true,
+            runtime: "docker".into(),
+        };
+        assert!(!container_argv(&s, &req(), &c, &[]).contains(&"none".to_string()));
     }
 
     #[test]

@@ -165,6 +165,7 @@ pub fn add_narrative(
         prompt,
         tier: Tier::Cheap,
         workdir: workdir.to_path_buf(),
+        container: None,
     };
 
     if let Ok((resp, _)) = dispatch(cfg, &req, Some(provider_id)) {

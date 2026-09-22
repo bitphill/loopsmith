@@ -7,6 +7,7 @@
 
 use super::perturb::Perturbation;
 use super::prompts::{build_node_prompt, build_system_prompt};
+use crate::container::{self, Containment};
 use crate::logging::Recorder;
 use crate::worktree::{self, Isolation};
 use loopsmith_core::{FailureClass, LoopConfig, NodeSpec, Role};
@@ -38,6 +39,9 @@ pub struct NodeOutcome {
     /// prose because the caller has to publish an isolated node's work back
     /// into the loop root, and cannot do that from a description of it.
     pub isolation: Isolation,
+    /// Whether the provider ran in a container, on the host, or asked for a
+    /// container and did not get one.
+    pub containment: Containment,
 }
 
 /// Resolve the sub-agents a node declares, acquiring what is missing.
@@ -148,12 +152,30 @@ pub fn run_node(
         _ => node.tier,
     };
 
+    let probed = if matches!(node.isolation, loopsmith_core::Isolation::Container { .. }) {
+        Some(container::probe())
+    } else {
+        None
+    };
+    let containment = match &probed {
+        None => Containment::Host,
+        Some(p) => container::resolve(
+            &node.isolation,
+            cfg.execution.graph.container_image.as_deref(),
+            p.as_ref().map_err(String::as_str),
+        ),
+    };
+
     let req = InvokeRequest {
         node_id: node.id.clone(),
         system,
         prompt: prompt.clone(),
         tier,
         workdir,
+        container: match &containment {
+            Containment::Container(c) => Some(c.clone()),
+            _ => None,
+        },
     };
 
     match dispatch(cfg, &req, node.provider.as_deref()) {
@@ -172,6 +194,7 @@ pub fn run_node(
             failure: None,
             seeded,
             isolation: iso,
+            containment,
         },
         Err(e) => NodeOutcome {
             node_id: node.id.clone(),
@@ -188,6 +211,7 @@ pub fn run_node(
             failure: Some(e.class()),
             seeded,
             isolation: iso,
+            containment,
         },
     }
 }

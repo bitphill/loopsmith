@@ -205,6 +205,7 @@ fn ask_agent(cfg: &LoopConfig, workdir: &Path, stall: &Stall) -> Option<Perturba
         prompt,
         tier: Tier::Cheap,
         workdir: workdir.to_path_buf(),
+        container: None,
     };
 
     let (resp, _) = dispatch(cfg, &req, None).ok()?;

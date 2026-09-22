@@ -57,6 +57,16 @@ pub fn execute(config: Option<&Path>) -> Result<ExitCode, String> {
     for tool in ["git", "sh", "sed", "awk", "curl"] {
         report_tool(tool);
     }
+    let docker = loopsmith_run::container::probe();
+    match &docker {
+        Ok(rt) => println!(
+            "  {:<13} {} (server {}; container isolation available)",
+            "containers",
+            rt.bin.display(),
+            rt.version
+        ),
+        Err(why) => println!("  {:<13} unavailable: {why}", "containers"),
+    }
 
     let mut notes: Vec<String> = Vec::new();
     if let Some(note) = p.portability_note() {
@@ -93,6 +103,14 @@ pub fn execute(config: Option<&Path>) -> Result<ExitCode, String> {
 
     if let Some(path) = config {
         notes.extend(config_notes(path));
+        if docker.is_err() && uses_containers(path) {
+            notes.push(
+                "this loop has `isolation: container` nodes and no container runtime answered; \
+                 they will run in a git worktree instead, and the ledger will say so. Set \
+                 LOOPSMITH_DOCKER to use podman or another Docker-compatible runtime."
+                    .into(),
+            );
+        }
     }
 
     if notes.is_empty() {
@@ -171,4 +189,17 @@ fn config_notes(path: &Path) -> Vec<String> {
         ));
     }
     out
+}
+
+/// Whether the config at `path` asks for container isolation anywhere.
+fn uses_containers(path: &Path) -> bool {
+    loopsmith_core::load(path)
+        .map(|cfg| {
+            cfg.execution
+                .graph
+                .nodes
+                .iter()
+                .any(|n| matches!(n.isolation, loopsmith_core::Isolation::Container { .. }))
+        })
+        .unwrap_or(false)
 }

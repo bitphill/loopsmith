@@ -1125,3 +1125,28 @@ fn a_proposal_that_would_touch_a_protected_path_is_never_written() {
     assert!(ledger_says(&s, "protected", LedgerKind::GateEvaluated, "the gate refused a proposal"));
     let _ = std::fs::remove_dir_all(d);
 }
+
+// --- container isolation -----------------------------------------------------------
+
+#[test]
+fn a_container_node_without_an_image_degrades_to_a_worktree_and_still_runs() {
+    // No image named anywhere, so there is nothing to run in whether or not
+    // this machine has Docker. The run must go on, and say why.
+    let (s, d) = store("container");
+    let mut c = cfg("");
+    c.execution.graph.nodes[0].isolation = loopsmith_core::Isolation::Container {
+        image: None,
+        network: false,
+    };
+    let out = execute(&c, &s, &opts("container", &d)).unwrap();
+    assert_eq!(out.state, RunState::Succeeded);
+    let said: Vec<_> = s
+        .ledger("container")
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.detail.contains("asked for container isolation"))
+        .collect();
+    assert_eq!(said.len(), 1, "said once, not once per iteration");
+    assert!(said[0].detail.contains("no image"), "{}", said[0].detail);
+    let _ = std::fs::remove_dir_all(d);
+}

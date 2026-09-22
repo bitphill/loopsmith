@@ -91,6 +91,7 @@ pub fn validate(cfg: &LoopConfig) -> ValidationReport {
     check_gate_rules(cfg, &mut r);
     check_recovery(cfg, &mut r);
     check_alerts(cfg, &mut r);
+    check_containers(cfg, &mut r);
     r
 }
 
@@ -523,6 +524,25 @@ fn check_gate_rules(cfg: &LoopConfig, r: &mut ValidationReport) {
             "must stay on in `prod`: a production loop may propose changes to itself, never \
              adopt them unreviewed",
         ));
+    }
+}
+
+/// Container isolation that has nothing to run in.
+fn check_containers(cfg: &LoopConfig, r: &mut ValidationReport) {
+    for (i, n) in cfg.execution.graph.nodes.iter().enumerate() {
+        if let crate::Isolation::Container { image, .. } = &n.isolation {
+            let named = image.as_deref().or(cfg.execution.graph.container_image.as_deref());
+            if named.map_or(true, |s| s.trim().is_empty()) {
+                r.issues.push(Issue::warn(
+                    format!("execution.graph.nodes[{i}].isolation"),
+                    format!(
+                        "`{}` asks for a container but no image is named here or in \
+                         `execution.graph.container_image`; it will run in a worktree instead",
+                        n.id
+                    ),
+                ));
+            }
+        }
     }
 }
 

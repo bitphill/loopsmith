@@ -28,6 +28,7 @@
 //! Only the dispatcher's thread touches the store. Workers run a node and send
 //! the outcome back; everything is written down here, in arrival order.
 
+use crate::container::Containment;
 use crate::context::Run;
 use crate::dispatch::{ensure_skills, run_node, NodeContext, NodeOutcome};
 use crate::judgment;
@@ -686,6 +687,20 @@ fn record_outcome<S: Store>(
     it: u32,
 ) -> Option<(FailureClass, String)> {
     let cfg = run.cfg;
+    if let Containment::Degraded(why) = &o.containment {
+        if progress.degraded.insert(o.node_id.clone()) {
+            run.rec.entry(
+                it,
+                LedgerKind::NodeDispatched,
+                format!(
+                    "`{}` asked for container isolation, but {why}; it runs in a worktree \
+                     instead",
+                    o.node_id
+                ),
+                Some(o.node_id.clone()),
+            );
+        }
+    }
     out.log
         .push((o.node_id.clone(), o.provider_id.clone(), o.role, o.error.is_none()));
     if let Some(err) = &o.error {
@@ -736,7 +751,10 @@ fn record_outcome<S: Store>(
             o.duration_ms,
             o.tokens.unwrap_or(0),
             if o.tokens_estimated { " (est)" } else { "" },
-            o.isolation.describe()
+            match &o.containment {
+                Containment::Container(c) => format!("{} in container `{}`", o.isolation.describe(), c.image),
+                _ => o.isolation.describe(),
+            }
         ),
         Some(o.node_id.clone()),
     );

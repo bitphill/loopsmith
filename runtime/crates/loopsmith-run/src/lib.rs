@@ -25,6 +25,7 @@
 //! The gate is not in this crate. The engine hands it evidence and records its
 //! ruling; nothing here can mark a goal satisfied.
 
+pub mod container;
 pub mod dispatch;
 pub mod evolve;
 pub mod export;
