@@ -27,6 +27,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 ctrlc = { workspace = true }
+# The wizard refuses a regex that cannot compile where it is typed, using the
+# same engine the gate will run it with.
+regex = { workspace = true }
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]

@@ -23,11 +23,13 @@
 //! Nothing here blocks a script: a piped stdin is consumed as an answer stream,
 //! which is also how the tests drive the whole wizard end to end.
 
+pub mod answers;
 pub mod catalog;
 pub mod detect;
 mod form;
 pub mod io;
 mod sections;
+pub mod spec;
 
 pub use io::{Choice, Io, Nav};
 use loopsmith_core::LoopConfig;
