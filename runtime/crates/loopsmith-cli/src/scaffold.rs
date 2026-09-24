@@ -934,7 +934,7 @@ mod tests {
 
         let run = std::fs::read_to_string(root.join("run.sh")).unwrap();
         assert!(run.contains("cd \"$(dirname \"$0\")\""), "got: {run}");
-        assert!(run.contains(" run \"loop.yaml\""), "got: {run}");
+        assert!(run.contains(" run start \"loop.yaml\""), "got: {run}");
         // Absolute, because cron and launchd do not inherit a shell PATH.
         let binary = binary_path();
         assert!(run.contains(&binary), "run.sh should pin {binary}: {run}");
@@ -983,7 +983,7 @@ mod tests {
         assert!(!root.join("loop.yaml").exists());
         // run.sh must point at the config that actually exists.
         let run = std::fs::read_to_string(root.join("run.sh")).unwrap();
-        assert!(run.contains(" run \"loop.md\""), "got: {run}");
+        assert!(run.contains(" run start \"loop.md\""), "got: {run}");
         loopsmith_util::testing::cleanup(&root);
     }
 

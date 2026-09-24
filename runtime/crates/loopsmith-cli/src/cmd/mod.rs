@@ -3,7 +3,7 @@
 //! Every command returns `Result<ExitCode, String>` rather than exiting, so a
 //! command is testable and the exit code is decided in one place.
 
-use crate::cli::{Command, MemoryAction, SkillsAction};
+use crate::cli::{Command, LoopAction, MemoryAction, RunAction, SkillsAction};
 use loopsmith_run::RunOutcome;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -110,7 +110,7 @@ pub fn report_outcome(out: &RunOutcome) {
     }
     if !out.stop.is_success() {
         println!(
-            "\nThis run did not meet the bar. The ledger holds what was tried:\n  loopsmith ledger <config> {}",
+            "\nThis run did not meet the bar. The ledger holds what was tried:\n  loopsmith run ledger <config> {}",
             out.run_id
         );
     }
@@ -119,66 +119,8 @@ pub fn report_outcome(out: &RunOutcome) {
 /// Route a resolved command to its module.
 pub fn dispatch(command: Command) -> Result<ExitCode, String> {
     match command {
-        Command::New {
-            path,
-            name,
-            purpose,
-            force,
-            config_file,
-            config_stdin,
-            markdown,
-            git,
-        } => new::execute(new::NewArgs {
-            path,
-            name,
-            purpose,
-            force,
-            config_file,
-            config_stdin,
-            markdown,
-            git,
-        }),
-        Command::Validate { config, strict } => validate::execute(&config, strict),
-        Command::Migrate { config, check, write } => migrate::execute(&config, check, write),
-        Command::Convert {
-            config,
-            out,
-            to_yaml,
-        } => convert::execute(&config, out, to_yaml),
-        Command::Plan { config } => plan::execute(&config),
-        Command::Run {
-            config,
-            run_id,
-            dry_run,
-            no_acquire,
-            verbose,
-        } => run::execute(&config, run_id, dry_run, no_acquire, verbose),
-        Command::Resume {
-            config,
-            run_id,
-            verbose,
-            answer,
-        } => resume::execute(&config, run_id, verbose, answer),
-        Command::Status { config, run_id } => status::execute(&config, &run_id),
-        Command::Ledger {
-            config,
-            run_id,
-            limit,
-        } => ledger::execute(&config, &run_id, limit),
-        Command::Gate {
-            config,
-            target,
-            workdir,
-        } => gate::execute(&config, &target, &workdir),
-        Command::Providers { config } => providers::execute(&config),
-        Command::Doctor { config } => doctor::execute(config.as_deref()),
-        Command::Permissions { config, write } => permissions::execute(&config, write.as_deref()),
-        Command::Watch {
-            config,
-            max_runs,
-            check,
-        } => watch::execute(&config, max_runs, check),
-        Command::Schedule { config, install } => schedule::execute(&config, install),
+        Command::Loop { action } => loop_noun(action),
+        Command::Run { action } => run_noun(action),
         Command::Memory { action } => match action {
             MemoryAction::List { config, namespace } => memory::list(&config, namespace.as_deref()),
             MemoryAction::Promote {
@@ -203,10 +145,44 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
             SkillsAction::Install { config } => skills::install(&config),
             SkillsAction::Scores { config } => skills::scores(&config),
         },
-        Command::Proposals { config, run_id } => proposals::execute(&config, &run_id),
-        Command::Prune { config } => prune::execute(&config),
+        Command::Doctor { config } => doctor::execute(config.as_deref()),
+        Command::Providers { config } => providers::execute(&config),
         Command::Mcp { state } => mcp::execute(state),
-        Command::Guided {
+        #[cfg(feature = "web")]
+        Command::Web { port, no_open } => web::execute(port, no_open),
+        // Built without the `web` feature: say which flag brings it back
+        // rather than pretending the command does not exist.
+        #[cfg(not(feature = "web"))]
+        Command::Web { .. } => Err("this build has no web UI. Rebuild with the `web` feature: \
+             `cargo install loopsmith` (it is on by default), or \
+             `cargo build --features web` from a checkout."
+            .into()),
+    }
+}
+
+/// `loopsmith loop …` — the config file itself.
+fn loop_noun(action: LoopAction) -> Result<ExitCode, String> {
+    match action {
+        LoopAction::New {
+            path,
+            name,
+            purpose,
+            force,
+            config_file,
+            config_stdin,
+            markdown,
+            git,
+        } => new::execute(new::NewArgs {
+            path,
+            name,
+            purpose,
+            force,
+            config_file,
+            config_stdin,
+            markdown,
+            git,
+        }),
+        LoopAction::Guided {
             path,
             edit,
             novice,
@@ -226,14 +202,58 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
             };
             crate::guided::execute(path, edit, level)
         }
-        #[cfg(feature = "web")]
-        Command::Web { port, no_open } => web::execute(port, no_open),
-        // Built without the `web` feature: say which flag brings it back
-        // rather than pretending the command does not exist.
-        #[cfg(not(feature = "web"))]
-        Command::Web { .. } => Err("this build has no web UI. Rebuild with the `web` feature: \
-             `cargo install loopsmith` (it is on by default), or \
-             `cargo build --features web` from a checkout."
-            .into()),
+        LoopAction::Validate { config, strict } => validate::execute(&config, strict),
+        LoopAction::Plan { config } => plan::execute(&config),
+        LoopAction::Convert {
+            config,
+            out,
+            to_yaml,
+        } => convert::execute(&config, out, to_yaml),
+        LoopAction::Migrate {
+            config,
+            check,
+            write,
+        } => migrate::execute(&config, check, write),
+        LoopAction::Permissions { config, write } => {
+            permissions::execute(&config, write.as_deref())
+        }
+    }
+}
+
+/// `loopsmith run …` — one run of a loop.
+fn run_noun(action: RunAction) -> Result<ExitCode, String> {
+    match action {
+        RunAction::Start {
+            config,
+            run_id,
+            dry_run,
+            no_acquire,
+            verbose,
+        } => run::execute(&config, run_id, dry_run, no_acquire, verbose),
+        RunAction::Resume {
+            config,
+            run_id,
+            verbose,
+            answer,
+        } => resume::execute(&config, run_id, verbose, answer),
+        RunAction::Status { config, run_id } => status::execute(&config, &run_id),
+        RunAction::Ledger {
+            config,
+            run_id,
+            limit,
+        } => ledger::execute(&config, &run_id, limit),
+        RunAction::Gate {
+            config,
+            target,
+            workdir,
+        } => gate::execute(&config, &target, &workdir),
+        RunAction::Watch {
+            config,
+            max_runs,
+            check,
+        } => watch::execute(&config, max_runs, check),
+        RunAction::Schedule { config, install } => schedule::execute(&config, install),
+        RunAction::Proposals { config, run_id } => proposals::execute(&config, &run_id),
+        RunAction::Prune { config } => prune::execute(&config),
     }
 }

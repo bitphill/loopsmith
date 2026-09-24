@@ -88,8 +88,8 @@ pub fn execute(config: Option<&Path>) -> Result<ExitCode, String> {
     }
     if p.scheduler().is_none() {
         notes.push(
-            "no scheduler installed, so `loopsmith schedule` has nothing to hand the loop to. \
-             `loopsmith watch` still works under any process supervisor."
+            "no scheduler installed, so `loopsmith run schedule` has nothing to hand the \
+             loop to. `loopsmith run watch` still works under any process supervisor."
                 .into(),
         );
     }

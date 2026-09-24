@@ -8,4 +8,4 @@ if [ $# -eq 0 ]; then
   ls -1t logs/ 2>/dev/null | head -5 | sed -e 's/\.log$//' -e 's/^/  /' >&2
   exit 2
 fi
-exec "$LOOPSMITH" resume "{{config_file}}" "$1"
+exec "$LOOPSMITH" run resume "{{config_file}}" "$1"

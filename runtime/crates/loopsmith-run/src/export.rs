@@ -176,7 +176,7 @@ if ! command -v loopsmith >/dev/null 2>&1; then\n\
   echo \"This package is a config and its evidence; it needs the binary to run.\" >&2\n\
   exit 127\n\
 fi\n\
-exec loopsmith run \"{config_file}\" \"$@\"\n"
+exec loopsmith run start \"{config_file}\" \"$@\"\n"
     )
 }
 
@@ -210,7 +210,7 @@ if errorlevel 1 (\r\n\
   set \"CODE=127\"\r\n\
   goto :loopsmith_done\r\n\
 )\r\n\
-loopsmith run \"{config_file}\" %*\r\n\
+loopsmith run start \"{config_file}\" %*\r\n\
 set \"CODE=!ERRORLEVEL!\"\r\n\
 \r\n\
 :loopsmith_done\r\n\

@@ -6,7 +6,7 @@
   set "CODE=2"
   goto :loopsmith_done
 )
-"%LOOPSMITH%" resume "{{config_file}}" "%~1"
+"%LOOPSMITH%" run resume "{{config_file}}" "%~1"
 set "CODE=!ERRORLEVEL!"
 :loopsmith_done
 endlocal & exit /b %CODE%

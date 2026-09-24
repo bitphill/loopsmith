@@ -2,8 +2,8 @@
 //! for weeks.
 //!
 //! Without this, `schedules` is decoration: the config parses, validates, and
-//! then nothing ever fires it. `loopsmith watch` is the process that actually
-//! keeps a loop alive; `loopsmith schedule install` hands the job to the
+//! then nothing ever fires it. `loopsmith run watch` is the process that actually
+//! keeps a loop alive; `loopsmith run schedule --install` hands the job to the
 //! operating system so it survives a reboot.
 //!
 //! Cron expressions are evaluated in **UTC**. Deriving a correct local offset
@@ -483,7 +483,7 @@ pub fn poll_interval(triggers: &[TriggerSpec]) -> Duration {
 
 // ─────────────────────────────── OS handoff ────────────────────────────────
 
-/// A launchd agent that runs `loopsmith watch` and restarts it if it dies.
+/// A launchd agent that runs `loopsmith run watch` and restarts it if it dies.
 pub fn launchd_plist(label: &str, exe: &Path, config: &Path, log_dir: &Path) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -494,6 +494,7 @@ pub fn launchd_plist(label: &str, exe: &Path, config: &Path, log_dir: &Path) -> 
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>
+        <string>run</string>
         <string>watch</string>
         <string>{}</string>
     </array>
@@ -515,7 +516,7 @@ pub fn launchd_plist(label: &str, exe: &Path, config: &Path, log_dir: &Path) -> 
 /// `@reboot` keeps a watcher alive instead if the config has non-cron triggers.
 pub fn crontab_line(exe: &Path, config: &Path, expr: &str, log_dir: &Path) -> String {
     format!(
-        "{expr} {} run {} >> {}/loopsmith.log 2>&1",
+        "{expr} {} run start {} >> {}/loopsmith.log 2>&1",
         exe.display(),
         config.display(),
         log_dir.display()
@@ -546,7 +547,7 @@ pub fn launch_agents_dir() -> Option<PathBuf> {
     loopsmith_util::platform::home_dir().map(|h| h.join("Library").join("LaunchAgents"))
 }
 
-/// A `schtasks` invocation that keeps `loopsmith watch` alive on Windows.
+/// A `schtasks` invocation that keeps `loopsmith run watch` alive on Windows.
 ///
 /// Task Scheduler is the only scheduler that ships with Windows, and it has no
 /// crontab-shaped text file to append to — the schedule *is* a command. So this
@@ -565,7 +566,7 @@ pub fn schtasks_command(label: &str, exe: &Path, config: &Path) -> String {
     // a space — `C:\Program Files\` is the common case.
     format!(
         "schtasks /Create /F /RL LIMITED /TN \"{label}\" /SC MINUTE /MO 1 \
-         /TR \"\\\"{}\\\" watch \\\"{}\\\"\"",
+         /TR \"\\\"{}\\\" run watch \\\"{}\\\"\"",
         exe.display(),
         config.display()
     )
@@ -905,7 +906,7 @@ mod tests {
             "0 2 * * *",
             Path::new("/tmp"),
         );
-        assert!(line.starts_with("0 2 * * * /usr/local/bin/loopsmith run"));
+        assert!(line.starts_with("0 2 * * * /usr/local/bin/loopsmith run start"));
     }
 
     #[test]
@@ -929,7 +930,7 @@ mod tests {
         assert!(cmd.contains(r#"/TN "com.loopsmith.demo""#), "{cmd}");
         // Inside /TR, both paths carry escaped quotes of their own.
         assert!(
-            cmd.contains(r#"/TR "\"C:\Program Files\loopsmith\loopsmith.exe\" watch \"C:\Users\me\my loops\demo\loop.yaml\"""#),
+            cmd.contains(r#"/TR "\"C:\Program Files\loopsmith\loopsmith.exe\" run watch \"C:\Users\me\my loops\demo\loop.yaml\"""#),
             "{cmd}"
         );
         // `watch`, not `run`: the watcher evaluates the triggers, so Task

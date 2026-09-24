@@ -133,7 +133,7 @@ fn write_back(io: &mut Io, file: &std::path::Path, text: &str) -> Result<ExitCod
     }
     std::fs::write(file, text).map_err(|e| format!("could not write {}: {e}", file.display()))?;
     io.success(&format!("wrote {}", file.display()));
-    println!("\nCheck it:\n  loopsmith validate {}", file.display());
+    println!("\nCheck it:\n  loopsmith loop validate {}", file.display());
     Ok(ExitCode::SUCCESS)
 }
 
@@ -211,8 +211,8 @@ fn create_loop(
         io.note(&format!("git init failed: {why} — isolated nodes will share one directory."));
     }
     println!("\n  config: {}", config_path.display());
-    println!("  check:  loopsmith validate {}", config_path.display());
-    println!("  plan:   loopsmith plan {}", config_path.display());
+    println!("  check:  loopsmith loop validate {}", config_path.display());
+    println!("  plan:   loopsmith loop plan {}", config_path.display());
 
     offer_run(io, &config_path)
 }

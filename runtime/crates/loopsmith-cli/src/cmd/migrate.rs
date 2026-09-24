@@ -62,7 +62,7 @@ pub fn execute(config: &Path, check: bool, write: bool) -> Result<ExitCode, Stri
     }
 
     if check {
-        println!("\nRun `loopsmith migrate {} --write` to rewrite it.", config.display());
+        println!("\nRun `loopsmith loop migrate {} --write` to rewrite it.", config.display());
         return Ok(ExitCode::FAILURE);
     }
 

@@ -1,2 +1,2 @@
 {{header}}
-exec "$LOOPSMITH" run "{{config_file}}" "$@"
+exec "$LOOPSMITH" run start "{{config_file}}" "$@"
