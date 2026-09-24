@@ -104,6 +104,11 @@ pub struct Field {
     /// Longer lines shown under the question, for the reader who wants them.
     pub help: Vec<String>,
     pub input: Input,
+    /// What an untouched field answers with. The terminal offers it in
+    /// brackets and takes it on a bare Enter; the browser pre-fills the
+    /// control with it. Required fields carry one wherever the config itself
+    /// has a sensible default, so "Enter through it" stays a real option.
+    pub default: Option<String>,
     pub validator: Validator,
     /// Only asked when this holds.
     pub when: Option<When>,
@@ -453,6 +458,21 @@ mod tests {
                 !f.title.ends_with(' '),
                 "{} has a trailing space in its question",
                 f.id
+            );
+        }
+    }
+
+    #[test]
+    fn every_preset_is_an_answer_its_own_field_would_accept() {
+        // A preset is offered on a bare Enter, so a typo in one turns a
+        // question into a loop the user cannot get past.
+        for f in spec().fields() {
+            let Some(d) = &f.default else { continue };
+            assert!(
+                f.validator.check(d).is_ok(),
+                "{} presets `{d}`, which it would then refuse: {:?}",
+                f.id,
+                f.validator.check(d)
             );
         }
     }

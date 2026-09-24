@@ -61,6 +61,7 @@ fn field(id: &str, title: &str) -> Field {
             placeholder: None,
             mono: false,
         },
+        default: None,
         validator: Validator::Anything,
         when: None,
     }
@@ -178,6 +179,13 @@ impl Field {
 
     fn when(mut self, w: When) -> Self {
         self.when = Some(w);
+        self
+    }
+
+    /// The answer a bare Enter gives. Named `preset` rather than `default` so
+    /// it cannot be mistaken for `Default::default`.
+    fn preset(mut self, value: &str) -> Self {
+        self.default = Some(value.into());
         self
     }
 }
@@ -301,6 +309,7 @@ fn identity() -> Section {
             one(field("version", "Version")
                 .hint("Semantic version for your own tracking. 0.1.0 is a fine start.")
                 .mono("0.1.0")
+                .preset("0.1.0")
                 .valid(Validator::Semver)),
             one(field("environment", "Which environment does this loop run in?")
                 .hint("`prod` is stricter: it refuses unchecked approvals and unreviewed self-evolution.")
@@ -477,6 +486,7 @@ fn stop_gates() -> Section {
             one(field("safety.gates.stop.max_iterations", "How many whole-loop iterations at most?")
                 .hint("Hard ceiling on passes over the graph.")
                 .number(Some(1.0), 1.0, None)
+                .preset("10")
                 .valid(uint_from(1))),
             one(field(
                 "safety.gates.stop.max_revisions_per_node",
@@ -484,6 +494,7 @@ fn stop_gates() -> Section {
             )
             .hint("One stuck node cannot burn the whole budget past this.")
             .number(Some(1.0), 1.0, None)
+            .preset("3")
             .valid(uint_from(1))),
             one(field(
                 "safety.gates.stop.max_wall_clock_seconds",
@@ -507,6 +518,7 @@ fn stop_gates() -> Section {
             )
             .hint("Stop the line rather than spin when nothing is improving.")
             .number(Some(1.0), 1.0, None)
+            .preset("3")
             .valid(uint_from(1))),
             one(field(
                 "safety.gates.stop.stop_on_overall_success",
@@ -595,6 +607,7 @@ fn graph() -> Section {
                 })),
             one(field("execution.graph.concurrency.max_parallel", "How many nodes in parallel?")
                 .number(Some(1.0), 1.0, None)
+                .preset("4")
                 .valid(uint_from(1))
                 .when(When::Equals {
                     field: "execution.graph.concurrency.mode".into(),
@@ -613,6 +626,7 @@ fn graph() -> Section {
                 })),
             one(field("execution.graph.join.count", "How many successes release a wave?")
                 .number(Some(1.0), 1.0, None)
+                .preset("2")
                 .valid(uint_from(1))
                 .when(When::Equals {
                     field: "execution.graph.join.strategy".into(),
@@ -737,6 +751,7 @@ fn triggers() -> Section {
                     of_type("on.seconds", "Interval in seconds", "interval")
                         .hint("Runs must finish faster than this, or they pile up.")
                         .number(Some(1.0), 60.0, Some("s"))
+                        .preset("3600")
                         .valid(uint_from(1)),
                     of_type("on.expr", "Cron expression", "cron")
                         .hint("Five fields, evaluated in UTC: `0 9 * * 1` is 09:00 every Monday.")
@@ -757,6 +772,7 @@ fn triggers() -> Section {
             one(field("execution.triggers.max_depth", "How long may a self-started chain get?")
                 .hint("A run started by the last run's own output is one link. Depth 0 is a run a human started.")
                 .number(Some(0.0), 1.0, None)
+                .preset("5")
                 .valid(uint(true))),
             one(field(
                 "execution.triggers.dedup_window_seconds",
@@ -764,6 +780,7 @@ fn triggers() -> Section {
             )
             .hint("In seconds. Six files landing together are one event, not six.")
             .number(Some(0.0), 60.0, Some("s"))
+            .preset("300")
             .valid(uint(true))),
         ],
     )
@@ -881,12 +898,14 @@ fn memory() -> Section {
             )
             .hint("0 disables carry-forward; 2 lets a node see its last two tries.")
             .number(Some(0.0), 1.0, None)
+            .preset("2")
             .valid(uint(true))),
             one(field("execution.memory.summary_provider", "Which provider writes the summary prose?")
                 .hint("Prose costs tokens every iteration. Blank keeps only the deterministic facts.")
                 .select_from(Options::ProviderIds)),
             one(field("execution.memory.max_summary_chars", "Max characters per summary")
                 .number(Some(0.0), 100.0, None)
+                .preset("1200")
                 .valid(uint(true))),
         ],
     )
@@ -959,6 +978,7 @@ fn evolution() -> Section {
             one(field("evolution.max_regression", "How much may a metric worsen and still count as an improvement?")
                 .hint("A fraction: 0.02 allows a two-percent regression, which lets a change trade a hair of accuracy for half the cost.")
                 .number(Some(0.0), 0.01, None)
+                .preset("0.02")
                 .valid(fraction(true))
                 .when(When::Equals {
                     field: "evolution.enabled".into(),

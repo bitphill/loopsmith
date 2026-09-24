@@ -15,10 +15,11 @@
 //!
 //! The pieces:
 //!
+//!  - [`spec`] — every question, as data. The browser fetches the same list.
+//!  - [`answers`] — answers in, `LoopConfig` out, typed here and nowhere else.
+//!  - [`interview`] — walking that list in a terminal, where `:back` moves a
+//!    cursor rather than losing progress.
 //!  - [`io`] — the terminal: reading, colour, and the four `:commands`.
-//!  - `form` — a driver turning an ordered field list into answers, where
-//!    `:back` moves a cursor rather than losing progress.
-//!  - `sections` — one walker per config section, plus the answer→struct step.
 //!
 //! Nothing here blocks a script: a piped stdin is consumed as an answer stream,
 //! which is also how the tests drive the whole wizard end to end.
@@ -26,13 +27,15 @@
 pub mod answers;
 pub mod catalog;
 pub mod detect;
-mod form;
+pub mod interview;
 pub mod io;
-mod sections;
+pub mod preferences;
 pub mod spec;
 
 pub use io::{Choice, Io, Nav};
+use answers::Answers;
 use loopsmith_core::LoopConfig;
+use spec::Spec;
 use std::path::PathBuf;
 
 /// How an interview ended.
@@ -51,168 +54,117 @@ pub enum Outcome {
 }
 
 /// Run the whole interview, starting from `start` (an existing config to
-/// revise) or from an empty [`skeleton`].
+/// revise) or from nothing.
+///
+/// `grammar` settles the output format in advance: `Some(true)` for Markdown,
+/// `Some(false)` for YAML, `None` to ask. `--edit` passes the grammar of the
+/// file it loaded, because that file is what gets overwritten — asking there
+/// would let someone answer "Markdown" and leave Markdown inside a `.yaml`
+/// the loader then refuses to read.
 ///
 /// Nothing is written except a draft the user explicitly asks for at `:quit`.
 /// The config is validated before it is returned; a `Ready` config with errors
 /// is one the user knowingly chose to write anyway.
-pub fn interview(io: &mut Io, start: Option<LoopConfig>) -> Result<Outcome, String> {
+pub fn interview(
+    io: &mut Io,
+    start: Option<LoopConfig>,
+    grammar: Option<bool>,
+) -> Result<Outcome, String> {
+    let spec = spec::spec();
     let editing = start.is_some();
-    let mut cfg = start.unwrap_or_else(skeleton);
+    let mut answers = start
+        .as_ref()
+        .map(|cfg| answers::unpack(&spec, cfg))
+        .unwrap_or_default();
 
     intro(io, editing);
 
-    if let Flow::Quit { saved } = run_wizard(io, &mut cfg)? {
-        return Ok(Outcome::Quit { saved });
-    }
+    loop {
+        match interview::walk(io, &spec, &mut answers)? {
+            interview::Flow::Quit => {
+                return Ok(Outcome::Quit {
+                    saved: offer_draft(io, &spec, &answers)?,
+                })
+            }
+            interview::Flow::Completed => {}
+        }
 
-    // Final gate: the same check `loopsmith validate` prints. Nothing is
-    // returned for writing until this passes or the user knowingly overrides it.
-    if !final_review(io, &mut cfg)? {
-        return Ok(Outcome::Declined);
-    }
-
-    let Some(markdown) = ask_format(io)? else {
-        io.note("cancelled — nothing written");
-        return Ok(Outcome::Declined);
-    };
-    let text = render(&cfg, markdown)?;
-    Ok(Outcome::Ready {
-        cfg: Box::new(cfg),
-        text,
-        markdown,
-    })
-}
-
-/// A section of the wizard: a title, an optional yes/no gate (advanced sections
-/// are opt-in, per the design), and the walker that fills it in.
-struct Stage {
-    /// The yes/no question shown for an opt-in section. `None` for a core
-    /// section that always runs.
-    gate: Option<&'static str>,
-    run: fn(&mut Io, &mut LoopConfig) -> Result<(), Nav>,
-}
-
-
-enum Flow {
-    Completed,
-    Quit { saved: Option<PathBuf> },
-}
-
-/// The outcome of the `:quit` menu.
-enum QuitChoice {
-    /// Go back to the stage we were on.
-    Resume,
-    /// Stop; the wizard writes nothing (a draft may have been saved).
-    Leave(Option<PathBuf>),
-}
-
-/// The section flow, with `:back` walking between sections and `:quit` offering
-/// to save a draft or resume.
-fn run_wizard(io: &mut Io, cfg: &mut LoopConfig) -> Result<Flow, String> {
-    let stages = stages();
-    let mut i = 0usize;
-    while i < stages.len() {
-        // An opt-in section asks first; a "no" (or `:back`) skips it.
-        let proceed = match stages[i].gate {
-            None => true,
-            Some(q) => match io.ask_bool(q, &["(advanced — press Enter to skip)"], false) {
-                Ok(b) => b,
-                Err(Nav::Back) => {
-                    i = i.saturating_sub(1);
+        let cfg = match answers::assemble_over(&spec, &answers, start.as_ref()) {
+            Ok(cfg) => cfg,
+            Err(issues) => {
+                // Only reachable when an answer is refused by something the
+                // loader knows and the spec does not — a duplicate goal name,
+                // a graph with a cycle. Going round again is the only useful
+                // offer, since the wizard is where those answers live.
+                io.heading("Not yet a loop");
+                for issue in &issues {
+                    let where_ = if issue.key.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{}: ", issue.key)
+                    };
+                    io.error(&format!("{where_}{}", issue.message));
+                }
+                if io.ask_bool("Go back through the questions?", &[], true).unwrap_or(false) {
                     continue;
                 }
-                Err(Nav::Quit) => match quit_menu(io, cfg)? {
-                    QuitChoice::Resume => continue,
-                    QuitChoice::Leave(saved) => return Ok(Flow::Quit { saved }),
-                },
+                return Ok(Outcome::Declined);
+            }
+        };
+
+        // Final gate: the same check `loopsmith validate` prints. Nothing is
+        // returned for writing until this passes or the user knowingly
+        // overrides it.
+        match final_review(io, &cfg) {
+            Review::Write => {}
+            Review::Edit => continue,
+            Review::Leave => return Ok(Outcome::Declined),
+        }
+
+        let markdown = match grammar {
+            Some(known) => known,
+            None => match ask_format(io)? {
+                Some(picked) => picked,
+                None => {
+                    io.note("cancelled — nothing written");
+                    return Ok(Outcome::Declined);
+                }
             },
         };
-        if !proceed {
-            i += 1;
-            continue;
-        }
-        match (stages[i].run)(io, cfg) {
-            Ok(()) => i += 1,
-            Err(Nav::Back) => i = i.saturating_sub(1),
-            Err(Nav::Quit) => match quit_menu(io, cfg)? {
-                // Resume re-runs the current stage; sections read the config as
-                // their defaults, so nothing from earlier stages is lost.
-                QuitChoice::Resume => continue,
-                QuitChoice::Leave(saved) => return Ok(Flow::Quit { saved }),
-            },
-        }
+        let text = render(&cfg, markdown)?;
+        return Ok(Outcome::Ready {
+            cfg: Box::new(cfg),
+            text,
+            markdown,
+        });
     }
-    Ok(Flow::Completed)
 }
 
-/// The `:quit` menu: save a partial draft, discard, or resume where we left off.
-fn quit_menu(io: &mut Io, cfg: &LoopConfig) -> Result<QuitChoice, String> {
-    // In a non-interactive run there is no one to answer; treat quit/EOF as a
-    // clean discard so a truncated script does not hang.
-    if !io.is_interactive() {
-        return Ok(QuitChoice::Leave(None));
+/// On `:quit`, offer to keep what was typed.
+///
+/// The draft is the answers as far as they go, written as the config document
+/// they describe. It may not be a loop yet — that is the point of saving it —
+/// so it is written as YAML without being parsed first, and `--edit` reads it
+/// back through the ordinary loader like any other file.
+fn offer_draft(io: &mut Io, spec: &Spec, answers: &Answers) -> Result<Option<PathBuf>, String> {
+    if !io.is_interactive() || answers.is_empty() {
+        return Ok(None);
     }
     let choices = vec![
-        Choice::new("resume", "Resume — go back to where I was"),
         Choice::new("save", "Save a draft and leave"),
         Choice::new("discard", "Discard everything and leave"),
     ];
-    // A nested Nav here (another Ctrl-C) collapses to discard.
+    // A nested `:quit` here collapses to discard.
     let pick = io
         .ask_select("Leave the wizard?", &[], &choices, Some(0))
         .unwrap_or_else(|_| "discard".into());
-    match pick.as_str() {
-        "resume" => Ok(QuitChoice::Resume),
-        "save" => Ok(QuitChoice::Leave(Some(save_draft(cfg)?))),
-        _ => Ok(QuitChoice::Leave(None)),
+    if pick != "save" {
+        return Ok(None);
     }
-}
-
-/// Write a partial config to `loop.draft.<ext>` in the current directory.
-fn save_draft(cfg: &LoopConfig) -> Result<PathBuf, String> {
-    let text = render(cfg, true)?;
-    let path = PathBuf::from("loop.draft.md");
-    std::fs::write(&path, text).map_err(|e| format!("could not write {}: {e}", path.display()))?;
-    Ok(path)
-}
-
-/// An empty draft the wizard fills in section by section.
-///
-/// Every bundle is its own `Default`, so a section the author skips is the same
-/// as a section they never saw — which is what makes `:back` and an early
-/// `:quit` produce a coherent partial draft rather than a half-typed struct.
-pub fn skeleton() -> LoopConfig {
-    LoopConfig {
-        name: String::new(),
-        version: "0.1.0".into(),
-        description: String::new(),
-        environment: Default::default(),
-        features: Default::default(),
-        intent: Default::default(),
-        execution: Default::default(),
-        safety: Default::default(),
-        evolution: Default::default(),
-    }
-}
-
-fn stages() -> Vec<Stage> {
-    vec![
-        Stage { gate: None, run: sections::identity },
-        Stage { gate: None, run: sections::providers },
-        Stage { gate: None, run: sections::goals },
-        Stage { gate: None, run: sections::validations },
-        Stage { gate: None, run: sections::stop_gates },
-        Stage { gate: Some("Define an execution graph of work nodes now?"), run: sections::graph },
-        Stage { gate: Some("Add static information every node receives (section A)?"), run: sections::information },
-        Stage { gate: Some("Record the manual pre-execution steps (section B)?"), run: sections::pre_execution },
-        Stage { gate: Some("Define explicit success scenarios (section E)?"), run: sections::success },
-        Stage { gate: Some("Add schedules/triggers (section G)?"), run: sections::schedules },
-        Stage { gate: Some("Set global constraints (section H)?"), run: sections::constraints },
-        Stage { gate: Some("Define execution-guideline phases (section I)?"), run: sections::execution_guidelines },
-        Stage { gate: Some("Declare default skills to install (section J)?"), run: sections::default_skills },
-        Stage { gate: Some("Tune the context/memory policy?"), run: sections::context },
-    ]
+    let path = PathBuf::from("loop.draft.yaml");
+    std::fs::write(&path, answers::draft(spec, answers))
+        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    Ok(Some(path))
 }
 
 fn intro(io: &Io, editing: bool) {
@@ -230,54 +182,64 @@ fn intro(io: &Io, editing: bool) {
     println!();
 }
 
-/// Run the real validator, print what it found, and decide whether to write.
-fn final_review(io: &mut Io, cfg: &mut LoopConfig) -> Result<bool, String> {
-    loop {
-        let report = loopsmith_core::validate(cfg);
-        let errors = report
-            .issues
-            .iter()
-            .filter(|i| matches!(i.severity, loopsmith_core::Severity::Error))
-            .count();
-        let warnings = report.issues.len() - errors;
+/// What the reviewer decided about a finished config.
+enum Review {
+    /// Write it, warnings and all.
+    Write,
+    /// Go back through the questions.
+    Edit,
+    /// Leave without writing.
+    Leave,
+}
 
-        io.heading("Review");
-        if report.issues.is_empty() {
-            io.success("config is valid, no warnings");
-            return Ok(true);
-        }
-        for issue in &report.issues {
-            let sev = match issue.severity {
-                loopsmith_core::Severity::Error => io.red("error"),
-                loopsmith_core::Severity::Warning => io.yellow("warn "),
-            };
-            io.println(&format!("  {sev} {}: {}", io.dim(&issue.field), issue.message));
-        }
-        io.println("");
+/// Run the real validator, print what it found, and decide what happens next.
+fn final_review(io: &mut Io, cfg: &LoopConfig) -> Review {
+    let report = loopsmith_core::validate(cfg);
+    let errors = report
+        .issues
+        .iter()
+        .filter(|i| matches!(i.severity, loopsmith_core::Severity::Error))
+        .count();
+    let warnings = report.issues.len() - errors;
 
-        if errors == 0 {
-            io.note(&format!("{warnings} warning(s), no errors."));
-            // Warnings do not block a write; ask, defaulting to yes. A `:quit`
-            // here means "do not write", not an error.
-            return Ok(io.ask_bool("Write the config?", &[], true).unwrap_or(false));
-        }
+    io.heading("Review");
+    if report.issues.is_empty() {
+        io.success("config is valid, no warnings");
+        return Review::Write;
+    }
+    for issue in &report.issues {
+        let sev = match issue.severity {
+            loopsmith_core::Severity::Error => io.red("error"),
+            loopsmith_core::Severity::Warning => io.yellow("warn "),
+        };
+        io.println(&format!("  {sev} {}: {}", io.dim(&issue.field), issue.message));
+    }
+    io.println("");
 
-        let choices = vec![
-            Choice::new("edit", "Go back through the sections and fix them"),
-            Choice::new("write", "Write it anyway (errors and all)"),
-            Choice::new("quit", "Leave without writing"),
-        ];
-        match io.ask_select(&format!("{errors} error(s) block a clean config."), &[], &choices, Some(0)) {
-            Ok(a) => match a.as_str() {
-                "edit" => match run_wizard(io, cfg)? {
-                    Flow::Completed => continue,
-                    Flow::Quit { .. } => return Ok(false),
-                },
-                "write" => return Ok(true),
-                _ => return Ok(false),
-            },
-            Err(_) => return Ok(false),
-        }
+    if errors == 0 {
+        io.note(&format!("{warnings} warning(s), no errors."));
+        // Warnings do not block a write; ask, defaulting to yes. A `:quit`
+        // here means "do not write", not an error.
+        return match io.ask_bool("Write the config?", &[], true) {
+            Ok(true) => Review::Write,
+            _ => Review::Leave,
+        };
+    }
+
+    let choices = vec![
+        Choice::new("edit", "Go back through the questions and fix them"),
+        Choice::new("write", "Write it anyway (errors and all)"),
+        Choice::new("quit", "Leave without writing"),
+    ];
+    match io.ask_select(
+        &format!("{errors} error(s) block a clean config."),
+        &[],
+        &choices,
+        Some(0),
+    ) {
+        Ok(a) if a == "edit" => Review::Edit,
+        Ok(a) if a == "write" => Review::Write,
+        _ => Review::Leave,
     }
 }
 
@@ -307,10 +269,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_skeleton_is_a_valid_struct_even_when_incomplete() {
-        // It must serialize (draft-save relies on this) even before any section
-        // is filled in.
-        let cfg = skeleton();
+    fn an_empty_wizard_still_renders_both_grammars() {
+        // Draft-saving and the review panel both lean on this: a config that
+        // is not finished yet must still be writable as text.
+        answers::assemble(&spec::spec(), &Answers::new())
+            .expect_err("an empty wizard has nothing to assemble");
+        let cfg = loopsmith_core::parse_str("name: unfinished\n", "test")
+            .expect("a bare name parses");
         assert!(render(&cfg, true).is_ok());
         assert!(render(&cfg, false).is_ok());
     }

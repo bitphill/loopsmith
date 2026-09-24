@@ -101,6 +101,21 @@ fn check_one(f: &Field, key: &str, answers: &Answers, issues: &mut Vec<Issue>) {
 /// that report at the end and lets the author write the file anyway, which is
 /// the same latitude a hand-written file gets.
 pub fn assemble(spec: &Spec, answers: &Answers) -> Result<LoopConfig, Vec<Issue>> {
+    assemble_over(spec, answers, None)
+}
+
+/// [`assemble`], with the config the answers were unpacked from.
+///
+/// `--edit` needs this: the wizard asks about a subset of the file, so an
+/// assemble that saw only the answers would quietly drop everything it does
+/// not ask about. The rule is per section — an open section is the wizard's
+/// to own, keys and all, and a section the author never opened keeps whatever
+/// the file already said.
+pub fn assemble_over(
+    spec: &Spec,
+    answers: &Answers,
+    base: Option<&LoopConfig>,
+) -> Result<LoopConfig, Vec<Issue>> {
     let issues = check(spec, answers);
     if !issues.is_empty() {
         return Err(issues);
@@ -148,6 +163,10 @@ pub fn assemble(spec: &Spec, answers: &Answers) -> Result<LoopConfig, Vec<Issue>
         }
     }
 
+    let doc = match base {
+        Some(cfg) => over(spec, answers, cfg, doc),
+        None => doc,
+    };
     let text = serde_yaml::to_string(&Value::Mapping(doc)).map_err(|e| {
         vec![Issue {
             key: String::new(),
@@ -160,6 +179,43 @@ pub fn assemble(spec: &Spec, answers: &Answers) -> Result<LoopConfig, Vec<Issue>
             message: e.to_string(),
         }]
     })
+}
+
+/// The answers as the config document they describe, whether or not it is a
+/// loop yet.
+///
+/// This is what a `:quit` writes as a draft: the point of saving it is that it
+/// is not finished, so it is never parsed on the way out. `--edit` reads it
+/// back through the ordinary loader like any other file.
+pub fn draft(spec: &Spec, answers: &Answers) -> String {
+    let mut doc = Mapping::new();
+    for section in &spec.sections {
+        if !section_open(section, answers) {
+            continue;
+        }
+        for step in &section.steps {
+            match step {
+                Step::Field(f) => {
+                    if let Some(v) = value_of(f, &f.id, answers) {
+                        insert(&mut doc, &f.id, v);
+                    }
+                }
+                Step::List(l) => {
+                    let seq = entries(l, answers);
+                    if !seq.is_empty() {
+                        insert(&mut doc, &l.id, Value::Sequence(seq));
+                    }
+                }
+                Step::Providers(p) => {
+                    let seq = free_entries(&p.id, answers);
+                    if !seq.is_empty() {
+                        insert(&mut doc, &p.id, Value::Sequence(seq));
+                    }
+                }
+            }
+        }
+    }
+    serde_yaml::to_string(&Value::Mapping(doc)).unwrap_or_default()
 }
 
 /// Where a provider step keeps its cascade answers.
@@ -182,13 +238,22 @@ pub fn unpack(spec: &Spec, cfg: &LoopConfig) -> Answers {
     let Ok(doc) = serde_yaml::to_value(cfg) else {
         return answers;
     };
+    // Every config serialises its own defaults, so "this path has a value" is
+    // true of all eleven opt-in sections in every file ever written. What
+    // opens a gate is a value the author chose — one that differs from what a
+    // config with nothing but a name would have had.
+    let plain = plain_config();
     for section in &spec.sections {
         let mut used = false;
         for step in &section.steps {
             match step {
                 Step::Field(f) => {
                     if let Some(s) = read(&doc, &f.id, &f.input) {
-                        used = true;
+                        let untouched = s.trim().is_empty()
+                            || plain
+                                .as_ref()
+                                .is_some_and(|p| read(p, &f.id, &f.input).as_deref() == Some(&s));
+                        used |= !untouched;
                         answers.insert(f.id.clone(), s);
                     }
                 }
@@ -230,6 +295,14 @@ pub fn unpack(spec: &Spec, cfg: &LoopConfig) -> Answers {
         }
     }
     answers
+}
+
+/// A config with nothing in it but a name, as a document — the baseline every
+/// `unpack` compares against. `None` only if the loader itself refuses the
+/// two words, which would be a bug elsewhere.
+fn plain_config() -> Option<Value> {
+    let cfg = loopsmith_core::parse_str("name: baseline\n", "<defaults>").ok()?;
+    serde_yaml::to_value(&cfg).ok()
 }
 
 // --- reading --------------------------------------------------------------
@@ -375,6 +448,54 @@ fn insert(doc: &mut Mapping, path: &str, value: Value) {
             .or_insert_with(|| Value::Mapping(Mapping::new()));
         let Value::Mapping(next) = slot else { return };
         cursor = next;
+    }
+}
+
+/// The answer document laid over the config it came from.
+///
+/// Every path an *open* section owns is cleared from the original first, so a
+/// goal the author deleted really goes and a field they blanked really
+/// unsets. Sections they never opened are not touched at all.
+fn over(spec: &Spec, answers: &Answers, base: &LoopConfig, doc: Mapping) -> Mapping {
+    let Ok(Value::Mapping(mut out)) = serde_yaml::to_value(base) else {
+        return doc;
+    };
+    for section in spec.sections.iter().filter(|s| section_open(s, answers)) {
+        for step in &section.steps {
+            match step {
+                Step::Field(f) => strip(&mut out, &f.id),
+                Step::List(l) => strip(&mut out, &l.id),
+                Step::Providers(p) => {
+                    strip(&mut out, &p.id);
+                    strip(&mut out, &cascade_root(&p.id));
+                }
+            }
+        }
+    }
+    merge(&mut out, doc);
+    out
+}
+
+/// Remove one dotted path, leaving the branches above it in place.
+fn strip(doc: &mut Mapping, path: &str) {
+    let Some((head, rest)) = path.split_once('.') else {
+        doc.remove(Value::String(path.to_string()));
+        return;
+    };
+    if let Some(Value::Mapping(next)) = doc.get_mut(Value::String(head.to_string())) {
+        strip(next, rest);
+    }
+}
+
+/// `src` over `dst`, recursing into mappings so a sibling key survives.
+fn merge(dst: &mut Mapping, src: Mapping) {
+    for (key, value) in src {
+        match (dst.get_mut(&key), value) {
+            (Some(Value::Mapping(into)), Value::Mapping(from)) => merge(into, from),
+            (_, value) => {
+                dst.insert(key, value);
+            }
+        }
     }
 }
 
@@ -584,6 +705,66 @@ mod tests {
             serde_yaml::to_string(&first).unwrap(),
             serde_yaml::to_string(&second).unwrap(),
             "a round trip through the wizard must not change the loop"
+        );
+    }
+
+    #[test]
+    fn editing_keeps_the_sections_the_wizard_never_asks_about() {
+        // `safety.protected` has no question. An assemble that saw only the
+        // answers would drop it, and the author would find their protected
+        // list quietly reset to the default after one `--edit`.
+        let base = loopsmith_core::parse_str(
+            "name: kept\nsafety:\n  protected:\n    components: [gates, credentials]\n",
+            "test",
+        )
+        .expect("the base parses");
+        let cfg = assemble_over(&spec(), &minimal(), Some(&base)).expect("assembles");
+        assert_eq!(cfg.name, "demo", "the answers still win where they exist");
+        assert_eq!(cfg.safety.protected.components.len(), 2, "{:?}", cfg.safety.protected);
+    }
+
+    #[test]
+    fn an_open_section_owns_its_paths_even_when_the_answer_is_emptier() {
+        // Removing the last goal has to reach the config. The goals section is
+        // always open, so its list is the wizard's to overwrite — including
+        // with fewer entries than the file had.
+        let base = assemble(&spec(), &minimal()).expect("assembles");
+        let mut a = minimal();
+        a.insert("intent.goals[1].name".into(), "g2".into());
+        a.insert("intent.goals[1].description".into(), "a second goal, long enough".into());
+        let two = assemble_over(&spec(), &a, Some(&base)).expect("assembles");
+        assert_eq!(two.intent.goals.len(), 2);
+        let back = assemble_over(&spec(), &minimal(), Some(&two)).expect("assembles");
+        assert_eq!(back.intent.goals.len(), 1, "a removed goal came back");
+    }
+
+    #[test]
+    fn a_gate_opens_only_for_a_section_its_author_filled_in() {
+        // Every config serialises its own defaults, so an unpack that opened a
+        // gate for "this path has a value" would open all eleven opt-in
+        // sections on any edit — and then ask eleven sections of questions
+        // about settings nobody touched.
+        let plain = assemble(&spec(), &minimal()).expect("assembles");
+        let recovered = unpack(&spec(), &plain);
+        for section in spec().sections.iter().filter(|s| s.gate.is_some()) {
+            assert_eq!(
+                recovered.get(&section.gate_key()).map(String::as_str),
+                None,
+                "the `{}` gate opened on a config that never used it",
+                section.id
+            );
+        }
+
+        // One that was used does open.
+        let mut a = minimal();
+        a.insert("gate:alerts".into(), "true".into());
+        a.insert("safety.alerts[0].id".into(), "spend".into());
+        a.insert("safety.alerts[0].metric".into(), "cost_usd".into());
+        a.insert("safety.alerts[0].above".into(), "10".into());
+        let with_alert = assemble(&spec(), &a).expect("assembles");
+        assert_eq!(
+            unpack(&spec(), &with_alert).get("gate:alerts").map(String::as_str),
+            Some("true")
         );
     }
 

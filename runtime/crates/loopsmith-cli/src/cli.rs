@@ -24,7 +24,7 @@ pub struct Cli {
 
     /// Build a loop by answering questions in the terminal, one at a time.
     /// Identical to the `guided` subcommand. Where `--web` clicks and `new`
-    /// hands you a starter file to edit, this walks the whole A–J config with
+    /// hands you a starter file to edit, this walks the whole config with
     /// every field explained in place, and needs no browser — so it works over
     /// SSH and in a bare terminal.
     #[arg(long, global = false)]
@@ -46,7 +46,13 @@ impl Cli {
     pub fn resolve(self) -> Result<Command, String> {
         match (self.web, self.guided, self.command) {
             (true, false, None) => Ok(Command::Web { port: None, no_open: false }),
-            (false, true, None) => Ok(Command::Guided { path: None, edit: None }),
+            (false, true, None) => Ok(Command::Guided {
+                path: None,
+                edit: None,
+                novice: false,
+                expert: false,
+                ask: false,
+            }),
             // Two different UIs onto the same config. Picking one for the user
             // would guess wrong half the time.
             (true, true, _) => Err(
@@ -241,22 +247,32 @@ pub enum Command {
         #[arg(long, default_value = "state")]
         state: PathBuf,
     },
-    /// Build a loop by answering questions in the terminal. Same as `--guided`.
+    /// Build a loop in the terminal: guided questions, or your editor. Same as `--guided`.
     ///
-    /// Every section of the A–J config, asked one field at a time, each with
-    /// the explanation the field would carry in the web UI. Providers this
-    /// machine already has are offered as a numbered menu; everything else is a
-    /// prompt with the current value in `[brackets]` — press Enter to keep it.
-    /// `:back`, `:next`, `:help`, and `:quit` work at any prompt. Nothing is
-    /// written until the whole config validates.
+    /// Every section, asked one field at a time, each with the explanation the
+    /// field carries in the web UI — the two front ends ask the same list.
+    /// Providers this machine already has are offered as a numbered menu;
+    /// everything else is a prompt with its default in `[brackets]` — press
+    /// Enter to take it. `:back`, `:next`, `:help`, and `:quit` work at any
+    /// prompt. The validator runs before anything is written, and what it
+    /// found is shown; writing anyway is a choice you make, not the default.
     Guided {
         /// Directory for the new loop. Omit and the wizard asks for it.
         #[arg(value_name = "DIR")]
         path: Option<PathBuf>,
-        /// Load an existing config and walk through changing it, instead of
-        /// starting from the defaults. The wizard writes the result back out.
+        /// Load an existing config and change it, instead of starting from
+        /// the defaults. The result is written back over the same file.
         #[arg(long, value_name = "FILE")]
         edit: Option<PathBuf>,
+        /// Walk every question with its explanation, whatever was remembered.
+        #[arg(long, conflicts_with = "expert")]
+        novice: bool,
+        /// Hand me a filled-in config in $EDITOR instead of asking questions.
+        #[arg(long)]
+        expert: bool,
+        /// Forget which path was remembered and ask again.
+        #[arg(long, conflicts_with_all = ["novice", "expert"])]
+        ask: bool,
     },
     /// Build, run, and watch loops from a browser. Same thing as `--web`.
     ///

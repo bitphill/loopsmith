@@ -206,7 +206,26 @@ pub fn dispatch(command: Command) -> Result<ExitCode, String> {
         Command::Proposals { config, run_id } => proposals::execute(&config, &run_id),
         Command::Prune { config } => prune::execute(&config),
         Command::Mcp { state } => mcp::execute(state),
-        Command::Guided { path, edit } => crate::guided::execute(path, edit),
+        Command::Guided {
+            path,
+            edit,
+            novice,
+            expert,
+            ask,
+        } => {
+            // A flag is this run's business; `--ask` is the one that changes
+            // what is remembered, by throwing the answer away so the question
+            // comes back.
+            if ask {
+                loopsmith_wizard::preferences::forget();
+            }
+            let level = match (novice, expert) {
+                (true, _) => Some(loopsmith_wizard::preferences::Level::Novice),
+                (_, true) => Some(loopsmith_wizard::preferences::Level::Expert),
+                _ => None,
+            };
+            crate::guided::execute(path, edit, level)
+        }
         #[cfg(feature = "web")]
         Command::Web { port, no_open } => web::execute(port, no_open),
         // Built without the `web` feature: say which flag brings it back
