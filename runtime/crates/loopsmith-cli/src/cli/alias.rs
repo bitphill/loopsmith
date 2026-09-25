@@ -225,6 +225,37 @@ mod tests {
         }
     }
 
+    /// Every button in the web UI spells its command the 1.0 way.
+    ///
+    /// The browser builds no argv of its own — `loopsmith_web::exec::argv_for`
+    /// does, and that function lives on the other side of a crate boundary
+    /// from the grammar it has to agree with. A 0.3 spelling there would still
+    /// *work*, which is exactly the danger: it would work by coming through
+    /// this table, and the notice would land in the console of somebody who
+    /// pressed a button and typed nothing at all.
+    ///
+    /// So this asserts the pair: clap accepts it, and the rewrite has nothing
+    /// to say about it.
+    #[cfg(feature = "web")]
+    #[test]
+    fn the_browser_never_asks_for_a_spelling_that_moved() {
+        use clap::Parser;
+        for action in loopsmith_web::exec::all_actions() {
+            let (kind, argv) = loopsmith_web::exec::argv_for(&action).expect("every action maps");
+            let full: Vec<String> = std::iter::once("loopsmith".to_string())
+                .chain(argv.iter().cloned())
+                .collect();
+
+            let (_, moved) = rewrite(full.clone());
+            assert!(
+                moved.is_none(),
+                "the `{kind}` button spells its command the 0.3 way: {argv:?}"
+            );
+            super::super::Cli::try_parse_from(&full)
+                .unwrap_or_else(|e| panic!("the `{kind}` button builds {argv:?}, which clap refuses:\n{e}"));
+        }
+    }
+
     #[test]
     fn every_run_verb_is_a_real_one() {
         // The list decides whether `loopsmith run x` means the noun or the

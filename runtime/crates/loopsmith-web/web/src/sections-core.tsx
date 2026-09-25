@@ -104,7 +104,7 @@ export function PreExecution({ cfg, patch, help }: SectionProps) {
   const pending = steps.filter((w) => !w.done).length;
   return (
     <Section
-      k="pre_execution"
+      k="intent.prerequisites"
       help={help}
       count={steps.length}
       actions={pending > 0 ? <span className="chip chip-warn">{pending} not done</span> : undefined}
@@ -289,7 +289,7 @@ export function Validations({ cfg, patch, help }: SectionProps) {
 
   return (
     <Section
-      k="validations"
+      k="safety.checks"
       help={help}
       count={checks.length}
       actions={
@@ -390,7 +390,7 @@ export function StopGatesSection({ cfg, patch, help }: SectionProps) {
 
   return (
     <Section
-      k="stop_gates"
+      k="safety.gates.stop"
       help={help}
       actions={
         <span className={`chip ${unbounded ? "chip-warn" : "chip-good"}`}>

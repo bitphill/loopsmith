@@ -355,6 +355,12 @@ fn next(seq: &Arc<Mutex<u64>>) -> u64 {
 /// visible in a single place. The browser sends a verb from this list and its
 /// own parameters; it never sends an argv. A UI that could name the program to
 /// run would be a remote shell with a nice font.
+///
+/// Every argv here is spelled the 1.0 way — noun, then verb. The old spellings
+/// still work, but they work by being *rewritten*, and the rewrite prints a
+/// line telling the reader to change what they typed. Nobody typed this: it
+/// comes from a button. `the_browser_never_asks_for_a_spelling_that_moved`
+/// holds it to that.
 pub fn argv_for(action: &Action) -> Result<(String, Vec<String>), String> {
     let a = |s: &str| s.to_string();
     Ok(match action {
@@ -368,7 +374,7 @@ pub fn argv_for(action: &Action) -> Result<(String, Vec<String>), String> {
         } => (
             a("create"),
             {
-                let mut v = vec![a("new"), a("--path"), path.clone()];
+                let mut v = vec![a("loop"), a("new"), a("--path"), path.clone()];
                 if !name.trim().is_empty() {
                     v.push(a("--name"));
                     v.push(name.clone());
@@ -395,27 +401,42 @@ pub fn argv_for(action: &Action) -> Result<(String, Vec<String>), String> {
         Action::Validate { config, strict } => (
             a("validate"),
             {
-                let mut v = vec![a("validate"), config.clone()];
+                let mut v = vec![a("loop"), a("validate"), config.clone()];
                 if *strict {
                     v.push(a("--strict"));
                 }
                 v
             },
         ),
-        Action::Plan { config } => (a("plan"), vec![a("plan"), config.clone()]),
+        Action::Plan { config } => (a("plan"), vec![a("loop"), a("plan"), config.clone()]),
         Action::DryRun { config } => (
             a("dry-run"),
-            vec![a("run"), config.clone(), a("--dry-run"), a("--verbose")],
+            vec![
+                a("run"),
+                a("start"),
+                config.clone(),
+                a("--dry-run"),
+                a("--verbose"),
+            ],
         ),
-        Action::Run { config } => (a("run"), vec![a("run"), config.clone(), a("--verbose")]),
+        Action::Run { config } => (
+            a("run"),
+            vec![a("run"), a("start"), config.clone(), a("--verbose")],
+        ),
         Action::Resume { config, run_id } => (
             a("resume"),
-            vec![a("resume"), config.clone(), run_id.clone(), a("--verbose")],
+            vec![
+                a("run"),
+                a("resume"),
+                config.clone(),
+                run_id.clone(),
+                a("--verbose"),
+            ],
         ),
         Action::Watch { config, max_runs } => (
             a("watch"),
             {
-                let mut v = vec![a("watch"), config.clone()];
+                let mut v = vec![a("run"), a("watch"), config.clone()];
                 if let Some(n) = max_runs {
                     v.push(a("--max-runs"));
                     v.push(n.to_string());
@@ -425,11 +446,12 @@ pub fn argv_for(action: &Action) -> Result<(String, Vec<String>), String> {
         ),
         Action::ScheduleInstall { config } => (
             a("schedule"),
-            vec![a("schedule"), config.clone(), a("--install")],
+            vec![a("run"), a("schedule"), config.clone(), a("--install")],
         ),
-        Action::SchedulePreview { config } => {
-            (a("schedule-preview"), vec![a("schedule"), config.clone()])
-        }
+        Action::SchedulePreview { config } => (
+            a("schedule-preview"),
+            vec![a("run"), a("schedule"), config.clone()],
+        ),
         Action::Doctor { config } => (
             a("doctor"),
             match config {
@@ -440,15 +462,21 @@ pub fn argv_for(action: &Action) -> Result<(String, Vec<String>), String> {
         Action::Providers { config } => (a("providers"), vec![a("providers"), config.clone()]),
         Action::Gate { config, target } => (
             a("gate"),
-            vec![a("gate"), config.clone(), a("--target"), target.clone()],
+            vec![
+                a("run"),
+                a("gate"),
+                config.clone(),
+                a("--target"),
+                target.clone(),
+            ],
         ),
         Action::Status { config, run_id } => (
             a("status"),
-            vec![a("status"), config.clone(), run_id.clone()],
+            vec![a("run"), a("status"), config.clone(), run_id.clone()],
         ),
         Action::Ledger { config, run_id } => (
             a("ledger"),
-            vec![a("ledger"), config.clone(), run_id.clone()],
+            vec![a("run"), a("ledger"), config.clone(), run_id.clone()],
         ),
         Action::SkillsInstall { config } => (
             a("skills-install"),
@@ -457,6 +485,7 @@ pub fn argv_for(action: &Action) -> Result<(String, Vec<String>), String> {
         Action::PermissionsWrite { config, settings } => (
             a("permissions"),
             vec![
+                a("loop"),
                 a("permissions"),
                 config.clone(),
                 a("--write"),
@@ -503,51 +532,100 @@ pub enum Action {
     PermissionsWrite { config: String, settings: String },
 }
 
+/// One of every action, with plausible parameters.
+///
+/// The argv these produce is finally parsed by `loopsmith-cli`, so the test
+/// that every one of them is a spelling the 1.0 grammar accepts — and that
+/// none of them trips the 0.3 alias table into printing a notice at somebody
+/// who pressed a button — has to live over there, and needs the list from
+/// here. `every_variant_is_in_the_list` is what stops the two drifting: a new
+/// action that is not in this list does not compile.
+pub fn all_actions() -> Vec<Action> {
+    vec![
+        Action::Create {
+            path: "/tmp/x".into(),
+            name: "x".into(),
+            purpose: "p".into(),
+            config_file: "/tmp/d.yaml".into(),
+            force: false,
+            git: true,
+        },
+        Action::Validate { config: "c".into(), strict: true },
+        Action::Plan { config: "c".into() },
+        Action::DryRun { config: "c".into() },
+        Action::Run { config: "c".into() },
+        Action::Resume { config: "c".into(), run_id: "r".into() },
+        Action::Watch { config: "c".into(), max_runs: Some(2) },
+        Action::ScheduleInstall { config: "c".into() },
+        Action::SchedulePreview { config: "c".into() },
+        Action::Doctor { config: None },
+        Action::Providers { config: "c".into() },
+        Action::Gate { config: "c".into(), target: "overall".into() },
+        Action::Status { config: "c".into(), run_id: "r".into() },
+        Action::Ledger { config: "c".into(), run_id: "r".into() },
+        Action::SkillsInstall { config: "c".into() },
+        Action::PermissionsWrite { config: "c".into(), settings: "s".into() },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Every variant appears in [`all_actions`].
+    ///
+    /// The `match` is the check: it has no wildcard arm, so adding an action
+    /// without adding it to the list is a compile error rather than a hole in
+    /// the coverage of every test that walks the list.
     #[test]
-    fn every_action_maps_to_a_loopsmith_subcommand_and_nothing_else() {
+    fn every_variant_is_in_the_list() {
+        fn named(a: &Action) -> &'static str {
+            match a {
+                Action::Create { .. } => "create",
+                Action::Validate { .. } => "validate",
+                Action::Plan { .. } => "plan",
+                Action::DryRun { .. } => "dry_run",
+                Action::Run { .. } => "run",
+                Action::Resume { .. } => "resume",
+                Action::Watch { .. } => "watch",
+                Action::ScheduleInstall { .. } => "schedule_install",
+                Action::SchedulePreview { .. } => "schedule_preview",
+                Action::Doctor { .. } => "doctor",
+                Action::Providers { .. } => "providers",
+                Action::Gate { .. } => "gate",
+                Action::Status { .. } => "status",
+                Action::Ledger { .. } => "ledger",
+                Action::SkillsInstall { .. } => "skills_install",
+                Action::PermissionsWrite { .. } => "permissions_write",
+            }
+        }
+        let mut seen: Vec<&str> = all_actions().iter().map(named).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), all_actions().len(), "a variant is listed twice");
+        assert_eq!(seen.len(), 16, "add the new action to `all_actions`");
+    }
+
+    #[test]
+    fn every_action_maps_to_a_loopsmith_noun_and_nothing_else() {
         // The browser names a verb; this function names the program. If an
         // action ever produced an argv whose first element was not one of the
         // CLI's own subcommands, the web UI would be a way to run arbitrary
         // things through a trusted binary.
-        let known = [
-            "new", "validate", "plan", "run", "resume", "watch", "schedule",
-            "doctor", "providers", "gate", "status", "ledger", "skills",
-            "permissions",
+        //
+        // In 1.0 that list is eight nouns rather than twenty-two verbs, and
+        // spelling them the 0.3 way would still *work* — which is the trap
+        // this guards: it would work by being rewritten, and the rewrite
+        // prints a deprecation notice into the console of someone who typed
+        // nothing at all.
+        let nouns = [
+            "loop", "run", "memory", "skills", "doctor", "providers", "web", "mcp",
         ];
-        let actions = vec![
-            Action::Create {
-                path: "/tmp/x".into(),
-                name: "x".into(),
-                purpose: "p".into(),
-                config_file: "/tmp/d.yaml".into(),
-                force: false,
-                git: true,
-            },
-            Action::Validate { config: "c".into(), strict: true },
-            Action::Plan { config: "c".into() },
-            Action::DryRun { config: "c".into() },
-            Action::Run { config: "c".into() },
-            Action::Resume { config: "c".into(), run_id: "r".into() },
-            Action::Watch { config: "c".into(), max_runs: Some(2) },
-            Action::ScheduleInstall { config: "c".into() },
-            Action::SchedulePreview { config: "c".into() },
-            Action::Doctor { config: None },
-            Action::Providers { config: "c".into() },
-            Action::Gate { config: "c".into(), target: "overall".into() },
-            Action::Status { config: "c".into(), run_id: "r".into() },
-            Action::Ledger { config: "c".into(), run_id: "r".into() },
-            Action::SkillsInstall { config: "c".into() },
-            Action::PermissionsWrite { config: "c".into(), settings: "s".into() },
-        ];
-        for action in actions {
+        for action in all_actions() {
             let (_, argv) = argv_for(&action).expect("every action maps");
             assert!(
-                known.contains(&argv[0].as_str()),
-                "{argv:?} does not start with a loopsmith subcommand"
+                nouns.contains(&argv[0].as_str()),
+                "{argv:?} does not start with a 1.0 noun"
             );
         }
     }
@@ -565,7 +643,7 @@ mod tests {
             git: false,
         })
         .unwrap();
-        assert_eq!(argv[0], "new");
+        assert_eq!(&argv[..2], ["loop", "new"]);
         assert!(argv.contains(&"--config-file".to_string()), "{argv:?}");
         assert!(argv.contains(&"/tmp/draft.yaml".to_string()), "{argv:?}");
         assert!(!argv.contains(&"--force".to_string()), "not asked for");

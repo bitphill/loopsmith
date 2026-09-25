@@ -140,7 +140,7 @@ export function ConstraintsSection({ cfg, patch, help }: SectionProps) {
 
   return (
     <Section
-      k="constraints"
+      k="safety.limits"
       help={help}
       actions={
         <span className={`chip ${(g.human_checkpoint ?? []).length > 0 ? "chip-good" : "chip-warn"}`}>
@@ -186,7 +186,7 @@ export function ConstraintsSection({ cfg, patch, help }: SectionProps) {
 export function Guidelines({ cfg, patch, help }: SectionProps) {
   const eg = at<Phases>(cfg, "execution.phases") ?? {};
   return (
-    <Section k="execution_guidelines" help={help} count={eg.items?.length} defaultOpen={false}>
+    <Section k="execution.phases" help={help} count={eg.items?.length} defaultOpen={false}>
       <Repeater<Guideline>
         items={eg.items}
         onChange={(items) => patch(put(cfg, "execution.phases", { ...eg, items }))}
@@ -227,7 +227,7 @@ export function Skills({ cfg, patch, help, detection }: SectionProps & { detecti
   const installed = detection?.skills ?? [];
   return (
     <Section
-      k="default_skills"
+      k="execution.default_skills"
       help={help}
       count={at<DefaultSkill[]>(cfg, "execution.default_skills")?.length}
       defaultOpen={false}
@@ -315,7 +315,7 @@ export function Graph({ cfg, patch, help }: SectionProps) {
   const stages = (at<Phases>(cfg, "execution.phases")?.items ?? []).map((g) => g.name).filter(Boolean);
 
   return (
-    <Section k="graph" help={help} count={nodes.length}>
+    <Section k="execution.graph" help={help} count={nodes.length}>
       <Repeater<NodeSpec>
         items={nodes}
         onChange={(n) => setGraph({ nodes: n })}
@@ -457,7 +457,7 @@ export function Providers({
 
   return (
     <Section
-      k="providers"
+      k="execution.providers"
       help={help}
       count={providers.length}
       actions={<span className="chip">{agents.length} found on this machine</span>}
@@ -613,7 +613,7 @@ export function Context({ cfg, patch, help }: SectionProps) {
   const set = (p: Partial<Memory>) => patch(put(cfg, "execution.memory", { ...c, ...p }));
   const providerIds = providerNames(cfg);
   return (
-    <Section k="context" help={help} defaultOpen={false}>
+    <Section k="execution.memory" help={help} defaultOpen={false}>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Field label="Carry summaries" helpPath="execution.memory.carry_summaries">
           {(id) => <Num id={id} min={0} value={c.carry_summaries ?? 2} onChange={(v) => set({ carry_summaries: v ?? 0 })} />}

@@ -137,6 +137,21 @@ test.describe("with the tour dismissed", () => {
     await expect(page.getByText(/Nothing is on disk yet/)).toBeVisible();
   });
 
+  test("every section shows its title, not the path it edits", async ({ page }) => {
+    // A card falls back to rendering its own key when the server has no help
+    // keyed by it, which is how a section that missed a rename announces
+    // itself: a heading reading `stop_gates` instead of "Stop gates", and no
+    // explanation under it at all. Cheap to miss by eye, six steps deep.
+    for (const step of ["Place", "Power", "Intent", "Proof", "Work", "Ship"]) {
+      await page.getByRole("tab", { name: step }).click();
+      const headings = await page.locator("main h2").allInnerTexts();
+      expect(headings.length, `${step} has no sections`).toBeGreaterThan(0);
+      for (const h of headings) {
+        expect(h, `${step} shows a raw config key as a heading`).not.toMatch(/^[a-z0-9_.]+$/);
+      }
+    }
+  });
+
   test("a loaded loop fills the whole form, not just its name", async ({ page }) => {
     // The form edits the 1.0 config the server actually serves. When it was
     // still reading the 0.3 keys, every section but the name came up empty
