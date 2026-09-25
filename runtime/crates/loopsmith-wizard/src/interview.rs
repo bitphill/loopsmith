@@ -340,10 +340,7 @@ fn providers(io: &mut Io, p: &Providers, answers: &mut Answers) -> Result<(), Na
                     remove_entry(&p.id, i, count, answers);
                 }
             }
-            _ => {
-                cascade(&p.id, answers);
-                return Ok(());
-            }
+            _ => return Ok(()),
         }
     }
 }
@@ -447,25 +444,6 @@ fn model_for(io: &mut Io, known: &'static Known) -> Result<Option<String>, Nav> 
     Ok(Some(chosen))
 }
 
-/// Route every tier through the providers that were picked, in order. Without
-/// a cascade a tier resolves to "every provider that admits to serving it",
-/// which is right until two of them do.
-fn cascade(path: &str, answers: &mut Answers) {
-    let ids: Vec<String> = (0..answers::entry_count(path, answers))
-        .filter_map(|i| answers.get(&format!("{path}[{i}].id")).cloned())
-        .collect();
-    if ids.is_empty() {
-        return;
-    }
-    let root = path
-        .rsplit_once('.')
-        .map(|(head, _)| format!("{head}.cascade"))
-        .unwrap_or_else(|| "cascade".into());
-    for tier in ["cheap", "standard", "strong"] {
-        answers.insert(format!("{root}.{tier}"), ids.join(", "));
-    }
-}
-
 fn nonempty(v: &str) -> Result<(), String> {
     if v.trim().is_empty() {
         Err("this one is needed".into())
@@ -512,18 +490,4 @@ mod tests {
         assert_eq!(answers::entry_count("intent.goals", &a), 1);
     }
 
-    #[test]
-    fn the_cascade_routes_every_tier_through_what_was_picked() {
-        let mut a = answers_with(&[
-            ("execution.providers.providers[0].id", "claude"),
-            ("execution.providers.providers[1].id", "ollama"),
-        ]);
-        cascade("execution.providers.providers", &mut a);
-        for tier in ["cheap", "standard", "strong"] {
-            assert_eq!(
-                a.get(&format!("execution.providers.cascade.{tier}")).unwrap(),
-                "claude, ollama"
-            );
-        }
-    }
 }

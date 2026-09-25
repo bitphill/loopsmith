@@ -283,6 +283,24 @@ test.describe("the guided walk-through", () => {
   const primary = (page: import("@playwright/test").Page) =>
     page.locator("#guided-panel button.btn-primary");
 
+  /**
+   * Press on until a question arrives.
+   *
+   * The question list lives in Rust now, so counting clicks here would make
+   * this file a second copy of its length — and one that breaks every time a
+   * question is added. Walking until the heading shows says what the case
+   * actually cares about: that the question is reachable, in order, from the
+   * start.
+   */
+  const walkTo = async (page: import("@playwright/test").Page, heading: string | RegExp) => {
+    const target = page.getByRole("heading", { name: heading });
+    for (let i = 0; i < 40; i += 1) {
+      if (await target.isVisible()) return;
+      await primary(page).click();
+    }
+    await expect(target).toBeVisible();
+  };
+
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("loopsmith-tour", "done");
@@ -324,19 +342,37 @@ test.describe("the guided walk-through", () => {
   });
 
   test("a repeating section accumulates entries and says when it is done", async ({ page }) => {
-    // name, description, version, providers, then Goals.
-    for (let i = 0; i < 4; i++) await primary(page).click();
+    await walkTo(page, "What is this loop trying to achieve?");
 
-    await expect(page.getByRole("heading", { name: "What is this loop trying to achieve?" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add another goal" })).toBeVisible();
     // The step is not left until it is declared finished, which is what the
     // terminal's Done menu entry means.
     await expect(primary(page)).toHaveText(/This part is done/);
   });
 
+  test("the questions are the server's, not the bundle's", async ({ page }) => {
+    // The whole point of 1.0's wizard: Rust owns the list and the browser
+    // renders it. If the page ever stopped fetching it, this card would have
+    // to have come from somewhere else.
+    const spec = await page.request.get("/api/wizard/spec").then((r) => r.json());
+    const first = spec.sections[0].steps[0];
+    await expect(page.getByRole("heading", { name: first.title })).toBeVisible();
+  });
+
+  test("a check offers the goals named three questions earlier", async ({ page }) => {
+    // The choices come back from the server with the assembled draft, because
+    // working them out means knowing what a goal is — and that is a rule the
+    // browser deliberately does not hold a second copy of.
+    await walkTo(page, "What is this loop trying to achieve?");
+    await page.getByLabel("Goal name", { exact: true }).fill("ship-the-brief");
+
+    await walkTo(page, "How is each goal checked?");
+    await expect(page.getByRole("radio", { name: "ship-the-brief" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "overall" })).toBeVisible();
+  });
+
   test("the detector's own fields follow the detector that was chosen", async ({ page }) => {
-    for (let i = 0; i < 5; i++) await primary(page).click();
-    await expect(page.getByRole("heading", { name: "How is each goal checked?" })).toBeVisible();
+    await walkTo(page, "How is each goal checked?");
 
     // script is the default, and it asks for a command.
     await expect(page.getByLabel("Command to run", { exact: true })).toBeVisible();
@@ -348,11 +384,8 @@ test.describe("the guided walk-through", () => {
   });
 
   test("an advanced section is asked for before it is walked through", async ({ page }) => {
-    // Past the five core sections to the first opt-in gate.
-    for (let i = 0; i < 13; i++) await primary(page).click();
-    await expect(
-      page.getByRole("heading", { name: "Define an execution graph of work nodes now?" }),
-    ).toBeVisible();
+    // Past the sections every loop needs, to the first opt-in gate.
+    await walkTo(page, "Define an execution graph of work nodes now?");
 
     // Skipping jumps the whole section, exactly as the terminal's gate does.
     await page.getByRole("button", { name: "Skip" }).click();

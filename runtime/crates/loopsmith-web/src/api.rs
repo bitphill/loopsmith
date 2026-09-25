@@ -12,7 +12,7 @@
 //! hands it to the job runner. A browser cannot name a program to run, which
 //! is the difference between a control panel and a remote shell.
 
-use crate::{assemble, detect, examples, exec, help, picker, secrets};
+use crate::{assemble, detect, examples, exec, help, picker, secrets, wizard};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -44,6 +44,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/library", get(list_library))
         .route("/api/library/forget", post(forget_library))
         .route("/api/open", post(open_config))
+        // The wizard: its questions, and the one conversion from answers to
+        // a config. The browser holds answers and never builds a config.
+        .route("/api/wizard/spec", get(wizard_spec))
+        .route("/api/wizard/answers", post(wizard_answers))
+        .route("/api/wizard/unpack", post(wizard_unpack))
         // Live feedback on the draft.
         .route("/api/review", post(review))
         .route("/api/render", post(render))
@@ -271,6 +276,23 @@ async fn open_config(Json(b): Json<PathBody>) -> ApiResult<Value> {
 
 /// Validate, plan, price, and derive permissions for the draft. Called on
 /// every meaningful edit, so it does no I/O and spawns nothing.
+/// The question list. Static for the process, so the browser fetches it once.
+async fn wizard_spec() -> Json<loopsmith_wizard::spec::Spec> {
+    Json(wizard::spec())
+}
+
+/// Answers in, config out. The one place a browser draft becomes a config.
+async fn wizard_answers(Json(b): Json<wizard::AnswersBody>) -> ApiResult<wizard::Assembled> {
+    Ok(Json(wizard::assemble(&b)?))
+}
+
+/// A config back into the answers that would have produced it, for `--edit`,
+/// for the example library, and for a loop the user already has.
+async fn wizard_unpack(Json(cfg): Json<Value>) -> ApiResult<Value> {
+    let answers = wizard::unpack(&cfg)?;
+    Ok(Json(json!({ "answers": answers })))
+}
+
 async fn review(Json(cfg): Json<Value>) -> Json<assemble::Review> {
     Json(assemble::review(&cfg))
 }

@@ -8,22 +8,43 @@
  * where the CLI offers a list, and press Test to prove one answers before a
  * long run depends on it.
  *
+ * Like every other step, what it writes is answers — `providers[i].id`,
+ * `providers[i].command` and the rest — under the same keys the terminal uses.
+ * The tier cascade is *not* written here: neither front end asks about it, so
+ * the converter derives it from the ids that were picked.
+ *
  * Anything not on this machine is still reachable through the expert editor;
  * this step deliberately offers what was found.
  */
 import { Icon, Note, Select } from "../ui";
 import GlideMenu from "../glide-menu";
-import type { Agent, Detection, LoopConfig, ProviderSpec, Tier } from "../types";
+import { entryCount, type Answers } from "./wire";
+import type { Agent, Detection, ProviderSpec, Tier } from "../types";
 
-/** A detected CLI, as the config would record it. */
-function toSpec(a: Agent): ProviderSpec {
+/** The answers one detected CLI becomes. */
+function fields(a: Agent): Record<string, string> {
+  return {
+    id: a.id,
+    kind: a.kind,
+    command: a.command,
+    args: a.args.join(" "),
+    tiers: a.tiers.join(", "),
+    requires_env: a.requires_env.join(", "),
+    prompt_on_stdin: String(a.prompt_on_stdin),
+    ...(a.models[0] ? { model: a.models[0] } : {}),
+    ...(a.cost_per_1k != null ? { cost_per_1k_tokens: String(a.cost_per_1k) } : {}),
+  };
+}
+
+/** What the Test button needs, rebuilt from the answers that were written. */
+function toSpec(a: Agent, model: string): ProviderSpec {
   return {
     id: a.id,
     kind: a.kind,
     tiers: a.tiers as Tier[],
     command: a.command,
     args: a.args,
-    model: a.models[0] ?? null,
+    model: model || null,
     requires_env: a.requires_env,
     timeout_seconds: null,
     prompt_on_stdin: a.prompt_on_stdin,
@@ -33,10 +54,12 @@ function toSpec(a: Agent): ProviderSpec {
 }
 
 export function ProvidersStepBody({
-  cfg, patch, detection, scanning, onRescan, onTest, testing, results,
+  path, answers, setAnswers, detection, scanning, onRescan, onTest, testing, results,
 }: {
-  cfg: LoopConfig;
-  patch: (p: Partial<LoopConfig>) => void;
+  /** The list's answer path, from the spec. */
+  path: string;
+  answers: Answers;
+  setAnswers: (next: Answers) => void;
   detection: Detection | null;
   scanning: boolean;
   onRescan: (deep: boolean) => void;
@@ -44,19 +67,62 @@ export function ProvidersStepBody({
   testing: string | null;
   results: Record<string, { ok: boolean; text: string }>;
 }) {
-  const chosen = cfg.providers?.providers ?? [];
   const agents = detection?.agents ?? [];
+  const count = entryCount(path, answers);
 
-  const setProviders = (next: ProviderSpec[]) =>
-    patch({ providers: { ...(cfg.providers ?? {}), providers: next } });
+  /** The ids currently in the answer map, in order. */
+  const chosen: string[] = Array.from({ length: count }, (_, i) => answers[`${path}[${i}].id`] ?? "");
 
-  const toggle = (a: Agent) => {
-    const on = chosen.some((p) => p.id === a.id);
-    setProviders(on ? chosen.filter((p) => p.id !== a.id) : [...chosen, toSpec(a)]);
+  const write = (ids: string[], extra?: (id: string) => Record<string, string>) => {
+    // Rewritten whole, so indices stay contiguous — the converter counts
+    // entries by the highest index it sees, and a hole would resurrect a
+    // provider that was unticked as an empty one.
+    const next: Answers = {};
+    for (const [k, v] of Object.entries(answers)) {
+      if (!k.startsWith(`${path}[`)) next[k] = v;
+    }
+    ids.forEach((id, i) => {
+      const agent = agents.find((a) => a.id === id);
+      const values = extra?.(id) ?? (agent ? fields(agent) : { id });
+      for (const [leaf, v] of Object.entries(values)) {
+        if (v !== "") next[`${path}[${i}].${leaf}`] = v;
+      }
+    });
+    setAnswers(next);
   };
 
-  const setModel = (id: string, model: string) =>
-    setProviders(chosen.map((p) => (p.id === id ? { ...p, model: model || null } : p)));
+  const toggle = (a: Agent) => {
+    const on = chosen.includes(a.id);
+    const ids = on ? chosen.filter((x) => x !== a.id) : [...chosen, a.id];
+    // Keep what is already answered for the ones that stay, so a model picked
+    // by hand survives someone ticking a second CLI.
+    const existing = new Map(
+      chosen.map((id, i) => {
+        const prefix = `${path}[${i}].`;
+        const held: Record<string, string> = {};
+        for (const [k, v] of Object.entries(answers)) {
+          if (k.startsWith(prefix)) held[k.slice(prefix.length)] = v;
+        }
+        return [id, held];
+      }),
+    );
+    write(ids, (id) => existing.get(id) ?? fields(agents.find((x) => x.id === id) ?? a));
+  };
+
+  const modelOf = (id: string) => {
+    const i = chosen.indexOf(id);
+    return i < 0 ? "" : answers[`${path}[${i}].model`] ?? "";
+  };
+
+  const setModel = (id: string, model: string) => {
+    const i = chosen.indexOf(id);
+    if (i < 0) return;
+    const next = { ...answers };
+    const key = `${path}[${i}].model`;
+    if (model) next[key] = model;
+    else delete next[key];
+    setAnswers(next);
+  };
 
   if (scanning) {
     return <p className="hint">Reading this machine…</p>;
@@ -80,8 +146,7 @@ export function ProvidersStepBody({
     <div className="space-y-2">
       <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[10px] bg-raised">
         {agents.map((a) => {
-          const on = chosen.some((p) => p.id === a.id);
-          const spec = chosen.find((p) => p.id === a.id);
+          const on = chosen.includes(a.id);
           const result = results[a.id];
           return (
             <div key={a.id} className="relative z-10">
@@ -118,14 +183,14 @@ export function ProvidersStepBody({
                 {a.confidence === "template" && <span className="chip">template</span>}
               </button>
 
-              {on && spec && (
+              {on && (
                 <div className="ml-7 mb-1.5 space-y-2 border-l pl-3">
                   {a.models.length > 0 && (
                     <label className="block">
                       <span className="hint">Model</span>
                       <div className="mt-1">
                         <Select
-                          value={spec.model ?? ""}
+                          value={modelOf(a.id)}
                           onChange={(v) => setModel(a.id, v)}
                           options={[
                             { value: "", label: "(the CLI's own default)" },
@@ -140,7 +205,7 @@ export function ProvidersStepBody({
                       type="button"
                       className="btn btn-sm"
                       disabled={testing === a.id}
-                      onClick={() => onTest(spec)}
+                      onClick={() => onTest(toSpec(a, modelOf(a.id)))}
                     >
                       {testing === a.id ? "Testing…" : "Test"}
                     </button>

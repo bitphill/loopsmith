@@ -9,6 +9,7 @@ import type {
   Detection, Review, ExampleCard, LibraryEntry, Help, SecretStatus, SecretStore,
   JobSummary, JobLine, LoopConfig, Format, PathFacts, HandshakeResult, Meta,
 } from "./types";
+import type { Answers, Assembled, Spec } from "./guided/wire";
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -72,6 +73,21 @@ export const api = {
     }>("/api/open", { path }),
 
   review: (config: unknown) => post<Review>("/api/review", config),
+
+  /** The wizard's question list. Static for the server's lifetime. */
+  wizardSpec: () => call<Spec>("/api/wizard/spec"),
+
+  /**
+   * Answers in, config out — plus which questions apply and what the dynamic
+   * selects offer. `base` is the config the answers were unpacked from, so an
+   * edit keeps the sections the wizard has no question for.
+   */
+  wizardAssemble: (answers: Answers, base: unknown | null) =>
+    post<Assembled>("/api/wizard/answers", { answers, base }),
+
+  /** A config back into the answers that would have produced it. */
+  wizardUnpack: (config: unknown) =>
+    post<{ answers: Answers }>("/api/wizard/unpack", config),
 
   render: (config: unknown, format: Format) =>
     post<{ text: string; file_name: string }>("/api/render", { config, format }),

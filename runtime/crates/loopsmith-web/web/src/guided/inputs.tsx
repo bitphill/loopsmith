@@ -1,81 +1,64 @@
 /**
- * The controls a guided step can ask with.
+ * The controls a question can be asked with.
+ *
+ * Every answer is a string, because that is what the wizard's answer map holds
+ * and what the server types on the way back — a number field that handed React
+ * a `number` would have to hand the server a string anyway, and the conversion
+ * is one more place to disagree about what an empty answer means.
  *
  * The terminal offers a numbered list and reads a line. The browser can do
  * better without doing something else: a short enum is a row of circles you can
- * see all of at once, a long one collapses to a select, and a multi-answer
- * question uses squares so the shape of the control says how many answers it
- * takes. The hover layer is the ported GlideMenu, so a row of options here
- * behaves like every other option list in the app.
+ * see all of at once, and a long one collapses to a select. The hover layer is
+ * the ported GlideMenu, so a row of options here behaves like every other
+ * option list in the app.
  */
 import GlideMenu from "../glide-menu";
 import { Area, Num, Select, Text } from "../ui";
-import type { Choice, Input, Value } from "./spec-types";
+import type { Choice, Input } from "./wire";
 
 /** Above this many options a list of circles stops being scannable. */
 const CIRCLE_LIMIT = 6;
 
-function Marker({ on, shape }: { on: boolean; shape: "circle" | "square" }) {
+function Marker({ on }: { on: boolean }) {
   return (
     <span
-      className={`flex size-4 shrink-0 items-center justify-center transition-colors duration-200
-        ${shape === "circle" ? "rounded-full" : "rounded-[5px]"}
+      className={`flex size-4 shrink-0 items-center justify-center rounded-full transition-colors duration-200
         ${on ? "bg-ember text-on-ember" : "shadow-[inset_0_0_0_1.5px_var(--line-strong)] text-transparent"}`}
     >
-      {shape === "circle" ? (
-        <span
-          className="size-1.5 rounded-full bg-on-ember transition-transform duration-200"
-          style={{ transform: on ? "scale(1)" : "scale(0)" }}
-        />
-      ) : (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M20 6L9 17l-5-5" />
-        </svg>
-      )}
+      <span
+        className="size-1.5 rounded-full bg-on-ember transition-transform duration-200"
+        style={{ transform: on ? "scale(1)" : "scale(0)" }}
+      />
     </span>
   );
 }
 
-/**
- * A list of selectable rows. `multi` swaps the circles for squares and lets
- * more than one be on at a time.
- */
+/** A list of selectable rows, one answer at a time. */
 export function OptionRows({
-  options, value, onChange, multi = false, name,
+  options, value, onChange, name,
 }: {
   options: Choice[];
-  /** A single value, or the list of chosen values when `multi`. */
-  value: string | string[];
-  onChange: (v: string | string[]) => void;
-  multi?: boolean;
+  value: string;
+  onChange: (v: string) => void;
   name: string;
 }) {
-  const chosen = Array.isArray(value) ? value : [value];
-  const shape = multi ? "square" : "circle";
-
-  const toggle = (v: string) => {
-    if (!multi) return onChange(v);
-    onChange(chosen.includes(v) ? chosen.filter((x) => x !== v) : [...chosen, v]);
-  };
-
   return (
     <GlideMenu className="flex flex-col gap-0.5" highlightClassName="inset-x-0 rounded-[10px] bg-raised">
       {options.map((o) => {
-        const on = chosen.includes(o.value);
+        const on = o.value === value;
         return (
           <button
-            key={o.value}
+            key={o.value || "(blank)"}
             type="button"
             data-menu-row
-            role={multi ? "checkbox" : "radio"}
+            role="radio"
             aria-checked={on}
             aria-label={o.label}
             name={name}
-            onClick={() => toggle(o.value)}
+            onClick={() => onChange(o.value)}
             className="relative z-10 flex items-start gap-2 rounded-[10px] px-1.5 py-1.5 text-left transition-colors duration-100"
           >
-            <span className="mt-0.5"><Marker on={on} shape={shape} /></span>
+            <span className="mt-0.5"><Marker on={on} /></span>
             <span className="min-w-0 flex-1">
               <span className={`block text-[13px] leading-snug transition-colors duration-200 ${on ? "text-text" : "text-dim"}`}>
                 {o.label}
@@ -89,24 +72,31 @@ export function OptionRows({
   );
 }
 
-/** Render whichever control this field's `Input` calls for. */
+/**
+ * Render whichever control this field's `Input` calls for.
+ *
+ * `choices` is passed in rather than read off the input, because a select
+ * whose options come from earlier answers is resolved by the server and the
+ * two kinds must render identically once they arrive.
+ */
 export function FieldInput({
-  input, value, onChange, id, invalid,
+  input, value, onChange, id, invalid, choices,
 }: {
   input: Input;
-  value: Value;
-  onChange: (v: Value) => void;
+  value: string;
+  onChange: (v: string) => void;
   id: string;
   invalid?: boolean;
+  choices: Choice[];
 }) {
   switch (input.kind) {
     case "text":
       return (
         <Text
           id={id}
-          value={String(value ?? "")}
+          value={value}
           onChange={onChange}
-          placeholder={input.placeholder}
+          placeholder={input.placeholder ?? undefined}
           mono={input.mono}
           invalid={invalid}
         />
@@ -116,10 +106,24 @@ export function FieldInput({
       return (
         <Area
           id={id}
-          value={String(value ?? "")}
+          value={value}
           onChange={onChange}
-          placeholder={input.placeholder}
-          rows={input.rows ?? 3}
+          placeholder={input.placeholder ?? undefined}
+          rows={input.rows}
+        />
+      );
+
+    case "items":
+      // Several values in one answer. The separator is the spec's, so what is
+      // typed here splits the same way the server will split it.
+      return (
+        <Text
+          id={id}
+          value={value}
+          onChange={onChange}
+          placeholder={input.placeholder ?? undefined}
+          mono={input.mono}
+          invalid={invalid}
         />
       );
 
@@ -127,11 +131,11 @@ export function FieldInput({
       return (
         <Num
           id={id}
-          value={value === "" || value == null ? null : Number(value)}
+          value={value.trim() === "" ? null : Number(value)}
           onChange={(n) => onChange(n === null ? "" : String(n))}
-          min={input.min}
-          step={input.step}
-          suffix={input.suffix}
+          min={input.min ?? undefined}
+          step={input.step ?? undefined}
+          suffix={input.suffix ?? undefined}
         />
       );
 
@@ -139,42 +143,26 @@ export function FieldInput({
       return (
         <OptionRows
           name={id}
-          value={value ? "yes" : "no"}
-          onChange={(v) => onChange(v === "yes")}
+          value={value === "false" ? "false" : "true"}
+          onChange={onChange}
           options={[
-            { value: "yes", label: input.trueLabel ?? "Yes" },
-            { value: "no", label: input.falseLabel ?? "No" },
+            { value: "true", label: input.true_label ?? "Yes" },
+            { value: "false", label: input.false_label ?? "No" },
           ]}
         />
       );
 
     case "select":
       // A long list of options is a dropdown; a short one is worth seeing whole.
-      return input.options.length > CIRCLE_LIMIT ? (
+      return choices.length > CIRCLE_LIMIT ? (
         <Select
           id={id}
-          value={String(value ?? "")}
+          value={value}
           onChange={onChange}
-          options={input.options.map((o) => ({ value: o.value, label: o.label }))}
+          options={choices.map((o) => ({ value: o.value, label: o.label }))}
         />
       ) : (
-        <OptionRows
-          name={id}
-          value={String(value ?? "")}
-          onChange={onChange}
-          options={input.options}
-        />
-      );
-
-    case "multi":
-      return (
-        <OptionRows
-          name={id}
-          multi
-          value={Array.isArray(value) ? value : []}
-          onChange={onChange}
-          options={input.options}
-        />
+        <OptionRows name={id} value={value} onChange={onChange} options={choices} />
       );
   }
 }

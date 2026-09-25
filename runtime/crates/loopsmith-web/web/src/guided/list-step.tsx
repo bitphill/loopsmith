@@ -7,58 +7,91 @@
  * summary row, one entry is open for editing, `+` opens another, and the step's
  * primary button is "This part is done".
  *
- * Entries are held in the real config as you type — there is no separate draft
- * to lose, and the review rail reacts to a half-typed goal the same way it
- * reacts to a finished one.
+ * Entries live in the answer map under `path[i].field`, which is the same key
+ * the terminal writes, so a draft is portable between the two front ends and a
+ * removal has to close the index gap behind it — the converter counts entries
+ * by the highest index it sees.
  */
-import { useState } from "react";
-import { Field, Icon, Note } from "../ui";
+import { useEffect, useState } from "react";
+import { Field as FieldRow, Icon, Note } from "../ui";
 import { FieldInput } from "./inputs";
-import { resolveInput, type AnyListStep, type EntryField } from "./spec-types";
-import type { LoopConfig } from "../types";
+import {
+  choicesFor, describeEntry, entryCount, removeEntry, valueOf,
+  type Answers, type Choice, type ListStep,
+} from "./wire";
 
 export function ListStepBody({
-  step, cfg, items, onChange,
+  step, answers, setAnswers, visible, options, issues,
 }: {
-  step: AnyListStep;
-  cfg: LoopConfig;
-  items: unknown[];
-  onChange: (items: unknown[]) => void;
+  step: ListStep;
+  answers: Answers;
+  setAnswers: (next: Answers) => void;
+  /** The answer keys the server says are being asked right now. */
+  visible: Set<string>;
+  options: Record<string, Choice[]>;
+  issues: Map<string, string>;
 }) {
+  const count = entryCount(step.id, answers);
   // Nothing yet means the first entry is already open: an empty card with a
   // lone `+` makes you click once before you can start typing.
-  const [open, setOpen] = useState<number>(items.length === 0 ? 0 : items.length - 1);
+  const [open, setOpen] = useState<number>(Math.max(0, count - 1));
 
-  const list = items.length === 0 ? [step.blank()] : items;
-  const commit = (next: unknown[]) => onChange(next);
+  // An entry exists when it has answers, so a brand-new one has nothing to
+  // count. `open` past the end is what holds its row on screen until the
+  // first field is filled in.
+  const shown = Math.max(count, open + 1, 1);
 
-  const setEntry = (i: number, e: unknown) => commit(list.map((x, j) => (i === j ? e : x)));
-
-  const add = () => {
-    const next = [...list, step.blank()];
-    commit(next);
-    setOpen(next.length - 1);
+  const set = (key: string, value: string) => {
+    const next = { ...answers };
+    if (value.trim() === "") delete next[key];
+    else next[key] = value;
+    setAnswers(next);
   };
+
+  const add = () => setOpen(count);
+
+  /**
+   * Give a brand-new entry its defaults.
+   *
+   * An entry is whatever keys exist under its index, so an untouched one does
+   * not exist at all — and a server that cannot see it cannot say which of its
+   * fields apply. Writing the defaults is what brings it into being, and it is
+   * the same thing the terminal does by offering them at the prompt.
+   */
+  useEffect(() => {
+    if (open < 0 || open < count) return;
+    const seeded: Answers = {};
+    for (const f of step.fields) {
+      if (f.when || !f.default) continue;
+      seeded[`${step.id}[${open}].${f.id}`] = f.default;
+    }
+    if (Object.keys(seeded).length > 0) setAnswers({ ...answers, ...seeded });
+    // `answers` is deliberately absent: this runs when a new index is opened,
+    // not on every keystroke inside it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, count, step]);
 
   const remove = (i: number) => {
-    const next = list.filter((_, j) => j !== i);
-    commit(next);
-    setOpen((o) => Math.max(0, Math.min(o, next.length - 1)));
+    setAnswers(removeEntry(step.id, i, answers));
+    setOpen((o) => Math.max(0, Math.min(o, count - 2)));
   };
-
-  const visibleFields = (entry: unknown): EntryField<unknown>[] =>
-    step.fields.filter((f: EntryField<unknown>) => !f.when || f.when(entry));
 
   return (
     <div className="space-y-2">
-      {list.length < step.min && (
+      {count < step.min && (
         <Note tone="warning">
           Add at least {step.min} {step.singular}{step.min === 1 ? "" : "s"} to continue.
         </Note>
       )}
 
-      {list.map((entry, i) => {
+      {Array.from({ length: shown }, (_, i) => {
         const isOpen = i === open;
+        const prefix = `${step.id}[${i}]`;
+        // A brand-new entry has no keys yet, so nothing is visible for it. Its
+        // unconditional fields are the way in.
+        const fields = step.fields.filter(
+          (f) => !f.when || visible.has(`${prefix}.${f.id}`),
+        );
         return (
           <div key={i} className={`rounded-[10px] border ${isOpen ? "bg-surface" : "bg-raised"}`}>
             <div className="flex items-center gap-2 px-2.5 py-2">
@@ -69,7 +102,7 @@ export function ListStepBody({
                 aria-expanded={isOpen}
                 onClick={() => setOpen(isOpen ? -1 : i)}
               >
-                {step.describe(entry)}
+                {describeEntry(step, i, answers)}
               </button>
               <span
                 className="text-faint transition-transform duration-150"
@@ -78,7 +111,7 @@ export function ListStepBody({
               >
                 {Icon.chevron({ size: 14 })}
               </span>
-              {list.length > 1 && (
+              {count > 1 && (
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm btn-danger btn-icon"
@@ -92,27 +125,27 @@ export function ListStepBody({
 
             {isOpen && (
               <div className="space-y-3 border-t px-2.5 py-3">
-                {visibleFields(entry).map((f) => {
-                  const value = f.get(entry);
-                  const problem = f.validate ? f.validate(value) : null;
+                {fields.map((f) => {
+                  const key = `${prefix}.${f.id}`;
+                  const problem = issues.get(key);
                   return (
-                    <Field
+                    <FieldRow
                       key={f.id}
-                      label={f.label}
-                      hint={f.hint}
-                      required={f.required}
-                      error={problem ?? undefined}
+                      label={f.title}
+                      hint={f.hint ?? undefined}
+                      error={problem}
                     >
                       {(id) => (
                         <FieldInput
                           id={id}
-                          input={resolveInput(f.input, cfg)}
-                          value={value}
+                          input={f.input}
+                          choices={choicesFor(f.input, key, options)}
+                          value={valueOf(answers, key, f)}
                           invalid={!!problem}
-                          onChange={(v) => setEntry(i, f.set(entry, v))}
+                          onChange={(v) => set(key, v)}
                         />
                       )}
-                    </Field>
+                    </FieldRow>
                   );
                 })}
               </div>

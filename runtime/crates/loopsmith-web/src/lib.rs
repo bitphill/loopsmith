@@ -29,6 +29,7 @@ pub mod guard;
 pub mod help;
 pub mod picker;
 pub mod secrets;
+pub mod wizard;
 pub mod ws;
 
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};

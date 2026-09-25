@@ -120,6 +120,22 @@ pub fn assemble_over(
     if !issues.is_empty() {
         return Err(issues);
     }
+    draft_over(spec, answers, base)
+}
+
+/// The config these answers describe, finished or not.
+///
+/// [`assemble_over`] refuses a draft the moment any answer will not do. This
+/// builds one anyway, from whatever has been answered so far, and is what a
+/// front end with a live review needs: a wizard that showed nothing about the
+/// loop until its last question was answered would be a wizard with no
+/// feedback at all. `Err` here means the answers do not make a config even as
+/// a draft — an answer the loader itself refuses, like a graph with a cycle.
+pub fn draft_over(
+    spec: &Spec,
+    answers: &Answers,
+    base: Option<&LoopConfig>,
+) -> Result<LoopConfig, Vec<Issue>> {
     let mut doc = Mapping::new();
     for section in &spec.sections {
         if !section_open(section, answers) {
@@ -149,14 +165,8 @@ pub fn assemble_over(
                     if !seq.is_empty() {
                         insert(&mut doc, &p.id, Value::Sequence(seq));
                     }
-                    for (key, raw) in answers.range(format!("{}.", cascade_root(&p.id))..) {
-                        if !key.starts_with(&format!("{}.", cascade_root(&p.id))) {
-                            break;
-                        }
-                        let ids = Separator::Comma.split(raw);
-                        if !ids.is_empty() {
-                            insert(&mut doc, key, seq_of(&ids));
-                        }
+                    for (tier, ids) in cascade(&p.id, answers) {
+                        insert(&mut doc, &tier, seq_of(&ids));
                     }
                 }
             }
@@ -224,6 +234,39 @@ fn cascade_root(providers_path: &str) -> String {
         .rsplit_once('.')
         .map(|(head, _)| format!("{head}.cascade"))
         .unwrap_or_else(|| "cascade".into())
+}
+
+/// Which providers each tier routes through, as `(answer key, ids)`.
+///
+/// Answered explicitly when something set them; otherwise every tier routes
+/// through every provider that was picked, in order. Without a cascade a tier
+/// resolves to "every provider that admits to serving it", which is right
+/// until two of them do — and neither front end asks the question, so the
+/// answer belongs here rather than in both of them.
+fn cascade(providers_path: &str, answers: &Answers) -> Vec<(String, Vec<String>)> {
+    let root = cascade_root(providers_path);
+    let prefix = format!("{root}.");
+    let answered: Vec<(String, Vec<String>)> = answers
+        .range(prefix.clone()..)
+        .take_while(|(key, _)| key.starts_with(&prefix))
+        .map(|(key, raw)| (key.clone(), Separator::Comma.split(raw)))
+        .filter(|(_, ids)| !ids.is_empty())
+        .collect();
+    if !answered.is_empty() {
+        return answered;
+    }
+
+    let ids: Vec<String> = (0..entry_count(providers_path, answers))
+        .filter_map(|i| answers.get(&format!("{providers_path}[{i}].id")).cloned())
+        .filter(|id| !id.trim().is_empty())
+        .collect();
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    ["cheap", "standard", "strong"]
+        .into_iter()
+        .map(|tier| (format!("{root}.{tier}"), ids.clone()))
+        .collect()
 }
 
 /// The answers that would have produced this config.
@@ -295,6 +338,64 @@ pub fn unpack(spec: &Spec, cfg: &LoopConfig) -> Answers {
         }
     }
     answers
+}
+
+/// Every unanswered question that has a default, answered by it.
+///
+/// A default is what an untouched field answers with, so a question being
+/// asked that nobody has touched *is* answered — by its default. Filling them
+/// in here rather than in each front end is what lets a condition depend on
+/// one: the detector nobody changed is still `script`, and `script`'s own
+/// fields are still asked because of it.
+///
+/// Repeated to a fixed point, because filling one in can open the question
+/// that needs the next.
+pub fn with_defaults(spec: &Spec, answers: &Answers) -> Answers {
+    let mut out = answers.clone();
+    // Eight passes is far more than the deepest chain of conditions in the
+    // spec; the loop exits on the first that changes nothing.
+    for _ in 0..8 {
+        let mut added = false;
+        let mut fill = |key: String, f: &Field, out: &mut Answers| {
+            let Some(d) = &f.default else { return };
+            if let std::collections::btree_map::Entry::Vacant(slot) = out.entry(key) {
+                slot.insert(d.clone());
+                added = true;
+            }
+        };
+        for section in &spec.sections {
+            if !section_open(section, &out) {
+                continue;
+            }
+            for step in &section.steps {
+                match step {
+                    Step::Field(f) => {
+                        if holds(f.when.as_ref(), &out, None) {
+                            fill(f.id.clone(), f, &mut out);
+                        }
+                    }
+                    Step::List(l) => {
+                        if !holds(l.when.as_ref(), &out, None) {
+                            continue;
+                        }
+                        for i in 0..entry_count(&l.id, &out) {
+                            let prefix = format!("{}[{i}]", l.id);
+                            for f in &l.fields {
+                                if holds(f.when.as_ref(), &out, Some(&prefix)) {
+                                    fill(format!("{prefix}.{}", f.id), f, &mut out);
+                                }
+                            }
+                        }
+                    }
+                    Step::Providers(_) => {}
+                }
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    out
 }
 
 /// A config with nothing in it but a name, as a document — the baseline every
@@ -766,6 +867,37 @@ mod tests {
             unpack(&spec(), &with_alert).get("gate:alerts").map(String::as_str),
             Some("true")
         );
+    }
+
+    #[test]
+    fn picking_providers_is_enough_to_route_every_tier() {
+        // Neither front end asks about the cascade, and a tier with no
+        // cascade resolves to "every provider that admits to serving it",
+        // which is right until two of them do.
+        let mut a = minimal();
+        a.insert("execution.providers.providers[0].id".into(), "claude".into());
+        a.insert("execution.providers.providers[0].kind".into(), "byok".into());
+        a.insert("execution.providers.providers[0].command".into(), "echo".into());
+        a.insert("execution.providers.providers[1].id".into(), "ollama".into());
+        a.insert("execution.providers.providers[1].kind".into(), "byok".into());
+        a.insert("execution.providers.providers[1].command".into(), "echo".into());
+        let cfg = assemble(&spec(), &a).expect("assembles");
+        assert_eq!(cfg.execution.providers.cascade["cheap"], ["claude", "ollama"]);
+        assert_eq!(cfg.execution.providers.cascade["strong"], ["claude", "ollama"]);
+    }
+
+    #[test]
+    fn an_answered_cascade_is_left_alone() {
+        let mut a = minimal();
+        a.insert("execution.providers.providers[0].id".into(), "claude".into());
+        a.insert("execution.providers.providers[0].kind".into(), "byok".into());
+        a.insert("execution.providers.providers[0].command".into(), "echo".into());
+        a.insert("execution.providers.providers[1].id".into(), "ollama".into());
+        a.insert("execution.providers.providers[1].kind".into(), "byok".into());
+        a.insert("execution.providers.providers[1].command".into(), "echo".into());
+        a.insert("execution.providers.cascade.cheap".into(), "ollama".into());
+        let cfg = assemble(&spec(), &a).expect("assembles");
+        assert_eq!(cfg.execution.providers.cascade["cheap"], ["ollama"]);
     }
 
     #[test]

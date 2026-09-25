@@ -136,7 +136,14 @@ impl Field {
                 note: none_if_empty(note),
             })
             .collect();
-        let values = choices.iter().map(|c| c.value.clone()).collect();
+        let values: Vec<String> = choices.iter().map(|c| c.value.clone()).collect();
+        // The first option is the answer an untouched select gives — which is
+        // what the terminal's `[1]` already means. Saying so here is what lets
+        // a condition depend on it: the detector nobody changed is still a
+        // script, and a script's own fields are still asked.
+        if self.default.is_none() {
+            self.default = values.first().cloned();
+        }
         self.input = Input::Select {
             options: Options::Fixed { choices },
         };

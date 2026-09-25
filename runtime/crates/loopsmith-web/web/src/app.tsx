@@ -32,6 +32,7 @@ import { Tour } from "./tour";
 import { SmithGate, type Smith } from "./smith-gate";
 import { ExamplesPicker } from "./examples-picker";
 import { Guided } from "./guided/guided";
+import type { Answers, Assembled, Spec } from "./guided/wire";
 import type {
   LoopConfig, Detection, Help, SectionHelp, Review, ExampleCard, LibraryEntry,
   Format, PathFacts, JobSummary, ProviderSpec, Meta,
@@ -127,6 +128,19 @@ export default function App() {
   const [meta, setMeta] = useState<Meta | null>(null);
 
   const [review, setReview] = useState<Review | null>(null);
+
+  /**
+   * The guided wizard's draft.
+   *
+   * Answers are the wizard's own currency — strings keyed by the config path
+   * each one fills — and the server is what turns them into a config. `base`
+   * is whatever config they were unpacked from, so an edit does not drop the
+   * sections the wizard has no question for.
+   */
+  const [spec, setSpec] = useState<Spec | null>(null);
+  const [answers, setAnswers] = useState<Answers>({});
+  const [assembled, setAssembled] = useState<Assembled | null>(null);
+  const [answerBase, setAnswerBase] = useState<unknown | null>(null);
   const [facts, setFacts] = useState<PathFacts | null>(null);
   const [job, setJob] = useState<string | null>(null);
   const [lastJob, setLastJob] = useState<JobSummary | null>(null);
@@ -231,6 +245,38 @@ export default function App() {
     return () => window.clearTimeout(reviewTimer.current);
   }, [cfg]);
 
+  /**
+   * The wizard's answers, typed by the server.
+   *
+   * Short debounce rather than none: the call is in-process on loopback, and
+   * the inputs read the local answer map, so what waits for the reply is only
+   * the part the server owns — which questions apply, what the dynamic
+   * selects offer, and the config itself.
+   */
+  const answerTimer = useRef<number>(0);
+  useEffect(() => {
+    if (mode !== "guided") return;
+    window.clearTimeout(answerTimer.current);
+    answerTimer.current = window.setTimeout(() => {
+      api.wizardAssemble(answers, answerBase)
+        .then((out) => {
+          setAssembled(out);
+          // A refused draft leaves the last good config in place, so the rail
+          // keeps showing something true rather than blanking mid-keystroke.
+          if (out.config) setCfg(out.config as LoopConfig);
+        })
+        .catch(() => {});
+    }, 120);
+    return () => window.clearTimeout(answerTimer.current);
+  }, [answers, answerBase, mode]);
+
+  // The question list never changes while the server is up, so it is fetched
+  // once, the first time the wizard is opened.
+  useEffect(() => {
+    if (mode !== "guided" || spec) return;
+    api.wizardSpec().then(setSpec).catch(() => {});
+  }, [mode, spec]);
+
   const pathTimer = useRef<number>(0);
   useEffect(() => {
     if (!parent.trim() || !cfg.name.trim()) { setFacts(null); return; }
@@ -301,14 +347,54 @@ export default function App() {
     if (s === "new") setOnboarding("tour");
   };
 
+  /**
+   * The one door into the wizard.
+   *
+   * Whatever is in the editor becomes the answers, so the two modes stay two
+   * views of one draft rather than two drafts. The same config is kept as the
+   * base, because the wizard asks about a subset of it and an assemble that
+   * saw only the answers would drop the rest.
+   */
+  const enterGuided = async (from: LoopConfig) => {
+    setAnswerBase(from);
+    try {
+      const { answers: recovered } = await api.wizardUnpack(from);
+      setAnswers(recovered);
+    } catch {
+      // A draft the loader will not read yet is not a reason to refuse the
+      // wizard: start it empty rather than stranding someone in the editor.
+      setAnswers({});
+    }
+    setMode("guided");
+  };
+
+  /**
+   * Leave the wizard for the editor, carrying the last keystroke with it.
+   *
+   * The answers are posted on a short debounce, so switching straight away
+   * would drop whatever was typed in the last fraction of a second — and the
+   * editor would open on a draft that is one field behind.
+   */
+  const exitGuided = async () => {
+    try {
+      const out = await api.wizardAssemble(answers, answerBase);
+      if (out.config) setCfg(out.config as LoopConfig);
+    } catch {
+      // Keep the last config that did assemble rather than refusing to leave.
+    }
+    setMode("expert");
+  };
+
   /** Leave the examples picker for the wizard, with or without a loaded example. */
   const startGuided = async (id: string | null) => {
+    let start = cfg;
     if (id) {
       setLoadingId(id);
       try {
         const { config } = await api.example(id);
         setCfg(config);
         setCreated(false);
+        start = config;
       } catch (e) {
         setToast({ tone: "bad", text: (e as Error).message });
       } finally {
@@ -317,7 +403,7 @@ export default function App() {
     }
     if (!parent.trim()) setParent("~/loops");
     setOnboarding("done");
-    setMode("guided");
+    await enterGuided(start);
   };
 
   const openLoop = async (p: string) => {
@@ -447,7 +533,7 @@ export default function App() {
       id: "mode",
       group: "View",
       label: mode === "guided" ? "Switch to the expert editor" : "Walk me through it, one field at a time",
-      run: () => setMode(mode === "guided" ? "expert" : "guided"),
+      run: () => { if (mode === "guided") void exitGuided(); else void enterGuided(cfg); },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [help.sections, examples, blocked, theme, problemsByStep, cfg, path, created, mode]);
@@ -474,7 +560,8 @@ export default function App() {
             {mode === "guided" ? (
               <div className="grid min-h-0">
                 <Guided
-                  cfg={cfg} patch={patch} review={review}
+                  spec={spec} answers={answers} setAnswers={setAnswers}
+                  assembled={assembled} review={review}
                   detection={detection} scanning={scanning}
                   onRescan={(deep) => {
                     setScanning(true);
@@ -484,10 +571,10 @@ export default function App() {
                   parent={parent} setParent={setParent} loopPath={path}
                   initGit={initGit} setInitGit={setInitGit}
                   format={format} setFormat={setFormat} facts={facts}
-                  onExit={() => setMode("expert")}
+                  onExit={() => void exitGuided()}
                   onCreate={() => run("create")}
                   createDisabled={blocked || !path.trim() || (!!facts && !facts.writable)}
-                  onJump={(field) => { setMode("expert"); jump(field); }}
+                  onJump={(field) => { void exitGuided().then(() => jump(field)); }}
                 />
               </div>
             ) : (
