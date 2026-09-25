@@ -330,7 +330,7 @@ impl Watcher {
         // for an afternoon does not mean deleting it and typing it back in.
         for t in triggers.iter().filter(|t| t.enabled) {
             match &t.trigger {
-                Trigger::Manual => {}
+                Trigger::Manual {} => {}
                 Trigger::Cron { expr } => {
                     let Ok(c) = CronExpr::parse(expr) else { continue };
                     if c.matches(&civil) && self.fired_minute.get(expr) != Some(&minute) {
@@ -819,7 +819,7 @@ mod tests {
     #[test]
     fn manual_only_configs_never_fire() {
         let mut w = Watcher::default();
-        let triggers = vec![TriggerSpec::from(Trigger::Manual)];
+        let triggers = vec![TriggerSpec::from(Trigger::Manual {})];
         assert!(w
             .poll(&triggers, &std::env::temp_dir(), now_unix(), &BTreeMap::new())
             .is_empty());
@@ -827,7 +827,7 @@ mod tests {
 
     #[test]
     fn poll_interval_tightens_for_the_most_demanding_trigger() {
-        assert_eq!(poll_interval(&[TriggerSpec::from(Trigger::Manual)]), Duration::from_secs(30));
+        assert_eq!(poll_interval(&[TriggerSpec::from(Trigger::Manual {})]), Duration::from_secs(30));
         assert_eq!(
             poll_interval(&[TriggerSpec::from(Trigger::FileChange { path: "x".into() })]),
             Duration::from_secs(5)

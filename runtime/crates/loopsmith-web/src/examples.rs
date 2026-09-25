@@ -170,7 +170,7 @@ fn describe_triggers(triggers: &[loopsmith_core::TriggerSpec]) -> String {
     let parts: Vec<String> = triggers
         .iter()
         .map(|t| match &t.trigger {
-            Trigger::Manual => "manual".to_string(),
+            Trigger::Manual {} => "manual".to_string(),
             Trigger::Cron { expr } => format!("cron {expr}"),
             Trigger::Interval { seconds } => format!("every {}", human_seconds(*seconds)),
             Trigger::FileChange { path } => format!("when {path} changes"),

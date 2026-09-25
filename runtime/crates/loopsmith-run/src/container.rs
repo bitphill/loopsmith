@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn a_node_that_did_not_ask_for_a_container_runs_on_the_host() {
-        assert_eq!(resolve(&Isolation::Worktree, Some("img"), Ok(&rt())), Containment::Host);
+        assert_eq!(resolve(&Isolation::Worktree {}, Some("img"), Ok(&rt())), Containment::Host);
     }
 
     #[test]

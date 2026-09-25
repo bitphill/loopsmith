@@ -236,7 +236,7 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
                     stage: None,
                     skills: vec![],
                     weight: 3.0,
-                    isolation: Isolation::Worktree,
+                    isolation: Isolation::Worktree {},
                 },
                 NodeSpec {
                     id: "judge".into(),
@@ -249,14 +249,14 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
                     stage: None,
                     skills: vec![],
                     weight: 1.0,
-                    isolation: Isolation::None,
+                    isolation: Isolation::None {},
                 },
             ],
             concurrency: Concurrency::Auto {
                 cap: 16,
                 min_marginal_gain: 0.05,
             },
-            join: Join::WaitForAll,
+            join: Join::WaitForAll {},
             container_image: None,
         },
 
@@ -292,7 +292,7 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
         memory: Default::default(),
 
         triggers: TriggerPolicy {
-            triggers: vec![TriggerSpec::from(Trigger::Manual)],
+            triggers: vec![TriggerSpec::from(Trigger::Manual {})],
             ..TriggerPolicy::default()
         },
         },

@@ -7,6 +7,15 @@
 //! where the most typo-prone parts of a config live — the detector on every
 //! check, the isolation on every node, the action for every failure class.
 //!
+//! On an internally tagged enum the guard reaches struct variants and not unit
+//! ones, so every variant that had no fields of its own was given an empty
+//! body — `Worktree {}` rather than `Worktree`. That changes nothing a config
+//! can see: an internally tagged unit variant was always written as a map
+//! (`{ mode: worktree }`), and it still serializes back to exactly that. The
+//! table below therefore carries a case per enum for the fields-carrying
+//! variants and a case per enum for the empty ones, because the two are guarded
+//! by different halves of the same attribute.
+//!
 //! The failure this prevents is specific and silent. `detector: { type: judge,
 //! standard: …, node: review }` parsed, validated with no errors, ran, and
 //! then lost `node` the next time anything wrote the file back out — so the
@@ -126,6 +135,46 @@ const CASES: &[(&str, &str, &str, &str)] = &[
         "{ type: interval, seconds: 60 }",
         "{ type: interval, seconds: 60, jitter: 5 }",
     ),
+    // From here down the tag names a variant with no fields at all. The bad
+    // form in each is the same mistake: the tag was changed and the previous
+    // variant's body was left sitting underneath it, reading as though it still
+    // means something.
+    (
+        "Isolation, no fields",
+        "{ISOLATION}",
+        "{ mode: worktree }",
+        "{ mode: worktree, network: true }",
+    ),
+    (
+        "Join, no fields",
+        "{JOIN}",
+        "{ strategy: first_success }",
+        "{ strategy: first_success, count: 2 }",
+    ),
+    (
+        "Concurrency, no fields",
+        "{CONCURRENCY}",
+        "{ mode: sequential }",
+        "{ mode: sequential, max_parallel: 2 }",
+    ),
+    (
+        "Promotion, no fields",
+        "{PROMOTION}",
+        "{ rule: never }",
+        "{ rule: never, times: 2 }",
+    ),
+    (
+        "Trigger, no fields",
+        "{TRIGGER}",
+        "{ type: manual }",
+        "{ type: manual, seconds: 60 }",
+    ),
+    (
+        "RecoveryAction, no fields",
+        "{RECOVERY}",
+        "{ action: stop }",
+        "{ action: stop, max_attempts: 3 }",
+    ),
 ];
 
 #[test]
@@ -152,36 +201,4 @@ fn a_misspelled_key_inside_a_tagged_section_is_refused_rather_than_dropped() {
             "{what}: the refusal does not name `{key}`: {err}"
         );
     }
-}
-
-/// Where the guard stops: a variant with no fields of its own.
-///
-/// `deny_unknown_fields` on an internally tagged enum reaches its **struct**
-/// variants and not its unit ones. `isolation: { mode: worktree, network: true }`
-/// and `transient_error: { action: stop, max_attempts: 3 }` are both still
-/// accepted, and in both the extra key does nothing while reading as though it
-/// does something. The second is the likelier mistake — it is what a retry
-/// policy looks like after someone changes `action` and leaves the rest.
-///
-/// This records the limit rather than hiding it. Closing it means giving each
-/// unit variant an empty struct body (`Worktree {}`), which turns it into a
-/// struct variant that the guard does reach — about sixty match sites across
-/// the workspace, plus hand-written `Default` impls for `Isolation` and `Join`,
-/// whose derived ones need a unit variant. Worth doing deliberately, not as a
-/// side effect of this change.
-///
-/// When it is done, this test fails, and that is the signal to replace it with
-/// the case above.
-#[test]
-fn a_variant_with_no_fields_of_its_own_is_still_not_guarded() {
-    let bad = config("{ISOLATION}", "{ mode: worktree, network: true }");
-    assert!(
-        loopsmith_core::parse_str(&bad, "bad").is_ok(),
-        "a unit variant now refuses an unknown key — good; fold this case into \
-         `a_misspelled_key_inside_a_tagged_section_is_refused_rather_than_dropped` \
-         and delete this test"
-    );
-
-    let bad = config("{RECOVERY}", "{ action: stop, max_attempts: 3 }");
-    assert!(loopsmith_core::parse_str(&bad, "bad").is_ok());
 }

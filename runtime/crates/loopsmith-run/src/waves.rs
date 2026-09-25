@@ -76,21 +76,21 @@ impl Tally {
     /// Whether the next wave may start.
     fn released(&self) -> bool {
         match self.join {
-            Join::WaitForAll => self.finished == self.total,
+            Join::WaitForAll {} => self.finished == self.total,
             _ => self.succeeded >= self.required(),
         }
     }
 
     /// Whether the wave did what its join asked of it.
     fn met(&self) -> bool {
-        matches!(self.join, Join::WaitForAll) || self.succeeded >= self.required()
+        matches!(self.join, Join::WaitForAll {}) || self.succeeded >= self.required()
     }
 
     fn describe(&self) -> String {
         match self.join {
-            Join::WaitForAll => "wait_for_all".into(),
+            Join::WaitForAll {} => "wait_for_all".into(),
             Join::Quorum { count } => format!("quorum of {count}"),
-            Join::FirstSuccess => "first_success".into(),
+            Join::FirstSuccess {} => "first_success".into(),
         }
     }
 }

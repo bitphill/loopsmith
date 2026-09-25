@@ -24,7 +24,7 @@ pub enum Trigger {
     /// Fire when a named upstream goal becomes satisfied.
     GoalSatisfied { goal: String },
     /// Fire on demand only.
-    Manual,
+    Manual {},
 }
 
 impl Trigger {
@@ -170,6 +170,6 @@ mod tests {
         assert!(Trigger::FileChange { path: "out".into() }.is_self_reachable());
         assert!(!Trigger::Cron { expr: "* * * * *".into() }.is_self_reachable());
         assert!(!Trigger::Interval { seconds: 60 }.is_self_reachable());
-        assert!(!Trigger::Manual.is_self_reachable());
+        assert!(!Trigger::Manual {}.is_self_reachable());
     }
 }

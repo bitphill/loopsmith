@@ -623,7 +623,7 @@ fn check_recovery(cfg: &LoopConfig, r: &mut ValidationReport) {
     }
     if matches!(
         rec.safety_violation,
-        RecoveryAction::Retry { .. } | RecoveryAction::Revise { .. } | RecoveryAction::Fallback
+        RecoveryAction::Retry { .. } | RecoveryAction::Revise { .. } | RecoveryAction::Fallback {}
     ) {
         r.issues.push(Issue::err(
             "safety.recovery.safety_violation",
@@ -706,7 +706,7 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
     // that can actually overlap. Two unisolated builders in a dependency chain
     // never run at the same time, and warning about them trains the reader to
     // ignore the warning that matters.
-    let parallel_possible = !matches!(cfg.execution.graph.concurrency, Concurrency::Sequential);
+    let parallel_possible = !matches!(cfg.execution.graph.concurrency, Concurrency::Sequential {});
     if parallel_possible {
         let levels = wave_levels(&cfg.execution.graph.nodes);
         let mut by_wave: BTreeMap<usize, Vec<&str>> = BTreeMap::new();
@@ -1131,7 +1131,7 @@ execution:
             stage: None,
             skills: vec![],
             weight: 1.0,
-            isolation: Isolation::None,
+            isolation: Isolation::None {},
         }
     }
 
@@ -1181,7 +1181,7 @@ execution:
     fn sequential_concurrency_silences_the_warning_entirely() {
         let mut c = minimal();
         c.execution.graph.nodes = vec![builder("a", &[]), builder("b", &[])];
-        c.execution.graph.concurrency = Concurrency::Sequential;
+        c.execution.graph.concurrency = Concurrency::Sequential {};
         assert!(!validate(&c).render().contains("without worktree isolation"));
     }
 

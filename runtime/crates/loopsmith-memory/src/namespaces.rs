@@ -78,11 +78,11 @@ pub fn remember<S: Store>(store: &S, policy: &MemoryPolicy, note: &Note) -> Resu
         runs.push(note.run_id.to_string());
     }
     let promoted = match rules.promotion {
-        Promotion::Never => false,
-        Promotion::Automatic => true,
+        Promotion::Never {} => false,
+        Promotion::Automatic {} => true,
         Promotion::RepeatedValidation { times } => runs.len() as u32 >= times,
         // Only `promote` flips it; a write never does.
-        Promotion::HumanApproval => was_promoted,
+        Promotion::HumanApproval {} => was_promoted,
     };
     store.put_record(&Record {
         namespace: note.namespace,
@@ -223,7 +223,7 @@ mod tests {
         let policy = MemoryPolicy {
             namespaces: Namespaces {
                 semantic: NamespacePolicy {
-                    promotion: Promotion::HumanApproval,
+                    promotion: Promotion::HumanApproval {},
                     ..NamespacePolicy::default()
                 },
                 ..Namespaces::default()

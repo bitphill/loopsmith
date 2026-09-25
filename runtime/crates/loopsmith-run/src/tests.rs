@@ -975,7 +975,7 @@ fn a_node_out_of_revisions_is_escalated_and_only_an_answer_releases_it() {
 fn a_budget_policy_of_stop_fails_the_run_instead_of_pausing_it() {
     let (s, d) = store("exhaust-stop");
     let mut c = failing(cfg("stop_gates:\n  max_iterations: 1\n  no_progress_iterations: 0\n"));
-    c.safety.recovery.resource_exhaustion = loopsmith_core::RecoveryAction::Stop;
+    c.safety.recovery.resource_exhaustion = loopsmith_core::RecoveryAction::Stop {};
     let out = execute(&c, &s, &opts("exhaust-stop", &d)).unwrap();
     assert_eq!(out.state, RunState::Failed);
     let _ = std::fs::remove_dir_all(d);
@@ -1002,7 +1002,7 @@ fn an_isolated_node_that_touches_a_forbidden_path_halts_the_run_and_publishes_no
     git(&["commit", "-qm", "seed"], &d);
 
     let mut c = cfg("");
-    c.execution.graph.nodes[0].isolation = loopsmith_core::Isolation::Worktree;
+    c.execution.graph.nodes[0].isolation = loopsmith_core::Isolation::Worktree {};
     provider_script(&mut c, "echo leaked > .env; echo fine > out.txt; echo ok");
     c.safety.limits.global.forbidden_paths = vec![".env".into()];
 
@@ -1034,7 +1034,7 @@ fn three_wide(extra: &str) -> LoopConfig {
 fn first_success_releases_the_wave_without_dispatching_the_rest() {
     let (s, d) = store("first-success");
     let mut c = three_wide("");
-    c.execution.graph.join = loopsmith_core::Join::FirstSuccess;
+    c.execution.graph.join = loopsmith_core::Join::FirstSuccess {};
     let out = execute(&c, &s, &opts("first-success", &d)).unwrap();
     assert_eq!(out.state, RunState::Succeeded);
     assert_eq!(s.episodes("first-success").unwrap().len(), 1, "one success was enough");

@@ -113,11 +113,11 @@ pub(crate) fn respond(policy: &Recovery, class: FailureClass, attempt: u32) -> R
                 Response::Continue
             }
         }
-        RecoveryAction::Fallback => Response::Continue,
-        RecoveryAction::Escalate => Response::Escalate,
-        RecoveryAction::Pause => Response::Halt(RunState::Paused),
-        RecoveryAction::Stop => Response::Halt(RunState::Failed),
-        RecoveryAction::RestoreCheckpoint => Response::Halt(RunState::RolledBack),
+        RecoveryAction::Fallback {} => Response::Continue,
+        RecoveryAction::Escalate {} => Response::Escalate,
+        RecoveryAction::Pause {} => Response::Halt(RunState::Paused),
+        RecoveryAction::Stop {} => Response::Halt(RunState::Failed),
+        RecoveryAction::RestoreCheckpoint {} => Response::Halt(RunState::RolledBack),
     }
 }
 
@@ -204,7 +204,7 @@ mod tests {
             run_outcome(&p, FailureClass::ResourceExhaustion, RunState::Paused),
             RunState::Paused
         );
-        p.resource_exhaustion = RecoveryAction::Stop;
+        p.resource_exhaustion = RecoveryAction::Stop {};
         assert_eq!(
             run_outcome(&p, FailureClass::ResourceExhaustion, RunState::Paused),
             RunState::Failed

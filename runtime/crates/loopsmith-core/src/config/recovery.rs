@@ -67,15 +67,15 @@ pub enum RecoveryAction {
         max_attempts: u32,
     },
     /// Move to the next provider in the tier's cascade.
-    Fallback,
+    Fallback {},
     /// Halt this node and record an escalation for a human to answer.
-    Escalate,
+    Escalate {},
     /// Halt the whole run but keep the state resumable.
-    Pause,
+    Pause {},
     /// Roll the store back to the last good checkpoint and resume from there.
-    RestoreCheckpoint,
+    RestoreCheckpoint {},
     /// Stop the run immediately. No further dispatch, no perturbation.
-    Stop,
+    Stop {},
 }
 
 fn default_attempts() -> u32 {
@@ -132,19 +132,19 @@ fn default_invalid_output() -> RecoveryAction {
     RecoveryAction::Revise { max_attempts: 2 }
 }
 fn default_tool_unavailable() -> RecoveryAction {
-    RecoveryAction::Fallback
+    RecoveryAction::Fallback {}
 }
 fn default_repeated_failure() -> RecoveryAction {
-    RecoveryAction::Escalate
+    RecoveryAction::Escalate {}
 }
 fn default_safety_violation() -> RecoveryAction {
-    RecoveryAction::Stop
+    RecoveryAction::Stop {}
 }
 fn default_resource_exhaustion() -> RecoveryAction {
-    RecoveryAction::Pause
+    RecoveryAction::Pause {}
 }
 fn default_corrupted_state() -> RecoveryAction {
-    RecoveryAction::RestoreCheckpoint
+    RecoveryAction::RestoreCheckpoint {}
 }
 
 impl Default for Recovery {
@@ -251,7 +251,7 @@ mod tests {
         // The one class where "try again" is never the right answer.
         assert_eq!(
             Recovery::default().action_for(FailureClass::SafetyViolation),
-            RecoveryAction::Stop
+            RecoveryAction::Stop {}
         );
     }
 }

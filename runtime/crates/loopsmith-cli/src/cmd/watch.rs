@@ -21,7 +21,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
             .triggers
             .triggers
             .iter()
-            .all(|t| matches!(t.trigger, loopsmith_core::Trigger::Manual))
+            .all(|t| matches!(t.trigger, loopsmith_core::Trigger::Manual {}))
     {
         return Err(
             "this loop has no non-manual trigger, so `watch` would sleep forever. \n                     Add a cron, interval, file_change, or goal_satisfied trigger to `schedules`."

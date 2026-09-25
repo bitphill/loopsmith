@@ -44,16 +44,15 @@ pub enum Tier {
 /// directory gets checked out on developer laptops, CI runners and servers, and
 /// refusing to start there would make container isolation unusable in practice
 /// rather than merely unavailable.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Isolation {
     /// Runs directly in the loop directory. Correct for a single writer or a
     /// read-only node.
-    #[default]
-    None,
+    None {},
     /// Runs in its own git worktree, published back on success. Required for
     /// parallel writers.
-    Worktree,
+    Worktree {},
     /// Runs in a container over its own worktree.
     Container {
         /// Image to run in. Defaults to the loop-wide image when unset.
@@ -66,11 +65,17 @@ pub enum Isolation {
     },
 }
 
+impl Default for Isolation {
+    fn default() -> Self {
+        Isolation::None {}
+    }
+}
+
 impl Isolation {
     /// Whether this node needs a worktree of its own. Container isolation
     /// implies one, because the container mounts it.
     pub fn needs_worktree(&self) -> bool {
-        matches!(self, Isolation::Worktree | Isolation::Container { .. })
+        matches!(self, Isolation::Worktree {} | Isolation::Container { .. })
     }
 
     /// What this becomes when Docker is unavailable.
@@ -92,7 +97,7 @@ impl Isolation {
 
     pub fn without_container(&self) -> Isolation {
         match self {
-            Isolation::Container { .. } => Isolation::Worktree,
+            Isolation::Container { .. } => Isolation::Worktree {},
             other => other.clone(),
         }
     }
@@ -149,28 +154,33 @@ fn one() -> f64 {
 /// later waves read every output. The other two exist for the fan-out shape the
 /// reference calls out: several nodes attacking the same question, where the
 /// run does not need all the answers to proceed.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "strategy", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Join {
     /// Every node in the wave must finish.
-    #[default]
-    WaitForAll,
+    WaitForAll {},
     /// Proceed once this many nodes have finished successfully. Nodes still
     /// running are left to finish; their output is used if it arrives in time.
     Quorum { count: usize },
     /// Proceed as soon as any one node succeeds.
-    FirstSuccess,
+    FirstSuccess {},
+}
+
+impl Default for Join {
+    fn default() -> Self {
+        Join::WaitForAll {}
+    }
 }
 
 impl Join {
     /// How many successes release the wave, given its width.
     pub fn required_successes(self, wave_width: usize) -> usize {
         match self {
-            Join::WaitForAll => wave_width,
+            Join::WaitForAll {} => wave_width,
             // A quorum wider than the wave would never be reached and would
             // hang the run; clamping turns a config mistake into wait-for-all.
             Join::Quorum { count } => count.clamp(1, wave_width.max(1)),
-            Join::FirstSuccess => 1,
+            Join::FirstSuccess {} => 1,
         }
     }
 }
@@ -195,7 +205,7 @@ pub struct GraphSpec {
 #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Concurrency {
     /// One node at a time.
-    Sequential,
+    Sequential {},
     /// Fixed width.
     Fixed { max_parallel: usize },
     /// Derived from the graph: widest wave, capped, and trimmed to the point
@@ -252,12 +262,12 @@ mod tests {
             network: false,
         };
         assert!(c.needs_worktree());
-        assert_eq!(c.without_container(), Isolation::Worktree);
+        assert_eq!(c.without_container(), Isolation::Worktree {});
     }
 
     #[test]
     fn degrading_a_non_container_isolation_changes_nothing() {
-        assert_eq!(Isolation::None.without_container(), Isolation::None);
-        assert_eq!(Isolation::Worktree.without_container(), Isolation::Worktree);
+        assert_eq!(Isolation::None {}.without_container(), Isolation::None {});
+        assert_eq!(Isolation::Worktree {}.without_container(), Isolation::Worktree {});
     }
 }

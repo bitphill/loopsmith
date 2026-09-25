@@ -240,7 +240,7 @@ pub fn choose_concurrency(
 ) -> (usize, f64) {
     let widest = waves.iter().map(|w| w.nodes.len()).max().unwrap_or(1).max(1);
     match concurrency {
-        Concurrency::Sequential => (1, amdahl(p, 1)),
+        Concurrency::Sequential {} => (1, amdahl(p, 1)),
         Concurrency::Fixed { max_parallel } => {
             let n = (*max_parallel).max(1).min(widest);
             (n, amdahl(p, n))
@@ -418,7 +418,7 @@ mod tests {
     fn sequential_mode_pins_one_worker() {
         let spec = GraphSpec {
             nodes: vec![node("a", &[], 1.0), node("b", &[], 1.0)],
-            concurrency: Concurrency::Sequential,
+            concurrency: Concurrency::Sequential {},
             ..Default::default()
         };
         let p = plan(&spec).unwrap();

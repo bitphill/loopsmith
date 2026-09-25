@@ -23,10 +23,10 @@ use super::yes;
 #[serde(tag = "rule", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Promotion {
     /// Never reused beyond the run that wrote it.
-    Never,
+    Never {},
     /// Reusable as soon as it is written. Only appropriate where writing is
     /// itself the evidence — a recorded failure mode, for instance.
-    Automatic,
+    Automatic {},
     /// Reusable once the same record has been independently corroborated this
     /// many times.
     RepeatedValidation {
@@ -34,7 +34,7 @@ pub enum Promotion {
         times: u32,
     },
     /// Reusable only after a human says so.
-    HumanApproval,
+    HumanApproval {},
 }
 
 fn default_times() -> u32 {
@@ -111,7 +111,7 @@ pub struct Namespaces {
 
 fn episodic_default() -> NamespacePolicy {
     NamespacePolicy {
-        promotion: Promotion::Never,
+        promotion: Promotion::Never {},
         require_provenance: false,
         ..NamespacePolicy::default()
     }
@@ -119,7 +119,7 @@ fn episodic_default() -> NamespacePolicy {
 
 fn failure_default() -> NamespacePolicy {
     NamespacePolicy {
-        promotion: Promotion::Automatic,
+        promotion: Promotion::Automatic {},
         ..NamespacePolicy::default()
     }
 }
@@ -196,7 +196,7 @@ mod tests {
     fn episodes_are_never_promoted_by_default() {
         // An episode is evidence, not a conclusion. Promoting one would let a
         // single run's transcript become a standing belief.
-        assert_eq!(Namespaces::default().episodic.promotion, Promotion::Never);
+        assert_eq!(Namespaces::default().episodic.promotion, Promotion::Never {});
     }
 
     #[test]
@@ -205,7 +205,7 @@ mod tests {
         // prevent, and hitting it is its own evidence.
         assert_eq!(
             Namespaces::default().failure.promotion,
-            Promotion::Automatic
+            Promotion::Automatic {}
         );
     }
 
