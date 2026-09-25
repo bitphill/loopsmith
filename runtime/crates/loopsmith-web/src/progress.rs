@@ -33,11 +33,26 @@ pub struct Event {
     /// The node it concerns, where it concerns one.
     pub node: Option<String>,
     pub detail: String,
-    /// For a `StateChanged`, the state the run moved *to*. This is the one
-    /// field worth pulling out of the detail: it is what the lifecycle
-    /// visualiser draws, and "running → blocked: no measurable change" has to
-    /// become `blocked` somewhere.
+    /// For a `StateChanged`, the state the run moved *to*.
     pub state: Option<String>,
+    /// For a `StateChanged`, the state it moved *from*.
+    ///
+    /// Only the first transition of a run says anything the trail does not
+    /// already know — but that one matters: without it the trail opens on
+    /// `validating` and reads as though something was missed.
+    pub from: Option<String>,
+    /// Why, where the entry gives a reason: the part after the colon in
+    /// "running → blocked: no measurable change for 3 iterations".
+    pub why: Option<String>,
+    /// The gate's running score, from the sentence it closes an iteration
+    /// with: `(passed, total)` out of "2/4 target(s) satisfied".
+    ///
+    /// This one reads a sentence the gate writes rather than the frame
+    /// `logging::line` puts around it, so it is the weaker of the two
+    /// contracts here — but it is the single number that says whether a run
+    /// is getting anywhere, and it is buried in prose either way. Better
+    /// buried in prose on this side of the wire, where a test can see it.
+    pub satisfied: Option<(u32, u32)>,
 }
 
 /// Turn one line of a verbose run log back into the entry it came from.
@@ -50,15 +65,15 @@ pub fn parse(line: &str) -> Option<Event> {
     // runs rather than by column offset: the iteration counter is right
     // aligned in three characters and overflows on iteration 1000, and a run
     // that long is exactly the kind that is worth watching.
-    let mut rest = line.strip_prefix(char::is_numeric).map(|_| line)?;
-    let (stamp, after) = rest.split_once("  ")?;
+    if !line.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    let (stamp, after) = line.split_once("  ")?;
     // A timestamp, not prose that happens to start with a digit.
     if stamp.len() != 20 || !stamp.ends_with('Z') {
         return None;
     }
-    rest = after.trim_start();
-
-    let after_it = rest.strip_prefix("it ")?;
+    let after_it = after.trim_start().strip_prefix("it ")?;
     let (iteration, after_iteration) = {
         let t = after_it.trim_start();
         let end = t.find(' ')?;
@@ -79,24 +94,45 @@ pub fn parse(line: &str) -> Option<Event> {
         None => (None, after_kind),
     };
 
+    let moved = (kind == "StateChanged").then(|| transition(detail)).flatten();
     Some(Event {
         iteration,
-        state: (kind == "StateChanged").then(|| to_state(detail)).flatten(),
+        state: moved.as_ref().map(|m| m.1.clone()),
+        from: moved.as_ref().and_then(|m| m.0.clone()),
+        why: moved.and_then(|m| m.2),
+        satisfied: satisfied(detail),
         kind: kind.to_string(),
         node,
         detail: detail.to_string(),
     })
 }
 
-/// The state a `StateChanged` moved to.
+/// A `StateChanged`'s detail, taken apart: from, to, and why.
 ///
-/// The detail reads `running → blocked: no measurable change for 3
-/// iterations`. The arrow separates the two states and the colon separates
-/// the destination from why.
-fn to_state(detail: &str) -> Option<String> {
-    let after = detail.split_once('→')?.1.trim();
-    let name = after.split_once(':').map(|(s, _)| s).unwrap_or(after).trim();
-    (!name.is_empty()).then(|| name.to_string())
+/// It reads `running → blocked: no measurable change for 3 iterations`. The
+/// arrow separates the two states and the colon separates the destination
+/// from the reason. `None` where there is no arrow, which would mean the
+/// engine changed the sentence without telling anyone.
+#[allow(clippy::type_complexity)]
+fn transition(detail: &str) -> Option<(Option<String>, String, Option<String>)> {
+    let (before, after) = detail.split_once('→')?;
+    let (to, why) = match after.split_once(':') {
+        Some((to, why)) => (to.trim(), Some(why.trim().to_string())),
+        None => (after.trim(), None),
+    };
+    if to.is_empty() {
+        return None;
+    }
+    let from = before.trim();
+    Some(((!from.is_empty()).then(|| from.to_string()), to.to_string(), why))
+}
+
+/// The gate's score out of "… 2/4 target(s) satisfied."
+fn satisfied(detail: &str) -> Option<(u32, u32)> {
+    let at = detail.find(" target(s) satisfied")?;
+    let counts = detail[..at].rsplit(' ').next()?;
+    let (passed, total) = counts.split_once('/')?;
+    Some((passed.parse().ok()?, total.parse().ok()?))
 }
 
 #[cfg(test)]
@@ -168,6 +204,17 @@ mod tests {
             assert_eq!(back.kind, format!("{kind:?}"));
             assert_eq!(back.node.as_deref(), Some("node-a"));
             assert_eq!(back.detail, "running \u{2192} blocked: two lines");
+            // Only a transition is taken apart; every other kind keeps its
+            // detail whole and says nothing it did not say.
+            if matches!(kind, StateChanged) {
+                assert_eq!(back.state.as_deref(), Some("blocked"));
+                assert_eq!(back.from.as_deref(), Some("running"));
+                assert_eq!(back.why.as_deref(), Some("two lines"));
+            } else {
+                assert_eq!(back.state, None);
+                assert_eq!(back.from, None);
+                assert_eq!(back.why, None);
+            }
         }
     }
 
@@ -193,7 +240,29 @@ mod tests {
         )
         .expect("a run log line");
         assert_eq!(e.state.as_deref(), Some("blocked"));
+        assert_eq!(e.from.as_deref(), Some("running"));
+        assert_eq!(
+            e.why.as_deref(),
+            Some("no measurable change for 3 iterations")
+        );
         assert_eq!(e.node, None);
+    }
+
+    #[test]
+    fn the_gates_running_score_is_read_out_of_the_sentence_it_is_buried_in() {
+        // The one number that says whether a run is getting anywhere.
+        let e = parse(
+            "2026-09-25T13:57:31Z  it   2  GateEvaluated      0 node(s) ran (1 failed); 2/4 target(s) satisfied.",
+        )
+        .expect("a run log line");
+        assert_eq!(e.satisfied, Some((2, 4)));
+        // The count in the parenthesis must not be mistaken for it.
+        assert_eq!(
+            parse("2026-09-25T13:57:31Z  it   2  GateEvaluated      3 node(s) ran (1 failed)")
+                .expect("a run log line")
+                .satisfied,
+            None
+        );
     }
 
     #[test]
@@ -201,6 +270,8 @@ mod tests {
         let e = parse("2026-09-25T13:57:31Z  it   0  StateChanged       created → validating")
             .expect("a run log line");
         assert_eq!(e.state.as_deref(), Some("validating"));
+        assert_eq!(e.from.as_deref(), Some("created"));
+        assert_eq!(e.why, None);
     }
 
     #[test]

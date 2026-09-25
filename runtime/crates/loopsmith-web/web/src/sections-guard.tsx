@@ -15,8 +15,8 @@ import { Field, Num, Select, Text, Toggle, Repeater, Note, ListInput } from "./u
 import { at, put } from "./types";
 import { Section, DetectorEditor, type SectionProps } from "./sections-core";
 import type {
-  Alert, Baseline, Evolution, GateOutcome, GateRule, Metric, ProposalKind,
-  Recovery, RecoveryAction,
+  Alert, Baseline, Evolution, Features, GateOutcome, GateRule, Metric,
+  ProposalKind, Recovery, RecoveryAction,
 } from "./types";
 
 /* --- gate rules ---------------------------------------------------------- */
@@ -327,6 +327,75 @@ export function Protected({ cfg, patch, help }: SectionProps) {
             />
           )}
         </Field>
+      </div>
+    </Section>
+  );
+}
+
+/* --- feature switches ---------------------------------------------------- */
+
+/**
+ * The five switches, and what each one is really deciding.
+ *
+ * `on` is the model's own default, so an untouched config shows what will
+ * actually happen. The two that are off are the two that widen what the loop
+ * can become, and they stay off until somebody says otherwise.
+ */
+const FLAGS: readonly { key: keyof Features; label: string; hint: string; on: boolean }[] = [
+  {
+    key: "self_evolution",
+    label: "Propose changes to itself",
+    hint: "Self-modification is the capability most worth opting into knowingly.",
+    on: false,
+  },
+  {
+    key: "marketplace_skills",
+    label: "Take sub-agents from the marketplace",
+    hint: "This is the supply-chain surface: someone else's code, your credentials.",
+    on: false,
+  },
+  {
+    key: "external_side_effects",
+    label: "Act outside the loop's own directory",
+    hint: "Sending, publishing, deleting — anything the loop directory does not contain.",
+    on: false,
+  },
+  {
+    key: "parallel_execution",
+    label: "Run independent nodes at the same time",
+    hint: "Turning this off forces strict sequence, which is the first thing to try when a run behaves differently under load.",
+    on: true,
+  },
+  {
+    key: "human_approval",
+    label: "Honour human checkpoints",
+    hint: "Off, every checkpoint in the config is decorative. Refused outright in a production environment.",
+    on: true,
+  },
+];
+
+export function FeatureFlags({ cfg, patch, help }: SectionProps) {
+  const f = at<Features>(cfg, "features") ?? {};
+  const on = (k: keyof Features) => f[k] ?? FLAGS.find((x) => x.key === k)!.on;
+
+  return (
+    <Section k="features" help={help} defaultOpen={false}>
+      <div className="space-y-2.5">
+        {FLAGS.map((flag) => (
+          <Toggle
+            key={flag.key}
+            checked={on(flag.key)}
+            onChange={(v) => patch(put(cfg, "features", { ...f, [flag.key]: v }))}
+            label={flag.label}
+            hint={flag.hint}
+          />
+        ))}
+        {!on("human_approval") && (
+          <Note tone="error">
+            With this off, every `human_checkpoint` in the config does nothing. A config that says
+            it stops for a person and does not is worse than one that never claimed to.
+          </Note>
+        )}
       </div>
     </Section>
   );

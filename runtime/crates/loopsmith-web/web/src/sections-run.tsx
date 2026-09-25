@@ -606,6 +606,84 @@ export function Providers({
   );
 }
 
+/* --- skill policy -------------------------------------------------------- */
+
+/** Where a skill may come from, in the order the engine tries them. */
+const SOURCES: readonly { id: "installed" | "marketplace" | "generate"; label: string; hint: string }[] = [
+  { id: "installed", label: "Already on this machine", hint: "Free, and the only source with no supply chain." },
+  { id: "marketplace", label: "The marketplace", hint: "Someone else's code, running with your credentials." },
+  { id: "generate", label: "Have one written", hint: "A model writing a tool for a model to use." },
+];
+
+/**
+ * What happens when a node wants a specialist the machine does not have.
+ *
+ * Separate from the Sub-agents card next to it, which lists the ones to
+ * install up front. This is the standing policy for everything after that,
+ * and the two answer different questions: what do we start with, and what are
+ * we allowed to pick up.
+ */
+export function SkillPolicySection({ cfg, patch, help }: SectionProps) {
+  const p = at<SkillPolicy>(cfg, "execution.skills") ?? {};
+  const order = p.acquisition_order ?? ["installed"];
+  const set = (next: Partial<SkillPolicy>) => patch(put(cfg, "execution.skills", { ...p, ...next }));
+
+  const toggle = (id: (typeof SOURCES)[number]["id"], on: boolean) =>
+    // Rebuilt in the declared order rather than appended, so the list stays
+    // the order the engine tries them in and not the order they were ticked.
+    set({
+      acquisition_order: SOURCES.map((s) => s.id).filter((s) =>
+        s === id ? on : order.includes(s),
+      ),
+    });
+
+  return (
+    <Section k="execution.skills" help={help} count={order.length} defaultOpen={false}>
+      <div className="space-y-2.5">
+        {SOURCES.map((src) => (
+          <Toggle
+            key={src.id}
+            checked={order.includes(src.id)}
+            onChange={(on) => toggle(src.id, on)}
+            label={src.label}
+            hint={src.hint}
+          />
+        ))}
+
+        {order.includes("marketplace") && (
+          <Note tone="warning">
+            A marketplace skill is code you did not write, running where your loop runs. The star
+            floor and the promotion rule below are the whole of what stands between the two.
+          </Note>
+        )}
+
+        <div className="grid grid-cols-1 gap-3 pt-1 md:grid-cols-2">
+          <Field label="Quarantine directory" hint="Where anything acquired at run time waits.">
+            {(id) => (
+              <Text id={id} mono value={p.quarantine_dir ?? ""}
+                onChange={(v) => set({ quarantine_dir: v || undefined })}
+                placeholder=".loopsmith/quarantine" />
+            )}
+          </Field>
+          <Field label="Marketplace star floor" hint="Below this, a skill is not offered at all.">
+            {(id) => (
+              <Num id={id} min={0} value={p.min_marketplace_stars ?? null}
+                onChange={(v) => set({ min_marketplace_stars: v ?? undefined })} />
+            )}
+          </Field>
+        </div>
+
+        <Toggle
+          checked={p.require_human_promotion ?? true}
+          onChange={(v) => set({ require_human_promotion: v })}
+          label="A person promotes a skill out of quarantine"
+          hint="Off, and the loop grants itself new abilities between iterations."
+        />
+      </div>
+    </Section>
+  );
+}
+
 /* --- context ------------------------------------------------------------- */
 
 export function Context({ cfg, patch, help, defaults }: SectionProps) {

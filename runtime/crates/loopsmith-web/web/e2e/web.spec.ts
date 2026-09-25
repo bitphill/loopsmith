@@ -58,6 +58,13 @@ test("the third door builds a loop somewhere disposable and walks it through", a
 
   // Nothing was spent: a dry run never reaches a provider.
   await expect(page.getByText(/--dry-run/).first()).toBeVisible();
+
+  // And it is visible on a phone. The console and the run view live in the
+  // side rail, which is hidden below the large breakpoint — so without the
+  // narrow-screen case the door aimed squarely at first-time visitors shows
+  // them a form and nothing else.
+  await page.setViewportSize({ width: 390, height: 780 });
+  await expect(progress).toBeVisible();
 });
 
 test("an experienced smith is not detained by the tour, but can still open it", async ({ page }) => {

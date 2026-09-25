@@ -12,11 +12,17 @@
  * successor table living in TypeScript, and a run cannot take a path it did
  * not take.
  *
- * **The waves** come from the plan the review rail already has — the same
- * schedule the engine derived from the graph — with each node coloured by the
- * last thing the run said about it. Which is the point of the whole panel: a
- * wave of four builders running at once is the thing loopsmith does that is
- * hardest to see in a log, because the four of them interleave.
+ * **The waves** come from the plan the review rail already has — the schedule
+ * derived from the graph *in the form*, not from the process, which reports
+ * counts and not membership. For anything built from this draft the two are
+ * the same, and the heading says which it is rather than implying the
+ * stronger claim. Each node is coloured by the last thing the run said about
+ * it, which is the point of the whole panel: a wave of four builders running
+ * at once is what loopsmith does that a log is worst at showing, because the
+ * four of them interleave.
+ *
+ * Nothing here reads a run's prose. Every field it uses was taken apart by
+ * `loopsmith_web::progress`, on the side that owns the format.
  */
 import type { PlanView, RunEvent } from "./types";
 
@@ -57,15 +63,11 @@ export function digest(events: RunEvent[]) {
   for (const e of events) {
     if (e.iteration > iteration) iteration = e.iteration;
     if (e.state) {
-      const why = e.detail.includes(":") ? e.detail.slice(e.detail.indexOf(":") + 1).trim() : null;
       // The first transition is the only one that says where the run began,
-      // and `created →` is half of it. Without this the trail opens on
-      // `validating`, which reads as though something was missed.
-      if (trail.length === 0) {
-        const from = e.detail.split("→")[0].trim();
-        if (from) trail.push({ state: from, why: null });
-      }
-      trail.push({ state: e.state, why });
+      // and without it the trail opens on `validating` and reads as though
+      // something was missed.
+      if (trail.length === 0 && e.from) trail.push({ state: e.from, why: null });
+      trail.push({ state: e.state, why: e.why });
       // A new iteration re-dispatches everything, so the previous pass's
       // verdicts are not this pass's.
       if (e.state === "running") nodes.clear();
@@ -76,11 +78,7 @@ export function digest(events: RunEvent[]) {
       else if (e.kind === "NodeFailed") nodes.set(e.node, "failed");
     }
     if (e.kind === "IterationStarted") nodes.clear();
-    // The gate's own closing line for an iteration: "… 2/4 target(s)
-    // satisfied." It is the one number that says whether the run is getting
-    // anywhere, and it is buried in a sentence.
-    const count = /(\d+)\/(\d+) target\(s\) satisfied/.exec(e.detail);
-    if (count) satisfied = `${count[1]}/${count[2]}`;
+    if (e.satisfied) satisfied = `${e.satisfied[0]}/${e.satisfied[1]}`;
     if (e.kind === "StopGateTriggered") stopped = e.detail;
   }
 
@@ -149,7 +147,7 @@ export function RunView({
           <p className="label">
             Waves
             <span className="ml-1.5 font-normal text-faint">
-              everything in one row runs together
+              everything in one row runs together, from the config in the form
             </span>
           </p>
           <div className="mt-1 space-y-1">

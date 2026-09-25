@@ -20,10 +20,16 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SectionHelp {
-    /// Which of the four bundles this section lives in, shown as its badge.
-    /// 1.0 grouped the config by what a key is *for*, so the badge says
-    /// `intent` or `safety` where 0.3 said `A` or `F`.
-    pub bundle: &'static str,
+    /// Which of the four bundles this section lives in, and `None` for the
+    /// handful of keys that sit above them.
+    ///
+    /// 1.0 grouped the config by what a key is *for*, so this says `intent`
+    /// or `safety` where 0.3 said `A` or `F`. `features` and the config's own
+    /// name and version are genuinely top level, and saying so is better than
+    /// filing them under the bundle they most resemble — the form groups its
+    /// cards by this answer, and a wrong one would put a kill switch under a
+    /// heading that does not own it.
+    pub bundle: Option<&'static str>,
     /// Dotted config path this section edits, which is also what the
     /// validator names in an issue.
     pub key: &'static str,
@@ -61,7 +67,7 @@ pub struct FieldHelp {
 /// palette's section list navigable by someone reading the file.
 pub const SECTIONS: &[SectionHelp] = &[
     SectionHelp {
-        bundle: "intent",
+        bundle: Some("intent"),
         key: "intent.background",
         title: "Information",
         summary: "Facts every step of the loop should know, written once.",
@@ -75,7 +81,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "intent",
+        bundle: Some("intent"),
         key: "intent.prerequisites",
         title: "Pre-execution work",
         summary: "What you must do by hand, once, before letting this run unattended.",
@@ -89,7 +95,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "intent",
+        bundle: Some("intent"),
         key: "intent.goals",
         title: "Goals",
         summary: "What you want, in plain language, one named goal at a time.",
@@ -102,7 +108,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: true,
     },
     SectionHelp {
-        bundle: "intent",
+        bundle: Some("intent"),
         key: "intent.success",
         title: "Success scenarios",
         summary: "What counts as good enough — all of it, or a proportion.",
@@ -116,7 +122,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "execution",
+        bundle: Some("execution"),
         key: "execution.graph",
         title: "Nodes and dependencies",
         summary: "The units of work, who they are, and what genuinely feeds what.",
@@ -131,7 +137,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "execution",
+        bundle: Some("execution"),
         key: "execution.providers",
         title: "Providers",
         summary: "Which models do the work, and which fallback runs when one is unreachable.",
@@ -145,7 +151,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "execution",
+        bundle: Some("execution"),
         key: "execution.phases",
         title: "Execution guidelines",
         summary: "Named phases, each with a standing instruction and a place in the order.",
@@ -158,7 +164,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "execution",
+        bundle: Some("execution"),
         key: "execution.default_skills",
         title: "Sub-agents",
         summary: "Specialist agents installed before the loop starts.",
@@ -171,7 +177,22 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "execution",
+        bundle: Some("execution"),
+        key: "execution.skills",
+        title: "How sub-agents are acquired",
+        summary: "Where a skill the loop needs may come from, and what it takes to trust one.",
+        detail: "A node can want a specialist the machine does not have. This decides what \
+                 happens next: look for one already installed, take one from the marketplace, \
+                 or have one generated. Anything acquired at run time lands in a quarantine \
+                 directory and stays there until a person promotes it, because a loop that can \
+                 grant itself new abilities unsupervised is a loop with no ceiling on what it \
+                 can do.",
+        failure: "Marketplace acquisition with no star floor and no human promotion is an \
+                  unreviewed dependency running with your credentials.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: Some("execution"),
         key: "execution.memory",
         title: "Carried context",
         summary: "How much of the previous iterations each prompt drags along.",
@@ -183,7 +204,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "execution",
+        bundle: Some("execution"),
         key: "execution.triggers",
         title: "Schedules",
         summary: "What makes this loop start. Leave it empty to run it only by hand.",
@@ -197,7 +218,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.checks",
         title: "Validations",
         summary: "How each goal is checked. This is the part that makes a loop trustworthy.",
@@ -212,7 +233,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: true,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.gates.stop",
         title: "Stop gates",
         summary: "Every way this loop is allowed to end. Set these before the first run.",
@@ -226,7 +247,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.gates.entry",
         title: "Entry gates",
         summary: "What must already be true before the first node is dispatched.",
@@ -240,7 +261,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.gates.approval",
         title: "Approval gates",
         summary: "What has to be signed off before the loop is allowed to start working.",
@@ -253,7 +274,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.gates.rollback",
         title: "Rollback gates",
         summary: "What, if it becomes true mid-run, means the last iteration should be undone.",
@@ -266,7 +287,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.limits",
         title: "Constraints",
         summary: "What the loop may not do, and what it must stop and ask about.",
@@ -279,7 +300,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.recovery",
         title: "Recovery",
         summary: "What the loop does about each kind of failure, decided before it happens.",
@@ -293,7 +314,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.alerts",
         title: "Alerts",
         summary: "Numbers worth being told about while the run is still going.",
@@ -305,7 +326,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "safety",
+        bundle: Some("safety"),
         key: "safety.protected",
         title: "Protected components",
         summary: "What self-evolution may never touch, whatever it proposes.",
@@ -318,7 +339,7 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        bundle: "evolution",
+        bundle: Some("evolution"),
         key: "evolution",
         title: "Self-evolution",
         summary: "Whether the loop may propose changes to itself, and what they are measured \
@@ -330,6 +351,22 @@ pub const SECTIONS: &[SectionHelp] = &[
                  loopsmith will not apply one on its own.",
         failure: "An evolution with no baseline has nothing to be better than, so every \
                   proposal looks like an improvement.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: None,
+        key: "features",
+        title: "What this loop may do at all",
+        summary: "Five switches, above everything else in the file.",
+        detail: "These are not settings so much as capabilities. Self-evolution and marketplace \
+                 skills are off until someone turns them on, because they are the two that \
+                 widen what the loop can become. External side effects is the one that decides \
+                 whether a node may reach outside the loop's own directory. Parallel execution \
+                 is on, and turning it off is the first thing to try when a run behaves \
+                 differently under load. Human approval is on, and turning it off is refused \
+                 outright in a production environment.",
+        failure: "Turning off human approval makes every checkpoint in the config decorative, \
+                  including the ones guarding something irreversible.",
         required: false,
     },
 ];
@@ -529,8 +566,18 @@ mod tests {
         // The key is what the form edits *and* what the validator names in an
         // issue, so the rail's "jump to this field" has something to aim at.
         for s in SECTIONS {
+            let Some(bundle) = s.bundle else {
+                // No bundle means genuinely top level, which is only true of a
+                // key with nothing above it.
+                assert!(
+                    !s.key.contains('.'),
+                    "{} has a bundle in its path but claims none",
+                    s.key
+                );
+                continue;
+            };
             assert!(
-                ["intent", "execution", "safety", "evolution"].contains(&s.bundle),
+                ["intent", "execution", "safety", "evolution"].contains(&bundle),
                 "{} is in no bundle",
                 s.key
             );
@@ -538,10 +585,10 @@ mod tests {
             // section, so its key is the bundle itself rather than a path
             // inside it.
             assert!(
-                s.key == s.bundle || s.key.starts_with(&format!("{}.", s.bundle)),
+                s.key == bundle || s.key.starts_with(&format!("{bundle}.")),
                 "{} is not inside {}",
                 s.key,
-                s.bundle
+                bundle
             );
         }
     }

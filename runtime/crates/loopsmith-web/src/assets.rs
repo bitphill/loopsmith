@@ -29,6 +29,22 @@ const APP_CSS: &str = include_str!("dist/app.css");
 /// GitHub and wrong for a dark UI, where it renders as a white tile.
 const MARK_PNG: &[u8] = include_bytes!("../templates/loopsmith-mark.png");
 
+/// What a crawler should do with this server, which is nothing.
+///
+/// The listener binds `127.0.0.1` and there is no public mode, so in ordinary
+/// use nothing ever asks for this. It is here for the case that is not
+/// ordinary: somebody puts a tunnel or a reverse proxy in front of the port.
+/// The shell's canonical URL already points at the project site, and this
+/// says the same thing to a reader that ignores canonicals — do not index a
+/// control panel for somebody's machine.
+const ROBOTS_TXT: &str = "\
+# `loopsmith web` is a control panel for one machine, reached over loopback.
+# Nothing here is meant to be indexed; the public pages are at
+# https://bitphill.github.io/loopsmith/.
+User-agent: *
+Disallow: /
+";
+
 pub fn router() -> Router {
     Router::new()
         .route("/", get(index))
@@ -39,6 +55,7 @@ pub fn router() -> Router {
         // directly rather than left to the SPA fallback — which would hand back
         // an HTML document with an image content type.
         .route("/favicon.png", get(mark))
+        .route("/robots.txt", get(robots))
         // Anything else is the single-page app's own route. Serving the shell
         // means a reload on a deep link works instead of 404ing.
         .fallback(get(index))
@@ -79,6 +96,15 @@ async fn css() -> Response {
             (header::CACHE_CONTROL, "no-store"),
         ],
         APP_CSS,
+    )
+        .into_response()
+}
+
+async fn robots() -> Response {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        ROBOTS_TXT,
     )
         .into_response()
 }
@@ -127,6 +153,19 @@ mod tests {
     fn the_shell_loads_the_two_assets_this_module_serves() {
         assert!(INDEX_HTML.contains("/app.js"), "shell must load the bundle");
         assert!(INDEX_HTML.contains("/app.css"), "shell must load the styles");
+    }
+
+    #[test]
+    fn the_local_server_asks_not_to_be_indexed() {
+        // Without this the SPA fallback answers `/robots.txt` with the HTML
+        // shell, which is not a refusal — it is an unparseable file, and a
+        // crawler that cannot read one indexes everything.
+        assert!(ROBOTS_TXT.contains("User-agent: *"));
+        assert!(ROBOTS_TXT.contains("Disallow: /"));
+        assert!(
+            !ROBOTS_TXT.contains("Allow:"),
+            "an Allow rule here would undo the point of the file"
+        );
     }
 
     #[test]

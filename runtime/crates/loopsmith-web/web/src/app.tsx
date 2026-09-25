@@ -27,9 +27,12 @@ import { LeftRail, ReviewRail } from "./rails";
 import { RunConsole, type ActionId } from "./console";
 import { Location, Secrets, Preflight } from "./setup";
 import { Information, PreExecution, Goals, Validations, Success, StopGatesSection, type SectionProps } from "./sections-core";
-import { Schedules, ConstraintsSection, Guidelines, Skills, Graph, Providers, Context } from "./sections-run";
 import {
-  EntryGates, ApprovalGates, RollbackGates, RecoverySection, Alerts, Protected, EvolutionSection,
+  Schedules, ConstraintsSection, Guidelines, Skills, SkillPolicySection, Graph, Providers, Context,
+} from "./sections-run";
+import {
+  EntryGates, ApprovalGates, RollbackGates, RecoverySection, Alerts, Protected,
+  EvolutionSection, FeatureFlags,
 } from "./sections-guard";
 import { Tour } from "./tour";
 import { SmithGate, type Smith } from "./smith-gate";
@@ -86,7 +89,7 @@ function loopDir(parent: string, name: string): string {
  * the limits on another.
  */
 const STEP_KEYS: Record<string, string[]> = {
-  place: ["name", "description", "version", "environment"],
+  place: ["name", "description", "version", "environment", "features"],
   power: ["execution.providers"],
   intent: ["intent.background", "intent.prerequisites", "intent.goals"],
   proof: ["safety.checks", "intent.success", "safety.gates"],
@@ -95,7 +98,7 @@ const STEP_KEYS: Record<string, string[]> = {
     "safety.limits", "safety.recovery", "safety.alerts", "execution.memory",
     "execution.skills",
   ],
-  ship: ["execution.triggers", "evolution", "safety.protected", "features"],
+  ship: ["execution.triggers", "evolution", "safety.protected"],
 };
 
 /** The step that owns a config path, by the longest prefix that matches it. */
@@ -451,7 +454,11 @@ export default function App() {
 
       // Past the gate and into the editor, so the form behind the console is
       // the loop being watched rather than an empty one.
-      localStorage.setItem("loopsmith-smith", "experienced");
+      //
+      // Not written to storage, unlike the other two doors: watching a
+      // demonstration is not an answer to "which kind of smith are you", and
+      // recording it as one would mean nobody who pressed this button is ever
+      // offered the walk-through.
       setSmith("experienced");
       setMode("expert");
       setParent(where);
@@ -591,6 +598,18 @@ export default function App() {
     }
   };
 
+  /**
+   * The latest `run`, for callbacks that outlive the render they were made in.
+   *
+   * `onFinished` is what the console's socket effect depends on, so it has to
+   * keep one identity for the life of a run — which means the `run` it closed
+   * over is the one from whichever render created it, holding that render's
+   * `format` and `created`. Reading it through a ref is what stops the
+   * demonstration's second command being built from a draft two states ago.
+   */
+  const latestRun = useRef(run);
+  latestRun.current = run;
+
   const onFinished = useCallback((s: JobSummary) => {
     setLastJob(s);
     // The demonstration is two commands. The second one is the point.
@@ -599,7 +618,7 @@ export default function App() {
     // effect depends on, and a new identity for it tears the socket down and
     // replays the run from the top, mid-run.
     if (demo.current && s.kind === "create" && s.state === "succeeded") {
-      void run("dry_run", { dir: demo.current });
+      void latestRun.current("dry_run", { dir: demo.current });
       return;
     }
     if (demo.current && s.kind === "dry-run") {
@@ -687,7 +706,7 @@ export default function App() {
       run: () => goStep(s.id),
     })),
     ...help.sections.map((s) => ({
-      id: `sec-${s.key}`, group: "Sections", label: s.title, hint: s.bundle,
+      id: `sec-${s.key}`, group: "Sections", label: s.title, hint: s.bundle ?? undefined,
       run: () => jump(s.key),
     })),
     ...(Object.keys(ACTION_LABEL) as ActionId[]).map((a) => ({
@@ -751,7 +770,13 @@ export default function App() {
                 />
               </div>
             ) : (
-            <div className="grid min-h-0 grid-rows-[auto_1fr_auto]">
+            /* A live run takes the whole width on a narrow screen. Below the
+               large breakpoint there is only one column, and the console —
+               the one thing on screen that is actually moving — lives in the
+               rail, so without this a run in a narrow window is invisible.
+               That matters most for the demonstration door, whose entire
+               purpose is to be watched. */
+            <div className={`min-h-0 grid-rows-[auto_1fr_auto] ${job ? "hidden lg:grid" : "grid"}`}>
               <div className="flex flex-wrap items-center gap-3 border-b bg-surface px-4 py-2">
                 <StepBar steps={STEPS} active={step} onPick={goStep} />
                 <div className="ml-auto flex items-center gap-2">
@@ -807,7 +832,7 @@ export default function App() {
             )}
 
             {railOpen && (
-              <div className="hidden min-h-0 lg:block">
+              <div className={`min-h-0 ${job ? "block" : "hidden lg:block"}`}>
                 {job ? (
                   <div className="h-full border-l bg-surface">
                     <RunConsole
@@ -945,15 +970,20 @@ function Header({
 /* -------------------------------------------------------------- step views */
 
 /**
- * One card on a step, with the bundle it belongs to.
+ * One card on a step, named by the config path it edits.
  *
  * A step is a stage of the work — where it lives, what powers it, what you
  * want — and the bundles are how the config itself is organised. Most steps
- * span two of them, so the card carries its bundle and [`Bundled`] draws the
- * line. `null` is for the cards that are not config at all: the folder
- * picker, the secrets table, the preflight report.
+ * span two of them, so [`Bundled`] groups the cards under the bundle each one
+ * belongs to.
+ *
+ * The path is what it carries, not the bundle. Which bundle a section is in
+ * is `help.rs`'s to say — it is already served, and the card itself looks it
+ * up by the same key — so a table of it here would be a second answer to a
+ * question that has one. `null` is for the cards that are not config at all:
+ * the folder picker, the secrets table, the preflight report.
  */
-type Card = { bundle: string | null; node: React.ReactNode };
+type Card = { path: string | null; node: React.ReactNode };
 
 /** What each bundle is for, in the six words that fit above a group of cards. */
 const BUNDLE_BLURB: Record<string, string> = {
@@ -971,13 +1001,21 @@ const BUNDLE_BLURB: Record<string, string> = {
  * the config they write, with one line saying what that part is for. The same
  * word used to sit on every card as a badge, which said where a card lived
  * without ever saying what the place was.
+ *
+ * The grouping is the server's answer, looked up by the path each card edits.
+ * A card whose path the server has no note for is drawn ungrouped rather than
+ * invented a bundle for — that is a missing help entry, and quietly filing it
+ * under a guess is how it stays missing.
  */
-function Bundled({ cards }: { cards: Card[] }) {
+function Bundled({ cards, help }: { cards: Card[]; help: Map<string, SectionHelp> }) {
+  const bundleOf = (path: string | null) => (path && help.get(path)?.bundle) || null;
+
   const groups: { bundle: string | null; nodes: React.ReactNode[] }[] = [];
   for (const c of cards) {
+    const bundle = bundleOf(c.path);
     const last = groups[groups.length - 1];
-    if (last && last.bundle === c.bundle) last.nodes.push(c.node);
-    else groups.push({ bundle: c.bundle, nodes: [c.node] });
+    if (last && last.bundle === bundle) last.nodes.push(c.node);
+    else groups.push({ bundle, nodes: [c.node] });
   }
 
   let index = 0;
@@ -1014,8 +1052,8 @@ function StepView(props: {
 
   switch (step) {
     case "place":
-      return <Bundled cards={[
-        { bundle: null, node: (
+      return <Bundled help={sp.help} cards={[
+        { path: null, node: (
           <Location
             parent={props.parent} onParent={props.setParent} loopPath={props.loopPath}
             initGit={props.initGit} onInitGit={props.setInitGit}
@@ -1024,22 +1062,23 @@ function StepView(props: {
             permissions={props.review?.permissions ?? []}
           />
         ) },
+        { path: "features", node: <FeatureFlags {...sp} /> },
       ]} />;
 
     case "power":
-      return <Bundled cards={[
-        { bundle: "execution", node: (
+      return <Bundled help={sp.help} cards={[
+        { path: "execution.providers", node: (
           <Providers {...sp} detection={props.detection} onTest={props.onTest}
             testing={props.testing} results={props.testResults} />
         ) },
-        { bundle: null, node: <Secrets detection={props.detection} needed={props.neededKeys} /> },
+        { path: null, node: <Secrets detection={props.detection} needed={props.neededKeys} /> },
       ]} />;
 
     case "intent":
-      return <Bundled cards={[
-        { bundle: "intent", node: <Goals {...sp} /> },
-        { bundle: "intent", node: <Information {...sp} /> },
-        { bundle: "intent", node: <PreExecution {...sp} /> },
+      return <Bundled help={sp.help} cards={[
+        { path: "intent.goals", node: <Goals {...sp} /> },
+        { path: "intent.background", node: <Information {...sp} /> },
+        { path: "intent.prerequisites", node: <PreExecution {...sp} /> },
       ]} />;
 
     // Proof is the step that is deliberately two bundles: what counts as done
@@ -1047,32 +1086,33 @@ function StepView(props: {
     // them on one step is what stops someone writing a success scenario with
     // nothing checking it.
     case "proof":
-      return <Bundled cards={[
-        { bundle: "safety", node: <Validations {...sp} /> },
-        { bundle: "intent", node: <Success {...sp} /> },
-        { bundle: "safety", node: <StopGatesSection {...sp} /> },
-        { bundle: "safety", node: <EntryGates {...sp} /> },
-        { bundle: "safety", node: <ApprovalGates {...sp} /> },
-        { bundle: "safety", node: <RollbackGates {...sp} /> },
+      return <Bundled help={sp.help} cards={[
+        { path: "safety.checks", node: <Validations {...sp} /> },
+        { path: "intent.success", node: <Success {...sp} /> },
+        { path: "safety.gates.stop", node: <StopGatesSection {...sp} /> },
+        { path: "safety.gates.entry", node: <EntryGates {...sp} /> },
+        { path: "safety.gates.approval", node: <ApprovalGates {...sp} /> },
+        { path: "safety.gates.rollback", node: <RollbackGates {...sp} /> },
       ]} />;
 
     case "work":
-      return <Bundled cards={[
-        { bundle: "execution", node: <Graph {...sp} /> },
-        { bundle: "execution", node: <Guidelines {...sp} /> },
-        { bundle: "execution", node: <Skills {...sp} detection={props.detection} /> },
-        { bundle: "execution", node: <Context {...sp} /> },
-        { bundle: "safety", node: <ConstraintsSection {...sp} /> },
-        { bundle: "safety", node: <RecoverySection {...sp} /> },
-        { bundle: "safety", node: <Alerts {...sp} /> },
+      return <Bundled help={sp.help} cards={[
+        { path: "execution.graph", node: <Graph {...sp} /> },
+        { path: "execution.phases", node: <Guidelines {...sp} /> },
+        { path: "execution.default_skills", node: <Skills {...sp} detection={props.detection} /> },
+        { path: "execution.skills", node: <SkillPolicySection {...sp} /> },
+        { path: "execution.memory", node: <Context {...sp} /> },
+        { path: "safety.limits", node: <ConstraintsSection {...sp} /> },
+        { path: "safety.recovery", node: <RecoverySection {...sp} /> },
+        { path: "safety.alerts", node: <Alerts {...sp} /> },
       ]} />;
 
     default:
-      return <Bundled cards={[
-        { bundle: "execution", node: <Schedules {...sp} /> },
-        { bundle: "evolution", node: <EvolutionSection {...sp} /> },
-        { bundle: "safety", node: <Protected {...sp} /> },
-        { bundle: null, node: (
+      return <Bundled help={sp.help} cards={[
+        { path: "execution.triggers", node: <Schedules {...sp} /> },
+        { path: "evolution", node: <EvolutionSection {...sp} /> },
+        { path: "safety.protected", node: <Protected {...sp} /> },
+        { path: null, node: (
           <Preflight detection={props.detection} scanning={props.scanning} onRescan={props.onRescan} />
         ) },
       ]} />;

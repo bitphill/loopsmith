@@ -12,7 +12,14 @@
     />
     <meta name="author" content="loopsmith" />
 
-    <link rel="canonical" href="https://bitphill.github.io/loopsmith/" />
+    <!--
+      `__SITE_URL__` is substituted by tools/build-site.sh. It is one string in
+      one place because switching to a custom domain otherwise means finding
+      every absolute URL across three files and the sitemap, and the one that
+      gets missed is the canonical — which then points every crawler at the
+      address the site just moved off.
+    -->
+    <link rel="canonical" href="__SITE_URL__/" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="loopsmith" />
@@ -21,8 +28,8 @@
       property="og:description"
       content="Describe a job once. loopsmith runs it until a deterministic check says it is done — and the check can revoke, so a goal that stops being true stops being satisfied."
     />
-    <meta property="og:url" content="https://bitphill.github.io/loopsmith/" />
-    <meta property="og:image" content="https://bitphill.github.io/loopsmith/loopsmith-logo-512.png" />
+    <meta property="og:url" content="__SITE_URL__/" />
+    <meta property="og:image" content="__SITE_URL__/loopsmith-logo-512.png" />
     <meta property="og:image:width" content="512" />
     <meta property="og:image:height" content="512" />
     <meta property="og:image:alt" content="The loopsmith mark: a hammer struck through a loop." />
@@ -33,7 +40,7 @@
       name="twitter:description"
       content="Describe a job once. loopsmith runs it until a deterministic check says it is done."
     />
-    <meta name="twitter:image" content="https://bitphill.github.io/loopsmith/loopsmith-logo-512.png" />
+    <meta name="twitter:image" content="__SITE_URL__/loopsmith-logo-512.png" />
 
     <link rel="icon" type="image/png" href="./loopsmith-logo-256.png" />
     <link rel="apple-touch-icon" href="./loopsmith-logo-256.png" />
@@ -356,7 +363,7 @@ loopsmith loop new -p ~/loops/my-loop</code></pre>
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Linux, macOS, Windows",
         "description": "Runs agent loops: a config describes goals, checks and stop gates, and a deterministic gate — never a model — decides whether a goal is satisfied, and can revoke that decision.",
-        "url": "https://bitphill.github.io/loopsmith/",
+        "url": "__SITE_URL__/",
         "downloadUrl": "https://github.com/bitphill/loopsmith/releases",
         "codeRepository": "https://github.com/bitphill/loopsmith",
         "license": "https://opensource.org/licenses/MIT",

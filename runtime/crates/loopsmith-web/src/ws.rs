@@ -93,7 +93,13 @@ pub async fn pump(mut socket: WebSocket, jobs: Jobs, id: String) {
     let _ = socket.send(Message::Close(None)).await;
 }
 
-/// Send every line as it arrives, until the job's sender is dropped.
+/// Follow a job until its sender is dropped.
+///
+/// Its own function so that the socket's closing message — the one that tells
+/// the console the run ended — is written once, on the path out, rather than
+/// once for a job that had already finished and again for one that finished
+/// while it was being watched. Getting only the second of those right is how
+/// a finished run sat there saying `running`.
 async fn follow(
     socket: &mut WebSocket,
     rx: &mut tokio::sync::broadcast::Receiver<crate::exec::JobLine>,

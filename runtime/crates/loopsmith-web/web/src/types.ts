@@ -523,8 +523,11 @@ export interface ExampleCard {
 export interface LibraryEntry { path: string; name: string; config_file: string; created_ms: number }
 
 export interface SectionHelp {
-  /** Which of the four bundles the section lives in, shown as its badge. */
-  bundle: string;
+  /**
+   * Which of the four bundles the section lives in, and `null` for the few
+   * keys that sit above them. The form groups its cards by this.
+   */
+  bundle: string | null;
   /** The dotted path it edits, which the validator also names in an issue. */
   key: string;
   title: string;
@@ -566,6 +569,12 @@ export interface RunEvent {
   detail: string;
   /** Where the run moved to, on a `StateChanged` and nowhere else. */
   state: string | null;
+  /** Where it moved from. Only the first transition says anything new. */
+  from: string | null;
+  /** The reason, where the entry gives one. */
+  why: string | null;
+  /** The gate's running score: passed, then total. */
+  satisfied: [number, number] | null;
 }
 
 export interface JobSummary {

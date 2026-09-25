@@ -38,19 +38,28 @@ export function RunConsole({
   const [summary, setSummary] = useState<JobSummary | null>(null);
   const [follow, setFollow] = useState(true);
   const box = useRef<HTMLDivElement>(null);
+  /**
+   * Which lines have already been taken.
+   *
+   * The socket replays everything it has before going live, so a reconnect
+   * delivers lines that are already on screen. Deciding that here rather than
+   * inside a `setLines` updater matters: an updater has to be pure, React
+   * invokes it twice in development to prove it, and a second `setEvents`
+   * from inside one would double every event in the run view.
+   */
+  const seen = useRef<Set<number>>(new Set());
 
   useEffect(() => {
     setLines([]);
     setEvents([]);
     setSummary(null);
+    seen.current = new Set();
     const stop = streamJob(jobId, {
-      // Keyed by seq so a reconnect cannot duplicate a line already shown.
       line: (l, event) => {
-        setLines((all) => {
-          if (all.some((x) => x.seq === l.seq)) return all;
-          if (event) setEvents((es) => [...es, event]);
-          return [...all, l];
-        });
+        if (seen.current.has(l.seq)) return;
+        seen.current.add(l.seq);
+        setLines((all) => [...all, l]);
+        if (event) setEvents((es) => [...es, event]);
       },
       state: (s) => {
         setSummary(s);

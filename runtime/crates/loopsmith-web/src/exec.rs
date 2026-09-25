@@ -624,7 +624,16 @@ mod tests {
         seen.sort_unstable();
         seen.dedup();
         assert_eq!(seen.len(), all_actions().len(), "a variant is listed twice");
-        assert_eq!(seen.len(), 16, "add the new action to `all_actions`");
+        // The arity of `Action`, not the length of the list — the list is
+        // what is being checked. Adding a variant breaks `named` above, and
+        // this is what catches the half-fix: an arm added there and no entry
+        // added to `all_actions`, which would leave the new button untested
+        // by every walk of the surface.
+        assert_eq!(
+            seen.len(),
+            16,
+            "`Action` has grown; add the new one to `all_actions`"
+        );
     }
 
     #[test]
