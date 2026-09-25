@@ -116,7 +116,12 @@ case "$MODE" in
       echo "::error file=assets/architecture.png::the diagram source changed and the PNG was not re-rendered — run ./tools/render-diagrams.sh" >&2
       stale=1
     fi
-    [ "$stale" -eq 0 ] && echo "diagrams are current"
+    # Not `[ … ] && echo`: under `set -e` a failing test as the last command
+    # before the exit would end the script on its own, which happens to give
+    # the right code and would stop giving it the moment a line is added.
+    if [ "$stale" -eq 0 ]; then
+      echo "diagrams are current"
+    fi
     exit "$stale"
     ;;
 
