@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "The facts all three installers need, in one place.",
+    "install.sh, install.ps1 and install.bat used to each carry their own copy",
+    "of the repository URL, the install directory, the build command and the",
+    "next-steps lines. Three copies of a URL is three chances to move the",
+    "repository and fix two of them — and the one nobody fixes is the Windows",
+    "script, because the person who moved it was not on Windows.",
+    "",
+    "Deliberately flat, and deliberately strings and arrays of strings only.",
+    "install.sh reads this with sed, because the machine it runs on has just",
+    "been told it needs cargo and git and is in no position to also need jq.",
+    "Nest anything here and that reader stops working."
+  ],
+
+  "binary": "loopsmith",
+  "repo_url": "https://github.com/bitphill/loopsmith.git",
+  "branch": "main",
+  "install_dir_name": ".loopsmith",
+  "bin_subdir": "bin",
+  "unix_link_dir": "/usr/local/bin",
+  "build_dir": "runtime",
+  "built_unix": "runtime/target/release/loopsmith",
+  "built_windows": "runtime/target/release/loopsmith.exe",
+  "min_rust": "1.75",
+
+  "build_args": ["build", "--release", "--bin", "loopsmith"],
+  "requires": ["cargo", "git"],
+
+  "next_steps": [
+    "loopsmith doctor                      # what this machine is, and what that stops you doing",
+    "loopsmith loop new --path <dir> --purpose \"...\"   # scaffold a loop",
+    "loopsmith --web                       # or build one in a browser"
+  ]
+}

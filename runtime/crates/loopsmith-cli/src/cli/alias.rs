@@ -465,9 +465,51 @@ mod tests {
              missing one the model has"
         );
 
+    }
+
+    /// No document still describes the lettered model.
+    ///
+    /// `A` through `J` were the 0.3 section names, and they are gone from the
+    /// model. A document that still teaches them sends a reader looking for a
+    /// key that no longer exists — and unlike a moved command, there is no
+    /// deprecation notice to catch it, because there is nothing left to run.
+    ///
+    /// "Formerly section A" is a different sentence and lives in the Rust doc
+    /// comments and the generated schema, neither of which this reads: that
+    /// one is for a 0.3 author looking for where their key went.
+    #[test]
+    fn no_document_still_describes_the_lettered_model() {
+        let root = repo_root();
+        let mut docs = Vec::new();
+        documents(&root, &mut docs);
+
+        let mut wrong: Vec<String> = Vec::new();
+        for doc in docs {
+            let rel = doc.strip_prefix(&root).unwrap_or(&doc).to_string_lossy().replace('\\', "/");
+            if KEEPS_THE_OLD_SPELLING.contains(&rel.as_ref()) {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&doc) else {
+                continue;
+            };
+            for (n, line) in text.lines().enumerate() {
+                let lettered = ["A–J", "A-J", "A–H", "A-H"]
+                    .iter()
+                    .any(|range| line.contains(range))
+                    || line.split_whitespace().collect::<Vec<_>>().windows(2).any(|w| {
+                        w[0].eq_ignore_ascii_case("section")
+                            && w[1].len() == 1
+                            && w[1].chars().all(|c| c.is_ascii_uppercase() && c <= 'J')
+                    });
+                if lettered {
+                    wrong.push(format!("{}:{}: {}", rel, n + 1, line.trim()));
+                }
+            }
+        }
         assert!(
-            !text.contains("A–J") && !text.contains("A-J"),
-            "the lettered model is gone from the code; it should be gone from the reference too"
+            wrong.is_empty(),
+            "documents still describing the lettered model:\n{}",
+            wrong.join("\n")
         );
     }
 }

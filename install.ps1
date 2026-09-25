@@ -1,14 +1,27 @@
 # loopsmith installer for Windows.
 #
-# Invoked by ..\install.bat, which exists so a user can double-click or type one
-# word rather than remembering an execution-policy incantation. Re-runnable and
-# idempotent: running it twice is how you upgrade.
+# Run it directly (`.\install.ps1`) or through install.bat, which exists so a
+# user can double-click or type one word rather than remembering an
+# execution-policy incantation. Re-runnable and idempotent: running it twice is
+# how you upgrade.
+#
+# This sits at the repository root beside install.sh, and for the same reason:
+# an installer is the first file anyone looks for, and burying it one directory
+# down makes a reader wonder whether they found the right one. Its dependency
+# half lives in installers\deps.ps1, mirroring installers/deps.sh.
 $ErrorActionPreference = 'Stop'
 
-$RepoUrl    = if ($env:LOOPSMITH_REPO_URL) { $env:LOOPSMITH_REPO_URL } else { 'https://github.com/bitphill/loopsmith.git' }
-$Branch     = if ($env:LOOPSMITH_BRANCH)   { $env:LOOPSMITH_BRANCH }   else { 'main' }
-$InstallDir = if ($env:LOOPSMITH_HOME)     { $env:LOOPSMITH_HOME }     else { Join-Path $env:USERPROFILE '.loopsmith' }
-$BinDir     = Join-Path $InstallDir 'bin'
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot  = $ScriptDir
+
+# Every fact this shares with install.sh comes from one file, so moving the
+# repository or changing the build command is one edit rather than three.
+$Manifest   = Get-Content (Join-Path $ScriptDir 'installers\manifest.json') -Raw | ConvertFrom-Json
+
+$RepoUrl    = if ($env:LOOPSMITH_REPO_URL) { $env:LOOPSMITH_REPO_URL } else { $Manifest.repo_url }
+$Branch     = if ($env:LOOPSMITH_BRANCH)   { $env:LOOPSMITH_BRANCH }   else { $Manifest.branch }
+$InstallDir = if ($env:LOOPSMITH_HOME)     { $env:LOOPSMITH_HOME }     else { Join-Path $env:USERPROFILE $Manifest.install_dir_name }
+$BinDir     = Join-Path $InstallDir $Manifest.bin_subdir
 $LogFile    = Join-Path $InstallDir 'install.log'
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
@@ -20,9 +33,7 @@ function Die        { param($m) Write-Host "[loopsmith] $m" -ForegroundColor Red
 
 Write-Log "host: windows $env:PROCESSOR_ARCHITECTURE"
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot  = Split-Path -Parent $ScriptDir
-$Deps      = Join-Path $ScriptDir 'deps.ps1'
+$Deps = Join-Path $ScriptDir 'installers\deps.ps1'
 
 if (Test-Path $Deps) {
     Write-Log 'resolving dependencies'
@@ -33,12 +44,15 @@ if (Test-Path $Deps) {
 
 $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
 if (Test-Path $cargoBin) { $env:PATH = "$cargoBin;$env:PATH" }
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Die 'cargo is not on PATH after the dependency step' }
-if (-not (Get-Command git   -ErrorAction SilentlyContinue)) { Die 'git is required' }
+foreach ($tool in $Manifest.requires) {
+    if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
+        Die "$tool is required and is not on PATH after the dependency step"
+    }
+}
 
 # A checkout beside this script wins when there is one, so `git clone && install`
 # installs the code just cloned rather than whatever main happens to be.
-if (Test-Path (Join-Path $RepoRoot 'runtime')) {
+if (Test-Path (Join-Path $RepoRoot $Manifest.build_dir)) {
     Write-Log "building from the checkout at $RepoRoot"
     $SrcDir = $RepoRoot
 } else {
@@ -49,16 +63,16 @@ if (Test-Path (Join-Path $RepoRoot 'runtime')) {
 }
 
 Write-Log 'building release binary — a few minutes on a cold cache'
-Push-Location (Join-Path $SrcDir 'runtime')
+Push-Location (Join-Path $SrcDir $Manifest.build_dir)
 try {
-    cargo build --release --bin loopsmith 2>&1 | Tee-Object -Append -FilePath $LogFile
+    & cargo @($Manifest.build_args) 2>&1 | Tee-Object -Append -FilePath $LogFile
     if ($LASTEXITCODE -ne 0) { Die "cargo build failed with exit code $LASTEXITCODE" }
 } finally {
     Pop-Location
 }
 
-$BinSrc = Join-Path $SrcDir 'runtime\target\release\loopsmith.exe'
-$BinDst = Join-Path $BinDir 'loopsmith.exe'
+$BinSrc = Join-Path $SrcDir ($Manifest.built_windows -replace '/', '\')
+$BinDst = Join-Path $BinDir ($Manifest.binary + '.exe')
 if (-not (Test-Path $BinSrc)) { Die "the build reported success but $BinSrc is not there" }
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 Copy-Item $BinSrc $BinDst -Force
@@ -76,5 +90,4 @@ if ($userPath -notlike "*$BinDir*") {
 $env:PATH = "$BinDir;$env:PATH"
 
 Write-Log 'done. next:'
-Write-Log '  loopsmith doctor          # what this machine is, and what that stops you doing'
-Write-Log '  loopsmith loop new --path %USERPROFILE%\loops\my-loop --purpose "..."'
+foreach ($step in $Manifest.next_steps) { Write-Log "  $step" }

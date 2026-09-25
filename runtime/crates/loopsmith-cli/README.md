@@ -99,7 +99,7 @@ answer:
   `--guided` runs in the terminal**, drawn as cards.
 
 The walk-through asks the sections in the order `--guided` asks them: identity,
-providers, goals, validations, stop gates, then each advanced section (A–J)
+providers, goals, checks, stop gates, then each advanced section
 behind its own opt-in card. One field per card, with that field's explanation in
 place. A repeating section — goals, validations, nodes — collects entries in a
 single card with a `+`, and stays there until you say **This part is done**. A
@@ -351,7 +351,7 @@ compile automatically as its dependencies:
 | Crate | Purpose |
 |---|---|
 | [`loopsmith-util`](https://crates.io/crates/loopsmith-util) | PATH lookup, wall clock, runtime platform detection |
-| [`loopsmith-core`](https://crates.io/crates/loopsmith-core) | The A–J config model and its validation |
+| [`loopsmith-core`](https://crates.io/crates/loopsmith-core) | The config model, its validation, and the 0.3 migration |
 | [`loopsmith-memory`](https://crates.io/crates/loopsmith-memory) | `sled`-backed episodes, goal state, ledger, checkpoints |
 | [`loopsmith-graph`](https://crates.io/crates/loopsmith-graph) | DAG scheduling, critical path, Amdahl-driven concurrency |
 | [`loopsmith-gate`](https://crates.io/crates/loopsmith-gate) | The deterministic verification gate |

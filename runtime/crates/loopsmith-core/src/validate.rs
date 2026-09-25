@@ -722,7 +722,7 @@ fn check_graph(cfg: &LoopConfig, goal_names: &BTreeSet<&str>, r: &mut Validation
         }
         for (wave, ids) in by_wave.iter().filter(|(_, ids)| ids.len() > 1) {
             r.issues.push(Issue::warn(
-                "execution.graph.nodes[].isolated",
+                "execution.graph.nodes[].isolation",
                 format!(
                     "{} builder nodes run together in wave {} without worktree isolation: {}",
                     ids.len(),

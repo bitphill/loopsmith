@@ -228,7 +228,7 @@ graph:
       role: builder
       instruction: Simplify one function. State any assumption you had to make.
       goals: [simpler]
-      isolated: true          # its own git worktree
+      isolation: { mode: worktree }   # its own git worktree
     - id: review
       role: judge
       instruction: Check the diff against the brief. Pass or fail per check, with evidence.

@@ -305,21 +305,21 @@ case ignore `run.sh` and start the loop with `loopsmith run start loop.md`.
 
 ## The six things you edit
 
-Open `loop.md`. It has lettered sections. You only touch these six — leave the
+Open `loop.md`. Each part has a heading. You only touch these six — leave the
 rest exactly as it is.
 
 ```mermaid
 flowchart LR
-    B["B · Did it by hand"] --> C["C · What I want"]
-    C --> D["D · How it's checked"]
-    D --> F["F · Money limit"]
-    F --> G["G · How often"]
-    G --> H["H · Ask me first"]
+    A["Prerequisites<br/>did it by hand"] --> B["Goals<br/>what I want"]
+    B --> C["Checks<br/>how it's judged"]
+    C --> D["Stop gates<br/>money limit"]
+    D --> E["Triggers<br/>how often"]
+    E --> F["Limits<br/>ask me first"]
 ```
 
-### B. Pre-execution — prove you've done it once
+### Prerequisites — prove you've done it once
 
-Do the task manually, once. Then change every `false` to `true`:
+Do the task by hand, once. Then change every `false` to `true`:
 
 ```markdown
 ### Run this task manually end to end at least once
@@ -327,7 +327,7 @@ Do the task manually, once. Then change every `false` to `true`:
 - evidence: Notes in my-first-run.md
 ```
 
-### C. Goals — what you actually want
+### Goals — what you actually want
 
 ```markdown
 ### primary
@@ -336,9 +336,9 @@ Do the task manually, once. Then change every `false` to `true`:
 
 Write it the way you'd brief a new hire. Specific beats short.
 
-### D. Validations — how anyone would tell it's good
+### Checks — how anyone would tell it's good
 
-This is the part that makes loopsmith worth using. Two kinds you'll ever need:
+This is the part that makes loopsmith worth using. Two kinds you'll ever need.
 
 **Does the file exist?**
 
@@ -377,30 +377,37 @@ you name — and it is never the same AI that wrote it.
 > `- target: overall`. That's the whole difference between a loop that runs and
 > one that fails on step one.
 
-### F. Stop gates — your safety net
+### Stop gates — your safety net
 
 ```markdown
-- max_cost_usd: 5.0
-- max_iterations: 8
-- max_wall_clock_seconds: 3600
+## Gates
+
+- stop:
+  - max_cost_usd: 5.0
+  - max_iterations: 8
+  - max_wall_clock_seconds: 3600
 ```
 
 Money, attempts, time. Whichever runs out first stops the loop. **Always set
 `max_cost_usd`.**
 
-### G. Schedules — how often it should run
+### Triggers — how often it should run
 
 ```markdown
 ### interval
-- seconds: 86400
+- on:
+  - seconds: 86400
 ```
 
 `3600` = hourly · `86400` = daily · `604800` = weekly.
 
-### H. Constraints — what it must ask you about first
+### Limits — what it must ask you about first
 
 ```markdown
-- human_checkpoint: ["publishing anything","sending a message","deleting data"]
+## Limits
+
+- global:
+  - human_checkpoint: ["publishing anything","sending a message","deleting data"]
 ```
 
 Anything on this list stops and waits for you. Keep publishing and sending on it
@@ -413,7 +420,7 @@ means you're ready.
 
 ## Put it on a schedule
 
-Set the interval in section **G**, then pick one:
+Set the interval under **Triggers**, then pick one:
 
 ```bash
 loopsmith run watch loop.md

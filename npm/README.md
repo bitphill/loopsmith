@@ -122,7 +122,7 @@ answer:
   `--guided` runs in the terminal**, drawn as cards.
 
 The walk-through asks the sections in the order `--guided` asks them: identity,
-providers, goals, validations, stop gates, then each advanced section (A–J)
+providers, goals, checks, stop gates, then each advanced section
 behind its own opt-in card. One field per card, with that field's explanation in
 place. A repeating section — goals, validations, nodes — collects entries in a
 single card with a `+`, and stays there until you say **This part is done**. A

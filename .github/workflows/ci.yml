@@ -160,6 +160,72 @@ jobs:
           [ "$code" -eq 2 ] || { echo "::error::the resume launcher exited $code, expected 2"; exit 1; }
           echo "both launchers present; resume exited 2 as designed"
 
+      # The installer, on the OS it is for. `install.sh` and `install.ps1` are
+      # the first thing most people run and the last thing anyone tests: they
+      # are not built by cargo, so nothing else in this workflow touches them,
+      # and a typo in either is invisible until someone installs.
+      #
+      # Both read `installers/manifest.json`, so this also proves the two
+      # readers — sed on POSIX, ConvertFrom-Json on Windows — agree about what
+      # is in it. The cargo build inside is a no-op here: the release binary is
+      # already built above and the target directory is shared.
+      - name: The installer for this OS installs a working binary
+        working-directory: .
+        shell: bash
+        env:
+          LOOPSMITH_HOME: ${{ runner.temp }}/ls-home
+          LOOPSMITH_BIN_DIR: ${{ runner.temp }}/ls-bin
+        run: |
+          mkdir -p "$LOOPSMITH_BIN_DIR"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            cmd //c install.bat
+            installed="$LOOPSMITH_HOME/bin/loopsmith.exe"
+          else
+            ./install.sh
+            installed="$LOOPSMITH_HOME/bin/loopsmith"
+          fi
+          test -x "$installed" || { echo "::error::$installed is not there"; exit 1; }
+          # Not `--version`: a binary that prints its version has linked, but
+          # has not necessarily been installed with everything it needs.
+          "$installed" doctor >/dev/null
+          echo "installed and ran: $("$installed" --version)"
+
+          # Re-running is how you upgrade, so it has to be safe to do twice.
+          if [ "${RUNNER_OS}" = "Windows" ]; then cmd //c install.bat; else ./install.sh; fi
+          test -x "$installed"
+          echo "second run left a working install"
+
+  # Linux on ARM. The matrix above is three x86 runners, so every claim about
+  # aarch64 — that the build works, that the installer's detection is right,
+  # that nothing depends on x86 tooling — has been a claim with no evidence.
+  # This is the cheapest way to make it one with evidence.
+  arm:
+    name: linux on arm
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version && cargo --version && uname -m
+
+      - name: Build and test
+        run: cargo test --workspace
+
+      - name: The installer works here too
+        working-directory: .
+        env:
+          LOOPSMITH_HOME: ${{ runner.temp }}/ls-home
+          LOOPSMITH_BIN_DIR: ${{ runner.temp }}/ls-bin
+        run: |
+          mkdir -p "$LOOPSMITH_BIN_DIR"
+          ./install.sh
+          "$LOOPSMITH_HOME/bin/loopsmith" doctor >/dev/null
+          echo "aarch64: $("$LOOPSMITH_HOME/bin/loopsmith" --version)"
+
   # The web UI is compiled into the binary with `include_str!` from a committed
   # `src/dist/`. That is what makes `loopsmith --web` work with no Node on
   # the machine, and it is also a trap: a frontend change that is not rebuilt
@@ -200,6 +266,31 @@ jobs:
             exit 1
           fi
           echo "dist is current"
+
+  # README-FOR-DUMMIES.md is named for the person it is for, and that promise is
+  # the kind a document loses one clause at a time. A grade level is a crude
+  # instrument, but the failure it catches is the one this document actually
+  # has: sentences that grew until nobody could follow them.
+  #
+  # Nothing here needs a toolchain, so it is its own job and finishes in
+  # seconds rather than waiting behind a build.
+  docs:
+    name: the plain-English README is still plain English
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Flesch-Kincaid grade 6 or below
+        run: ./tools/check-readability.sh
+
+      # The worst sentences, whether or not the ceiling held. On a failure this
+      # is the fix list; on a pass it is what the next edit should avoid.
+      - name: The longest sentences in it
+        if: always()
+        run: ./tools/check-readability.sh --report README-FOR-DUMMIES.md
 
   # The landing page at the root of gh-pages. It is the first thing anyone sees
   # and the only page of this project a search engine has ever indexed, so the

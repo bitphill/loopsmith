@@ -959,7 +959,7 @@ printed for you to run.
 | Not spending forever | Token, cost, and wall-clock ceilings, all evaluated every iteration |
 | Not spinning | `no_progress_iterations` halts when verdicts stop changing |
 | Knowing what happened | Append-only ledger, including every stop-gate trigger |
-| Parallel writers colliding | `isolated: true` puts the node in its own git worktree |
+| Parallel writers colliding | `isolation: { mode: worktree }` puts the node in its own git worktree |
 | Leftover state | `loopsmith run prune` removes the worktrees |
 
 Worktrees are reused across iterations rather than recreated, so a node's

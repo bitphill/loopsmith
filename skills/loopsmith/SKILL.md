@@ -15,7 +15,7 @@ For the concepts behind any of this, see the `loopsmith-reference` skill.
 
 ## Build the config — three front ends
 
-Same A–J config, three ways in. All three converge on the same validator, and
+Same config, three ways in. All three converge on the same validator, and
 none can do anything `loopsmith --help` does not list.
 
 ```bash
@@ -55,13 +55,15 @@ loopsmith loop new --path ./loops/<purpose> --purpose "one line on what it is fo
 That writes the config (`loop.yaml`, or Markdown), `run.sh` / `resume.sh` and
 their `.cmd` twins, an MCP definition, a permission template, and the `state/`,
 `out/`, `proposals/`, `logs/`, `generated-skills/` directories. `--git` also
-inits a repository with one commit, which is what lets `isolated: true` nodes
+inits a repository with one commit, which is what lets `isolation: { mode: worktree }` nodes
 have a worktree each — without it they share one directory and say so.
 
-Then edit the config. The sections are **A–J** (information, pre-execution,
-goals, validations, success, stop gates, schedules, constraints, execution
-guidelines, default skills); `LOOP-TEMPLATE.md` documents each one with an
-example and the reason it exists. `loopsmith loop convert <config>` translates the
+Then edit the config. It has eight top-level keys: `name`, `version`,
+`description`, `environment`, `features`, and the four bundles — `intent` (what
+the loop is for), `execution` (how the work gets done), `safety` (what must not
+happen, and when to stop) and `evolution` (how it may change itself).
+`LOOP-TEMPLATE.md` documents every section with an example and the reason it
+exists. `loopsmith loop convert <config>` translates the
 config between YAML and Markdown — the same model either way.
 
 ## The order that works
