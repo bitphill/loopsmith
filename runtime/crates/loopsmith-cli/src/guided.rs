@@ -21,17 +21,37 @@
 
 use loopsmith_core::LoopConfig;
 use loopsmith_wizard::preferences::{self, Level};
-use loopsmith_wizard::{Choice, Io, Outcome};
+use loopsmith_wizard::{Choice, Grammar, Io, Outcome};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+/// What the `guided` flags asked for, before any of it is acted on.
+pub struct Args {
+    /// Parent directory for the new loop. `None` asks for it.
+    pub path: Option<PathBuf>,
+    /// An existing config to revise, written back over the same file.
+    pub edit: Option<PathBuf>,
+    pub novice: bool,
+    pub expert: bool,
+    /// Forget the remembered level so the question comes back.
+    pub ask: bool,
+}
+
 /// Entry point from `cmd::dispatch`.
-pub fn execute(
-    path: Option<PathBuf>,
-    edit: Option<PathBuf>,
-    level: Option<Level>,
-) -> Result<ExitCode, String> {
+pub fn execute(args: Args) -> Result<ExitCode, String> {
+    let Args { path, edit, novice, expert, ask } = args;
     let mut io = Io::new();
+
+    // A flag is this run's business; `--ask` is the one that changes what is
+    // remembered, by throwing the answer away so the question comes back.
+    if ask {
+        preferences::forget();
+    }
+    let level = match (novice, expert) {
+        (true, _) => Some(Level::Novice),
+        (_, true) => Some(Level::Expert),
+        _ => None,
+    };
 
     // Starting point: an existing config to revise, or nothing.
     let start = match &edit {
@@ -44,16 +64,16 @@ pub fn execute(
 
     // An edit overwrites the file it read, so the grammar is already settled
     // by that file's own extension.
-    let grammar = edit.as_deref().map(loopsmith_core::is_markdown);
+    let grammar = edit.as_deref().map(Grammar::of);
 
-    let level = level_for(&mut io, level)?;
+    let level = level_for(&mut io, level);
     let outcome = match level {
         Level::Novice => loopsmith_wizard::interview(&mut io, start, grammar)?,
         Level::Expert => expert::run(&mut io, start, grammar)?,
     };
 
-    let (cfg, text, markdown) = match outcome {
-        Outcome::Ready { cfg, text, markdown } => (cfg, text, markdown),
+    let (cfg, text, grammar) = match outcome {
+        Outcome::Ready { cfg, text, grammar } => (cfg, text, grammar),
         Outcome::Quit { saved } => {
             if let Some(p) = saved {
                 println!(
@@ -71,7 +91,7 @@ pub fn execute(
 
     match edit {
         Some(file) => write_back(&mut io, &file, &text),
-        None => create_loop(&mut io, &cfg, path, text, markdown),
+        None => create_loop(&mut io, &cfg, path, text, grammar),
     }
 }
 
@@ -79,9 +99,9 @@ pub fn execute(
 ///
 /// The answer is only remembered when it was asked for. A `--expert` on one
 /// run is that run's business; picking expert when asked is a preference.
-fn level_for(io: &mut Io, flag: Option<Level>) -> Result<Level, String> {
+fn level_for(io: &mut Io, flag: Option<Level>) -> Level {
     if let Some(level) = flag {
-        return Ok(level);
+        return level;
     }
     if let Some(level) = preferences::level() {
         io.note(&format!(
@@ -89,10 +109,10 @@ fn level_for(io: &mut Io, flag: Option<Level>) -> Result<Level, String> {
              overrides it for this run; `--ask` forgets it.",
             level.as_str()
         ));
-        return Ok(level);
+        return level;
     }
     if !io.is_interactive() {
-        return Ok(Level::Novice);
+        return Level::Novice;
     }
     let choices = vec![
         Choice::new("novice", "Walk me through it")
@@ -110,7 +130,7 @@ fn level_for(io: &mut Io, flag: Option<Level>) -> Result<Level, String> {
     };
     preferences::remember(level);
     io.note("Remembered. `--novice` or `--expert` overrides it for one run, `--ask` forgets it.");
-    Ok(level)
+    level
 }
 
 /// A `:quit` at one of the final prompts, after the config is assembled but
@@ -143,7 +163,7 @@ fn create_loop(
     cfg: &LoopConfig,
     path_arg: Option<PathBuf>,
     text: String,
-    markdown: bool,
+    grammar: Grammar,
 ) -> Result<ExitCode, String> {
     io.heading("Where to create it");
     // A parent directory; the loop nests under its own name, so several loops
@@ -200,7 +220,10 @@ fn create_loop(
         name: cfg.name.clone(),
         purpose,
         force,
-        config: Some(crate::scaffold::ProvidedConfig { text, markdown }),
+        config: Some(crate::scaffold::ProvidedConfig {
+            text,
+            markdown: grammar.is_markdown(),
+        }),
         git,
     })
     .map_err(|e| e.to_string())?;
@@ -279,13 +302,13 @@ mod expert {
     pub fn run(
         io: &mut Io,
         start: Option<LoopConfig>,
-        grammar: Option<bool>,
+        grammar: Option<Grammar>,
     ) -> Result<Outcome, String> {
         io.heading("Expert");
-        let markdown = match grammar {
+        let grammar = match grammar {
             Some(known) => known,
-            None => match super::ask_grammar(io)? {
-                Some(m) => m,
+            None => match loopsmith_wizard::ask_grammar(io, false) {
+                Some(g) => g,
                 None => return Ok(Outcome::Declined),
             },
         };
@@ -312,8 +335,8 @@ mod expert {
             }
         };
 
-        let mut text = loopsmith_wizard::render(&cfg, markdown)?;
-        let file = draft_path(markdown);
+        let mut text = loopsmith_wizard::render(&cfg, grammar)?;
+        let file = draft_path(grammar);
         loop {
             std::fs::write(&file, &text)
                 .map_err(|e| format!("could not write {}: {e}", file.display()))?;
@@ -330,7 +353,7 @@ mod expert {
                     return Ok(Outcome::Ready {
                         cfg: Box::new(cfg),
                         text,
-                        markdown,
+                        grammar,
                     });
                 }
                 Err(e) => {
@@ -363,20 +386,28 @@ mod expert {
         if errors == 0 {
             return io.ask_bool("Write it?", &[], true).unwrap_or(false);
         }
-        !io.ask_bool(
-            &format!("{errors} error(s). Open it again?"),
-            &["Answering no writes it as it stands."],
-            true,
-        )
-        .unwrap_or(true)
+        // A `:quit` or an end of input here means "stop", which can only mean
+        // writing it as it stands — the alternative is opening the editor
+        // again on a stream that has nothing left to say, forever.
+        let again = io
+            .ask_bool(
+                &format!("{errors} error(s). Open it again?"),
+                &["Answering no writes it as it stands."],
+                true,
+            )
+            .unwrap_or(false);
+        !again
     }
 
     /// Where the draft lives while it is being edited. Not in the loop
     /// directory: that does not exist yet on a fresh `guided`, and a failed
     /// edit should leave nothing behind in the one place a person looks.
-    fn draft_path(markdown: bool) -> PathBuf {
-        let ext = if markdown { "md" } else { "yaml" };
-        std::env::temp_dir().join(format!("loopsmith-draft-{}.{ext}", std::process::id()))
+    fn draft_path(grammar: Grammar) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "loopsmith-draft-{}.{}",
+            std::process::id(),
+            grammar.extension()
+        ))
     }
 
     /// `$VISUAL`, then `$EDITOR`, then ask them to do it themselves.
@@ -412,15 +443,3 @@ mod expert {
     }
 }
 
-/// Markdown or YAML, asked before the editor opens so the draft arrives in the
-/// grammar it will be written in.
-fn ask_grammar(io: &mut Io) -> Result<Option<bool>, String> {
-    let choices = vec![
-        Choice::new("md", "Markdown — reads like a brief, easiest to hand-edit later"),
-        Choice::new("yaml", "YAML — terser, closer to the schema"),
-    ];
-    match io.ask_select("Which grammar for the config file?", &[], &choices, Some(0)) {
-        Ok(pick) => Ok(Some(pick == "md")),
-        Err(_) => Ok(None),
-    }
-}

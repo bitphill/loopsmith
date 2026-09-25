@@ -15,6 +15,12 @@
 //! defaults that a first-time author has no basis to change, and each is
 //! better met in the file, with the comments around it, than as eight more
 //! questions in a row.
+//!
+//! The builders below carry no doc comments of their own. Each is one
+//! section's questions, and every question already carries its own title,
+//! hint and help — prose written for the person answering it. A doc comment
+//! above `goals()` could only say "the questions about goals", and a second
+//! place to describe a section is a second place for it to go stale.
 
 use super::{
     Choice, Field, Gate, Input, List, Options, Providers, Section, Separator, Spec, Step, Summary,

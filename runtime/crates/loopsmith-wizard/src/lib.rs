@@ -38,6 +38,44 @@ use loopsmith_core::LoopConfig;
 use spec::Spec;
 use std::path::PathBuf;
 
+/// Which of the two grammars a config is written in.
+///
+/// A `bool` did this job until 1.0, and every signature carrying it had to
+/// say in prose which way round it was. Both grammars are the same model —
+/// the loader reads either — so the choice is a genuine two-valued thing
+/// rather than a flag with an obvious default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grammar {
+    /// Reads like a brief. Easiest to hand-edit later.
+    Markdown,
+    /// Terser, closer to the schema.
+    Yaml,
+}
+
+impl Grammar {
+    /// The grammar a file is in, by its extension — the same rule the loader
+    /// uses to decide how to read it.
+    pub fn of(path: &std::path::Path) -> Self {
+        if loopsmith_core::is_markdown(path) {
+            Grammar::Markdown
+        } else {
+            Grammar::Yaml
+        }
+    }
+
+    /// The extension a file in this grammar carries.
+    pub fn extension(self) -> &'static str {
+        match self {
+            Grammar::Markdown => "md",
+            Grammar::Yaml => "yaml",
+        }
+    }
+
+    pub fn is_markdown(self) -> bool {
+        self == Grammar::Markdown
+    }
+}
+
 /// How an interview ended.
 pub enum Outcome {
     /// A config the user asked to have written, already rendered in the
@@ -45,7 +83,7 @@ pub enum Outcome {
     Ready {
         cfg: Box<LoopConfig>,
         text: String,
-        markdown: bool,
+        grammar: Grammar,
     },
     /// The user left mid-way. `saved` is the draft they asked to keep, if any.
     Quit { saved: Option<PathBuf> },
@@ -56,11 +94,10 @@ pub enum Outcome {
 /// Run the whole interview, starting from `start` (an existing config to
 /// revise) or from nothing.
 ///
-/// `grammar` settles the output format in advance: `Some(true)` for Markdown,
-/// `Some(false)` for YAML, `None` to ask. `--edit` passes the grammar of the
-/// file it loaded, because that file is what gets overwritten — asking there
-/// would let someone answer "Markdown" and leave Markdown inside a `.yaml`
-/// the loader then refuses to read.
+/// `grammar` settles the output format in advance; `None` asks for it.
+/// `--edit` passes the grammar of the file it loaded, because that file is
+/// what gets overwritten — asking there would let someone answer "Markdown"
+/// and leave Markdown inside a `.yaml` the loader then refuses to read.
 ///
 /// Nothing is written except a draft the user explicitly asks for at `:quit`.
 /// The config is validated before it is returned; a `Ready` config with errors
@@ -68,7 +105,7 @@ pub enum Outcome {
 pub fn interview(
     io: &mut Io,
     start: Option<LoopConfig>,
-    grammar: Option<bool>,
+    grammar: Option<Grammar>,
 ) -> Result<Outcome, String> {
     let spec = spec::spec();
     let editing = start.is_some();
@@ -121,9 +158,9 @@ pub fn interview(
             Review::Leave => return Ok(Outcome::Declined),
         }
 
-        let markdown = match grammar {
+        let grammar = match grammar {
             Some(known) => known,
-            None => match ask_format(io)? {
+            None => match ask_grammar(io, true) {
                 Some(picked) => picked,
                 None => {
                     io.note("cancelled — nothing written");
@@ -131,11 +168,11 @@ pub fn interview(
                 }
             },
         };
-        let text = render(&cfg, markdown)?;
+        let text = render(&cfg, grammar)?;
         return Ok(Outcome::Ready {
             cfg: Box::new(cfg),
             text,
-            markdown,
+            grammar,
         });
     }
 }
@@ -243,24 +280,35 @@ fn final_review(io: &mut Io, cfg: &LoopConfig) -> Review {
     }
 }
 
-/// `Some(true)` = Markdown, `Some(false)` = YAML, `None` = the user quit.
-fn ask_format(io: &mut Io) -> Result<Option<bool>, String> {
+/// Ask which grammar to write. `None` is the user leaving.
+///
+/// Both terminal paths ask it — the interview at the end, the expert path
+/// before the editor opens — so it lives here rather than once in each.
+/// `heading` is the one difference: the interview is inside a run of
+/// headed sections and the expert path is not.
+pub fn ask_grammar(io: &mut Io, heading: bool) -> Option<Grammar> {
     let choices = vec![
         Choice::new("md", "Markdown — reads like a brief, easiest to hand-edit later"),
         Choice::new("yaml", "YAML — terser, closer to the schema"),
     ];
-    io.heading("Output");
+    if heading {
+        io.heading("Output");
+    }
     match io.ask_select("Which grammar for the config file?", &[], &choices, Some(0)) {
-        Ok(pick) => Ok(Some(pick == "md")),
-        Err(_) => Ok(None),
+        Ok(pick) if pick == "md" => Some(Grammar::Markdown),
+        Ok(_) => Some(Grammar::Yaml),
+        Err(_) => None,
     }
 }
 
-pub fn render(cfg: &LoopConfig, markdown: bool) -> Result<String, String> {
-    if markdown {
-        Ok(loopsmith_core::render_md(cfg))
-    } else {
-        serde_yaml::to_string(cfg).map_err(|e| e.to_string())
+/// A config as text, in the grammar asked for.
+///
+/// Fallible only for YAML: `render_md` cannot fail, and serialising a config
+/// that is already in memory can only fail on something pathological.
+pub fn render(cfg: &LoopConfig, grammar: Grammar) -> Result<String, String> {
+    match grammar {
+        Grammar::Markdown => Ok(loopsmith_core::render_md(cfg)),
+        Grammar::Yaml => serde_yaml::to_string(cfg).map_err(|e| e.to_string()),
     }
 }
 
@@ -276,7 +324,7 @@ mod tests {
             .expect_err("an empty wizard has nothing to assemble");
         let cfg = loopsmith_core::parse_str("name: unfinished\n", "test")
             .expect("a bare name parses");
-        assert!(render(&cfg, true).is_ok());
-        assert!(render(&cfg, false).is_ok());
+        assert!(render(&cfg, Grammar::Markdown).is_ok());
+        assert!(render(&cfg, Grammar::Yaml).is_ok());
     }
 }

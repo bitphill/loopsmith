@@ -28,8 +28,13 @@ mod sections;
 
 pub use sections::spec;
 
-/// Bumped when the shape of what `/api/wizard/spec` returns changes, so a
-/// browser holding an older bundle can say so instead of rendering nonsense.
+/// Bumped when the shape of what `/api/wizard/spec` returns changes.
+///
+/// The bundle is compiled into the binary, so the two normally cannot
+/// disagree. What this catches is the case where they can: a tab left open
+/// across an upgrade, still holding the old page and talking to the new
+/// server. The browser compares it against its own copy and says so rather
+/// than rendering nonsense.
 pub const SPEC_VERSION: u32 = 1;
 
 /// The whole wizard.
@@ -211,6 +216,11 @@ pub enum Separator {
 }
 
 impl Separator {
+    /// The items in one answer, blanks dropped.
+    ///
+    /// The round trip with [`Separator::join`] is what a list field rests on:
+    /// an answer is stored as one string and unpacked back into one when an
+    /// existing config is edited.
     pub fn split(self, s: &str) -> Vec<String> {
         let parts: Vec<&str> = match self {
             Separator::Comma => s.split(',').collect(),
@@ -225,6 +235,10 @@ impl Separator {
             .collect()
     }
 
+    /// Items as the one string an answer holds. The inverse of
+    /// [`Separator::split`], to the extent that a lossy format allows: an
+    /// item containing the separator does not survive, which is why none of
+    /// the separators is a character that appears in a path or a command.
     pub fn join(self, items: &[String]) -> String {
         match self {
             Separator::Comma => items.join(", "),
@@ -276,7 +290,8 @@ pub enum Validator {
         values: Vec<String>,
     },
     Semver,
-    /// A path with no leading or trailing whitespace and no NUL.
+    /// A path: trimmed of the whitespace a paste drags in, and refused if it
+    /// carries a NUL, which no filesystem will take.
     Path {
         required: bool,
     },

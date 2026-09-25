@@ -188,20 +188,13 @@ fn loop_noun(action: LoopAction) -> Result<ExitCode, String> {
             novice,
             expert,
             ask,
-        } => {
-            // A flag is this run's business; `--ask` is the one that changes
-            // what is remembered, by throwing the answer away so the question
-            // comes back.
-            if ask {
-                loopsmith_wizard::preferences::forget();
-            }
-            let level = match (novice, expert) {
-                (true, _) => Some(loopsmith_wizard::preferences::Level::Novice),
-                (_, true) => Some(loopsmith_wizard::preferences::Level::Expert),
-                _ => None,
-            };
-            crate::guided::execute(path, edit, level)
-        }
+        } => crate::guided::execute(crate::guided::Args {
+            path,
+            edit,
+            novice,
+            expert,
+            ask,
+        }),
         LoopAction::Validate { config, strict } => validate::execute(&config, strict),
         LoopAction::Plan { config } => plan::execute(&config),
         LoopAction::Convert {

@@ -8,9 +8,10 @@
 //!
 //! Three calls, and the division of labour is the point:
 //!
-//! - [`spec`] hands over the whole question list as data. The browser caches
-//!   it for the session and renders generically — a new question is an entry
-//!   in `loopsmith_wizard::spec::sections`, not a new component.
+//! - [`loopsmith_wizard::spec::spec`] hands over the whole question list as
+//!   data. The browser caches it for the session and renders generically — a
+//!   new question is an entry in `loopsmith_wizard::spec::sections`, not a
+//!   new component.
 //! - [`assemble`] takes the flat answer map back and types it, through
 //!   [`loopsmith_wizard::answers::assemble_over`] and then the ordinary config
 //!   loader. The browser never builds a config; it cannot produce one the CLI
@@ -22,16 +23,10 @@
 //! checks and the review from the same [`crate::assemble::review`] the expert
 //! editor's rail uses, so the two views of a draft cannot disagree.
 
-use loopsmith_wizard::answers::{self, Answers};
-use loopsmith_wizard::spec::{self, Choice, Spec, Step};
+use loopsmith_wizard::answers::{self, Answers, Questions};
+use loopsmith_wizard::spec::{self, Choice, Field, List, Providers, Section, Spec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-
-/// The whole question list, plus the version the browser checks against its
-/// own bundle.
-pub fn spec() -> Spec {
-    spec::spec()
-}
 
 /// What the browser posts to have its answers typed.
 #[derive(Debug, Deserialize)]
@@ -72,61 +67,59 @@ pub struct Assembled {
 
 /// Walk the spec against the answers and record what is being asked.
 ///
-/// One pass, in the spec's own order, so the browser can render straight down
-/// the list it already has.
+/// The walk itself is [`answers::walk`], shared with the checker and the
+/// defaults, so the browser cannot be shown a question the checker does not
+/// know about.
 fn shape(spec: &Spec, answers: &Answers) -> (Vec<String>, BTreeMap<String, Vec<Choice>>) {
-    let mut visible = Vec::new();
-    let mut options: BTreeMap<String, Vec<Choice>> = BTreeMap::new();
+    struct View<'a> {
+        answers: &'a Answers,
+        visible: Vec<String>,
+        options: BTreeMap<String, Vec<Choice>>,
+    }
 
-    // A select whose options depend on the answers is recorded under the key
-    // it fills; a fixed one is already in the spec and is not repeated here.
-    let mut dynamic = |key: &str, f: &spec::Field, answers: &Answers| {
-        if let spec::Input::Select { options: source } = &f.input {
-            if !matches!(source, spec::Options::Fixed { .. }) {
-                options.insert(key.to_string(), answers::options_for(source, answers));
-            }
-        }
-    };
-
-    for section in &spec.sections {
-        if section.gate.is_some() {
-            visible.push(section.gate_key());
-        }
-        if !answers::section_open(section, answers) {
-            continue;
-        }
-        visible.push(section.id.clone());
-        for step in &section.steps {
-            match step {
-                Step::Field(f) => {
-                    if !answers::holds(f.when.as_ref(), answers, None) {
-                        continue;
-                    }
-                    visible.push(f.id.clone());
-                    dynamic(&f.id, f, answers);
+    impl View<'_> {
+        /// A select whose options depend on the answers is recorded under the
+        /// key it fills; a fixed one is already in the spec.
+        fn dynamic(&mut self, key: &str, f: &Field) {
+            if let spec::Input::Select { options: source } = &f.input {
+                if !matches!(source, spec::Options::Fixed { .. }) {
+                    self.options
+                        .insert(key.to_string(), answers::options_for(source, self.answers));
                 }
-                Step::List(l) => {
-                    if !answers::holds(l.when.as_ref(), answers, None) {
-                        continue;
-                    }
-                    visible.push(l.id.clone());
-                    for i in 0..answers::entry_count(&l.id, answers) {
-                        let prefix = format!("{}[{i}]", l.id);
-                        for f in &l.fields {
-                            if !answers::holds(f.when.as_ref(), answers, Some(&prefix)) {
-                                continue;
-                            }
-                            let key = format!("{prefix}.{}", f.id);
-                            dynamic(&key, f, answers);
-                            visible.push(key);
-                        }
-                    }
-                }
-                Step::Providers(p) => visible.push(p.id.clone()),
             }
         }
     }
-    (visible, options)
+
+    impl Questions for View<'_> {
+        fn section(&mut self, section: &Section, open: bool) {
+            // A gate is offered even when the section behind it is shut —
+            // that is the question the browser has to draw.
+            if section.gate.is_some() {
+                self.visible.push(section.gate_key());
+            }
+            if open {
+                self.visible.push(section.id.clone());
+            }
+        }
+        fn list(&mut self, l: &List) {
+            self.visible.push(l.id.clone());
+        }
+        fn field(&mut self, f: &Field, key: &str) {
+            self.dynamic(key, f);
+            self.visible.push(key.to_string());
+        }
+        fn providers(&mut self, p: &Providers) {
+            self.visible.push(p.id.clone());
+        }
+    }
+
+    let mut view = View {
+        answers,
+        visible: Vec::new(),
+        options: BTreeMap::new(),
+    };
+    answers::walk(spec, answers, &mut view);
+    (view.visible, view.options)
 }
 
 #[derive(Debug, Serialize)]
@@ -354,7 +347,7 @@ mod tests {
 
     #[test]
     fn the_spec_the_browser_fetches_is_the_one_the_terminal_walks() {
-        let served = spec();
+        let served = spec::spec();
         assert_eq!(served.version, spec::SPEC_VERSION);
         assert!(!served.sections.is_empty());
         // It has to survive the wire, or the browser renders nothing.

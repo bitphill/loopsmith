@@ -21,6 +21,17 @@
  * loopback, so asking costs less than a frame.
  */
 
+/**
+ * The spec shape this bundle was built against, matching
+ * `loopsmith_wizard::spec::SPEC_VERSION`.
+ *
+ * The bundle is compiled into the binary, so the two normally cannot
+ * disagree. What this catches is the case where they can: a tab left open
+ * across an upgrade, still holding the old page and talking to the new
+ * server.
+ */
+export const SPEC_VERSION = 1;
+
 /** Every answer, keyed by the config path it fills. Strings, all the way. */
 export type Answers = Record<string, string>;
 
@@ -129,6 +140,16 @@ export interface Assembled {
 }
 
 /* --- reading the answer map ---------------------------------------------- */
+/*
+ * These are the only things about the wizard the browser works out for
+ * itself, and they are all mechanics of the answer map rather than questions:
+ * how many entries a list has, how to drop one without leaving a hole, what a
+ * collapsed entry says on its summary row. They are what keeps typing
+ * instant, and each has a counterpart in `loopsmith_wizard::answers` /
+ * `interview` that the shape of a key — `path[i].field` — is the contract
+ * between. What questions there are, which of them apply, and what a select
+ * offers all still come from the server.
+ */
 
 /**
  * How many entries a list has, counted the way the server counts them: from

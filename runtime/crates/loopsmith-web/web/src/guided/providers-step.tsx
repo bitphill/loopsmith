@@ -21,7 +21,14 @@ import GlideMenu from "../glide-menu";
 import { entryCount, type Answers } from "./wire";
 import type { Agent, Detection, ProviderSpec, Tier } from "../types";
 
-/** The answers one detected CLI becomes. */
+/**
+ * The answers one detected CLI becomes.
+ *
+ * Strings, joined the way `loopsmith_wizard::answers::provider_value` will
+ * split them back — spaces for argv, commas for the name lists. That
+ * agreement is a wire format, and `the_provider_wire_format_round_trips_the_
+ * catalog` is what holds the two ends to it.
+ */
 function fields(a: Agent): Record<string, string> {
   return {
     id: a.id,

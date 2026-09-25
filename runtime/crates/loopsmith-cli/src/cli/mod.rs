@@ -38,6 +38,20 @@ pub struct Cli {
     #[arg(long, global = false)]
     pub guided: bool,
 
+    /// Walk every question with its explanation, whatever was remembered.
+    /// Only meaningful with `--guided`; the subcommand takes it too.
+    #[arg(long, global = false, conflicts_with = "expert", requires = "guided")]
+    pub novice: bool,
+
+    /// Hand me a filled-in config in $EDITOR instead of asking questions.
+    /// Only meaningful with `--guided`; the subcommand takes it too.
+    #[arg(long, global = false, requires = "guided")]
+    pub expert: bool,
+
+    /// Forget which path was remembered and ask again.
+    #[arg(long, global = false, conflicts_with_all = ["novice", "expert"], requires = "guided")]
+    pub ask: bool,
+
     /// Absent when `--web` carries the invocation. Every other path requires
     /// one, and [`Cli::resolve`] is where that requirement is enforced, so the
     /// error message can name the flag instead of clap's generic complaint.
@@ -52,15 +66,19 @@ impl Cli {
     /// than in `dispatch` keeps `dispatch` a pure match over `Command` and
     /// leaves one place that knows the two spellings are the same.
     pub fn resolve(self) -> Result<Command, String> {
+        // `--guided` is a synonym for the subcommand, so it takes the
+        // subcommand's own flags too. Anything else would make the short
+        // spelling a lesser one.
+        let (novice, expert, ask) = (self.novice, self.expert, self.ask);
         match (self.web, self.guided, self.command) {
             (true, false, None) => Ok(Command::Web { port: None, no_open: false }),
             (false, true, None) => Ok(Command::Loop {
                 action: LoopAction::Guided {
                     path: None,
                     edit: None,
-                    novice: false,
-                    expert: false,
-                    ask: false,
+                    novice,
+                    expert,
+                    ask,
                 },
             }),
             // Two different UIs onto the same config. Picking one for the user

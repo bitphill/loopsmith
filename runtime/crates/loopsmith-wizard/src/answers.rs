@@ -16,7 +16,9 @@
 //! [`unpack`] is the same journey backwards, for `--edit`: an existing config
 //! becomes the answers that would have produced it.
 
-use crate::spec::{Field, Input, List, Options, Separator, Spec, Step, Validator, When};
+use crate::spec::{
+    Field, Input, List, Options, Providers, Section, Separator, Spec, Step, Validator, When,
+};
 use loopsmith_core::LoopConfig;
 use serde_yaml::{Mapping, Value};
 use std::collections::BTreeMap;
@@ -32,66 +34,103 @@ pub struct Issue {
     pub message: String,
 }
 
+/// What a walk of the spec reports back.
+///
+/// Every default is empty, so a visitor says only what it cares about.
+pub trait Questions {
+    /// Every section, open or not — a gate is offered even when it is shut.
+    fn section(&mut self, _section: &Section, _open: bool) {}
+    /// A list being asked. Its entries follow as ordinary fields.
+    fn list(&mut self, _list: &List) {}
+    /// One question, under the answer key it fills.
+    fn field(&mut self, _field: &Field, _key: &str) {}
+    /// The providers step, which is a pick from this machine rather than a form.
+    fn providers(&mut self, _providers: &Providers) {}
+}
+
+/// Walk every question the spec is asking, in the order it asks them.
+///
+/// Three things need this and used to carry a copy each: checking answers,
+/// filling in defaults, and telling the browser what to render. One of those
+/// copies lived in another crate — and a copy that drifts is a front end
+/// asking a question the checker has never heard of. The rules about gates,
+/// `when` conditions and entry prefixes live here now, once.
+pub fn walk<V: Questions>(spec: &Spec, answers: &Answers, v: &mut V) {
+    for section in &spec.sections {
+        let open = section_open(section, answers);
+        v.section(section, open);
+        if !open {
+            continue;
+        }
+        for step in &section.steps {
+            match step {
+                Step::Field(f) => {
+                    if holds(f.when.as_ref(), answers, None) {
+                        v.field(f, &f.id);
+                    }
+                }
+                Step::List(l) => {
+                    if !holds(l.when.as_ref(), answers, None) {
+                        continue;
+                    }
+                    v.list(l);
+                    for i in 0..entry_count(&l.id, answers) {
+                        let prefix = format!("{}[{i}]", l.id);
+                        for f in &l.fields {
+                            if holds(f.when.as_ref(), answers, Some(&prefix)) {
+                                v.field(f, &format!("{prefix}.{}", f.id));
+                            }
+                        }
+                    }
+                }
+                Step::Providers(p) => v.providers(p),
+            }
+        }
+    }
+}
+
 /// Check every answer the spec can see, in the order it asks for them.
 ///
 /// Only questions that are actually being asked are checked: a field behind an
 /// unanswered gate, or one whose `when` does not hold, is not a missing
 /// answer.
 pub fn check(spec: &Spec, answers: &Answers) -> Vec<Issue> {
-    let mut issues = Vec::new();
-    for section in &spec.sections {
-        if !section_open(section, answers) {
-            continue;
+    struct Checker<'a> {
+        answers: &'a Answers,
+        issues: Vec<Issue>,
+    }
+    impl Questions for Checker<'_> {
+        fn list(&mut self, l: &List) {
+            let entries = entry_count(&l.id, self.answers);
+            if entries < l.min {
+                self.issues.push(Issue {
+                    key: l.id.clone(),
+                    message: format!(
+                        "add at least {} {}{}",
+                        l.min,
+                        l.singular,
+                        if l.min == 1 { "" } else { "s" }
+                    ),
+                });
+            }
         }
-        for step in &section.steps {
-            match step {
-                Step::Field(f) => {
-                    if !holds(f.when.as_ref(), answers, None) {
-                        continue;
-                    }
-                    check_one(f, &f.id, answers, &mut issues);
-                }
-                Step::List(l) => {
-                    if !holds(l.when.as_ref(), answers, None) {
-                        continue;
-                    }
-                    let entries = entry_count(&l.id, answers);
-                    if entries < l.min {
-                        issues.push(Issue {
-                            key: l.id.clone(),
-                            message: format!(
-                                "add at least {} {}{}",
-                                l.min,
-                                l.singular,
-                                if l.min == 1 { "" } else { "s" }
-                            ),
-                        });
-                    }
-                    for i in 0..entries {
-                        let prefix = format!("{}[{i}]", l.id);
-                        for f in &l.fields {
-                            if !holds(f.when.as_ref(), answers, Some(&prefix)) {
-                                continue;
-                            }
-                            check_one(f, &format!("{prefix}.{}", f.id), answers, &mut issues);
-                        }
-                    }
-                }
-                Step::Providers(_) => {}
+        fn field(&mut self, f: &Field, key: &str) {
+            let raw = self.answers.get(key).map(String::as_str).unwrap_or("");
+            if let Err(message) = f.validator.check(raw) {
+                self.issues.push(Issue {
+                    key: key.to_string(),
+                    message,
+                });
             }
         }
     }
-    issues
-}
 
-fn check_one(f: &Field, key: &str, answers: &Answers, issues: &mut Vec<Issue>) {
-    let raw = answers.get(key).map(String::as_str).unwrap_or("");
-    if let Err(message) = f.validator.check(raw) {
-        issues.push(Issue {
-            key: key.to_string(),
-            message,
-        });
-    }
+    let mut checker = Checker {
+        answers,
+        issues: Vec::new(),
+    };
+    walk(spec, answers, &mut checker);
+    checker.issues
 }
 
 /// Turn answers into a config, through the same loader a file goes through.
@@ -323,18 +362,15 @@ pub fn unpack(spec: &Spec, cfg: &LoopConfig) -> Answers {
                         for (k, v) in m {
                             let Some(k) = k.as_str() else { continue };
                             if let Some(s) = scalar(v) {
-                                answers.insert(format!("{}[{i}].{k}", p.id, k = k), s);
+                                answers.insert(format!("{}[{i}].{k}", p.id), s);
                             }
                         }
                     }
                 }
             }
         }
-        if used {
-            if let Some(gate) = &section.gate {
-                let _ = gate;
-                answers.insert(section.gate_key(), "true".into());
-            }
+        if used && section.gate.is_some() {
+            answers.insert(section.gate_key(), "true".into());
         }
     }
     answers
@@ -351,44 +387,29 @@ pub fn unpack(spec: &Spec, cfg: &LoopConfig) -> Answers {
 /// Repeated to a fixed point, because filling one in can open the question
 /// that needs the next.
 pub fn with_defaults(spec: &Spec, answers: &Answers) -> Answers {
+    /// The defaults one pass found, collected rather than written, because
+    /// the walk is reading the map they would go into.
+    #[derive(Default)]
+    struct Defaults(Vec<(String, String)>);
+    impl Questions for Defaults {
+        fn field(&mut self, f: &Field, key: &str) {
+            if let Some(d) = &f.default {
+                self.0.push((key.to_string(), d.clone()));
+            }
+        }
+    }
+
     let mut out = answers.clone();
     // Eight passes is far more than the deepest chain of conditions in the
     // spec; the loop exits on the first that changes nothing.
     for _ in 0..8 {
+        let mut found = Defaults::default();
+        walk(spec, &out, &mut found);
         let mut added = false;
-        let mut fill = |key: String, f: &Field, out: &mut Answers| {
-            let Some(d) = &f.default else { return };
+        for (key, value) in found.0 {
             if let std::collections::btree_map::Entry::Vacant(slot) = out.entry(key) {
-                slot.insert(d.clone());
+                slot.insert(value);
                 added = true;
-            }
-        };
-        for section in &spec.sections {
-            if !section_open(section, &out) {
-                continue;
-            }
-            for step in &section.steps {
-                match step {
-                    Step::Field(f) => {
-                        if holds(f.when.as_ref(), &out, None) {
-                            fill(f.id.clone(), f, &mut out);
-                        }
-                    }
-                    Step::List(l) => {
-                        if !holds(l.when.as_ref(), &out, None) {
-                            continue;
-                        }
-                        for i in 0..entry_count(&l.id, &out) {
-                            let prefix = format!("{}[{i}]", l.id);
-                            for f in &l.fields {
-                                if holds(f.when.as_ref(), &out, Some(&prefix)) {
-                                    fill(format!("{prefix}.{}", f.id), f, &mut out);
-                                }
-                            }
-                        }
-                    }
-                    Step::Providers(_) => {}
-                }
             }
         }
         if !added {
@@ -516,6 +537,11 @@ fn free_entries(path: &str, answers: &Answers) -> Vec<Value> {
 
 /// A provider field's type, by name. The list is short and fixed because a
 /// `ProviderSpec` is: everything else about a provider is a string.
+///
+/// This is one half of a wire format: the terminal's `add_provider` and the
+/// browser's `providers-step.tsx` both write these leaves as strings, and the
+/// separators have to be the ones read back here. `the_provider_wire_format_
+/// round_trips_the_catalog` pins that agreement against the real catalog.
 fn provider_value(leaf: &str, raw: &str) -> Value {
     match leaf {
         "args" => seq_of(&Separator::Whitespace.split(raw)),
@@ -898,6 +924,43 @@ mod tests {
         a.insert("execution.providers.cascade.cheap".into(), "ollama".into());
         let cfg = assemble(&spec(), &a).expect("assembles");
         assert_eq!(cfg.execution.providers.cascade["cheap"], ["ollama"]);
+    }
+
+    #[test]
+    fn the_provider_wire_format_round_trips_the_catalog() {
+        // Both front ends write a provider as strings under
+        // `providers[i].<leaf>`, joining lists the way `provider_value` will
+        // split them. Nothing in the type system makes the two agree, so this
+        // runs every catalog entry through the join the front ends do and
+        // checks what comes out the other side is the entry again.
+        for known in crate::catalog::KNOWN {
+            let mut a = minimal();
+            let at = |leaf: &str| format!("execution.providers.providers[0].{leaf}");
+            a.insert(at("id"), known.id.into());
+            a.insert(at("kind"), known.kind.into());
+            a.insert(at("command"), known.bin.into());
+            a.insert(at("args"), known.args.join(" "));
+            a.insert(at("tiers"), known.tiers.join(", "));
+            a.insert(at("requires_env"), known.requires_env.join(", "));
+            a.insert(at("prompt_on_stdin"), known.prompt_on_stdin.to_string());
+            if let Some(cost) = known.cost_per_1k {
+                a.insert(at("cost_per_1k_tokens"), cost.to_string());
+            }
+
+            let cfg = assemble(&spec(), &a)
+                .unwrap_or_else(|e| panic!("`{}` does not assemble: {e:?}", known.id));
+            let p = &cfg.execution.providers.providers[0];
+            assert_eq!(p.id, known.id);
+            assert_eq!(p.command, known.bin);
+            assert_eq!(p.args, known.args, "`{}` args did not survive", known.id);
+            assert_eq!(
+                p.requires_env, known.requires_env,
+                "`{}` requires_env did not survive",
+                known.id
+            );
+            assert_eq!(p.prompt_on_stdin, known.prompt_on_stdin);
+            assert_eq!(p.cost_per_1k_tokens, known.cost_per_1k);
+        }
     }
 
     #[test]

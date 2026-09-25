@@ -82,14 +82,22 @@ where
         return (args, None);
     };
 
-    // `run` is the collision: a noun in 1.0, a verb in 0.3. A following token
-    // that names one of its verbs means the noun; anything else — a config
-    // path — means the 0.3 verb, which is `run start` now. A flag or nothing
-    // at all means neither, so clap gets it as-is and prints the noun's help.
+    // `run` is the collision: a noun in 1.0, a verb in 0.3.
+    //
+    // The token straight after it settles the common case: one of `run`'s own
+    // verbs means the noun. Otherwise what decides is whether there is a
+    // config path in there at all, because 0.3's `run` took flags before its
+    // positional — `loopsmith run --dry-run loop.yaml` is in as many scripts
+    // as the plain form. So any later non-flag token means the 0.3 verb, and
+    // `start` goes in immediately after `run` where the verb belongs. Nothing
+    // but flags means neither, and clap prints the noun's help.
+    //
+    // Reading the first *non-flag* token instead would misfire on a flag's
+    // value: `--run-id start` would look like the `start` verb.
     if first == "run" {
-        let next = args.get(2);
-        let is_noun = next.map_or(true, |n| n.starts_with('-') || RUN_VERBS.contains(&n.as_str()));
-        if is_noun {
+        let verb_next = args.get(2).is_some_and(|n| RUN_VERBS.contains(&n.as_str()));
+        let has_config = args[2..].iter().any(|a| !a.starts_with('-'));
+        if verb_next || !has_config {
             return (args, None);
         }
         args.insert(2, "start".into());
@@ -139,6 +147,30 @@ mod tests {
         assert_eq!(args, ["loopsmith", "run", "start", "loop.yaml", "--verbose"]);
         let (args, _) = rewritten(&["loopsmith", "resume", "loop.yaml", "r-1"]);
         assert_eq!(args, ["loopsmith", "run", "resume", "loop.yaml", "r-1"]);
+    }
+
+    #[test]
+    fn a_03_run_keeps_working_with_its_flags_in_front() {
+        // 0.3's `run` took `--dry-run`, `--verbose`, `--run-id` and
+        // `--no-acquire` before its positional, and clap was happy to read
+        // them in either order. Both orders are in scripts.
+        let (args, moved) = rewritten(&["loopsmith", "run", "--dry-run", "loop.yaml"]);
+        assert_eq!(args, ["loopsmith", "run", "start", "--dry-run", "loop.yaml"]);
+        assert!(moved.is_some());
+
+        let (args, _) = rewritten(&["loopsmith", "run", "-v", "loop.yaml"]);
+        assert_eq!(args, ["loopsmith", "run", "start", "-v", "loop.yaml"]);
+    }
+
+    #[test]
+    fn a_flag_value_that_reads_like_a_verb_is_still_a_value() {
+        // `--run-id start` is the reason this looks at the token straight
+        // after `run` rather than at the first non-flag token anywhere.
+        let (args, _) = rewritten(&["loopsmith", "run", "--run-id", "start", "loop.yaml"]);
+        assert_eq!(
+            args,
+            ["loopsmith", "run", "start", "--run-id", "start", "loop.yaml"]
+        );
     }
 
     #[test]

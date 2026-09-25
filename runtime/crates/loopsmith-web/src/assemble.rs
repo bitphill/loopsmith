@@ -1,10 +1,10 @@
 //! Turning what the browser holds into a config, and telling it what it has.
 //!
-//! The form in the browser is the A–J model, field for field. That is not a
-//! coincidence to be maintained by hand: the config the browser posts is
-//! deserialized by the very same `serde` derives the CLI uses, so a section
-//! the browser gets wrong fails here, at the moment it is typed, with the same
-//! message `loopsmith validate` would print. There is no second schema.
+//! The form in the browser is the 1.0 model, field for field. That is not a
+//! coincidence to be maintained by hand: the config the browser posts is read
+//! by the very same loader the CLI uses, so a section the browser gets wrong
+//! fails here, at the moment it is typed, with the same message `loopsmith
+//! loop validate` would print. There is no second schema.
 //!
 //! Everything in this module is in-process and instant. Validation, planning,
 //! permissions, and cost all answer in under a millisecond, which is what lets

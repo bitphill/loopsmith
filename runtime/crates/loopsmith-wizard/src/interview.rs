@@ -226,6 +226,7 @@ fn entry(
     Ok(())
 }
 
+/// Which entry, by its summary line. `None` is "never mind".
 fn pick(
     io: &mut Io,
     l: &List,
@@ -258,6 +259,10 @@ fn truncate(s: &str, max: usize) -> String {
     format!("{}…", s.chars().take(max.saturating_sub(1)).collect::<String>())
 }
 
+/// Forget an entry without moving the ones after it.
+///
+/// Used where the index is about to be reused or removed — a `:back` out of
+/// the first field of a new entry, or the first half of a removal.
 fn clear_entry(path: &str, index: usize, answers: &mut Answers) {
     let prefix = format!("{path}[{index}].");
     let doomed: Vec<String> = answers
@@ -345,6 +350,13 @@ fn providers(io: &mut Io, p: &Providers, answers: &mut Answers) -> Result<(), Na
     }
 }
 
+/// Add one provider: a pick from the catalog, or a command typed by hand.
+///
+/// A catalog pick is pre-filled from what loopsmith already knows about that
+/// CLI, so the only questions left are the two nobody can guess — which model,
+/// and what to call it in this config. The answers are written as strings
+/// under the same keys the browser writes, which is what lets a draft move
+/// between the two front ends.
 fn add_provider(
     io: &mut Io,
     p: &Providers,
@@ -428,6 +440,10 @@ fn add_provider(
     Ok(())
 }
 
+/// Which model, when the CLI has a list worth offering.
+///
+/// `None` means leave it unset, which is right for a CLI that discovers its
+/// own models — naming one there would pin a choice loopsmith cannot check.
 fn model_for(io: &mut Io, known: &'static Known) -> Result<Option<String>, Nav> {
     if known.models.is_empty() {
         if known.discovers_models {

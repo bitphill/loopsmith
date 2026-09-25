@@ -32,6 +32,7 @@ import { Tour } from "./tour";
 import { SmithGate, type Smith } from "./smith-gate";
 import { ExamplesPicker } from "./examples-picker";
 import { Guided } from "./guided/guided";
+import { SPEC_VERSION } from "./guided/wire";
 import type { Answers, Assembled, Spec } from "./guided/wire";
 import { at } from "./types";
 import type {
@@ -323,7 +324,17 @@ export default function App() {
   // once, the first time the wizard is opened.
   useEffect(() => {
     if (mode !== "guided" || spec) return;
-    api.wizardSpec().then(setSpec).catch(() => {});
+    api.wizardSpec().then((s) => {
+      setSpec(s);
+      // This page and that server normally ship together, in one binary. A
+      // tab left open across an upgrade is the case where they do not.
+      if (s.version !== SPEC_VERSION) {
+        setToast({
+          tone: "bad",
+          text: "This page was loaded before loopsmith was upgraded. Reload it to get the current questions.",
+        });
+      }
+    }).catch(() => {});
   }, [mode, spec]);
 
   const pathTimer = useRef<number>(0);

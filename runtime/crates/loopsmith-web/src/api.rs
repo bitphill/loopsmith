@@ -274,11 +274,9 @@ async fn open_config(Json(b): Json<PathBody>) -> ApiResult<Value> {
     })))
 }
 
-/// Validate, plan, price, and derive permissions for the draft. Called on
-/// every meaningful edit, so it does no I/O and spawns nothing.
 /// The question list. Static for the process, so the browser fetches it once.
 async fn wizard_spec() -> Json<loopsmith_wizard::spec::Spec> {
-    Json(wizard::spec())
+    Json(loopsmith_wizard::spec::spec())
 }
 
 /// Answers in, config out. The one place a browser draft becomes a config.
@@ -293,6 +291,8 @@ async fn wizard_unpack(Json(cfg): Json<Value>) -> ApiResult<Value> {
     Ok(Json(json!({ "answers": answers })))
 }
 
+/// Validate, plan, price, and derive permissions for the draft. Called on
+/// every meaningful edit, so it does no I/O and spawns nothing.
 async fn review(Json(cfg): Json<Value>) -> Json<assemble::Review> {
     Json(assemble::review(&cfg))
 }
