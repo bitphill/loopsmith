@@ -1,0 +1,290 @@
+name: container-refactor-loop
+version: 0.1.0
+description: >
+  Refactor several modules at once, each in its own container over its own
+  worktree, and let the test suite decide whether any of it survives.
+
+# --------------------------------------------------------------------
+# What this example is for
+#
+# Four builders editing the same checkout is the fastest way to lose a
+# morning's work. This is the shape that makes wide parallelism safe:
+# every writer gets a worktree, every worktree gets a container, and the
+# container gets no network unless the node genuinely needs one.
+#
+# A machine with no Docker runs this with plain worktrees and says so.
+# `loopsmith doctor` reports which of the three isolation levels this host
+# can actually give you.
+# --------------------------------------------------------------------
+
+environment: dev
+
+features:
+  parallel_execution: true
+  external_side_effects: false
+  human_approval: true
+
+# --------------------------------------------------------------------
+# intent — what this loop is for
+# --------------------------------------------------------------------
+intent:
+
+  background:
+    - key: test_command
+      value: cargo test --workspace
+      note: The gate. If this does not pass, nothing the loop did counts.
+    - key: modules
+      value: parser, planner, reporter
+      note: One builder per module. They must not touch each other's files.
+    - key: behaviour_rule
+      value: No behaviour changes. A test that had to be edited is a failed refactor.
+
+  # Do one of these by hand first. A refactor loop pointed at a suite you
+  # have never watched pass is a loop that will happily delete the tests.
+  prerequisites:
+    - step: Ran the full test suite by hand and watched it pass
+      done: false
+      evidence: "paste the summary line"
+    - step: Refactored one of these modules by hand, start to finish
+      done: false
+    - step: Confirmed `docker run hello-world` works, or accepted worktree isolation
+      done: false
+
+  goals:
+    - name: simplify
+      description: Each named module is smaller and clearer, with its behaviour unchanged.
+    - name: still-green
+      description: The whole test suite passes after every module has been changed.
+      depends_on: [simplify]
+
+  success:
+    - target: overall
+      name: green-and-smaller
+      mode: percentage
+      statement: Every blocking check passes.
+      threshold: 1.0
+
+# --------------------------------------------------------------------
+# execution — how the work gets done
+# --------------------------------------------------------------------
+execution:
+
+  graph:
+    nodes:
+      - id: survey
+        role: researcher
+        instruction: >
+          List the three modules by name with their current line counts and the
+          one thing in each that makes it hard to read. Change nothing.
+        goals: [simplify]
+        tier: cheap
+        # Read-only, so it needs no isolation at all.
+        isolation:
+          mode: none
+
+      - id: refactor-parser
+        role: builder
+        instruction: >
+          Simplify the parser module only. Do not edit tests. Do not touch any
+          other module. Commit nothing.
+        depends_on: [survey]
+        goals: [simplify]
+        tier: standard
+        weight: 3.0
+        isolation:
+          mode: container
+          # The network is on because this node is routed to a hosted model
+          # and could not reach it otherwise. Turn it off for a node whose
+          # provider is a local model — that is the configuration this shape
+          # exists for, and `loopsmith loop validate` says so either way.
+          network: true
+
+      - id: refactor-planner
+        role: builder
+        instruction: >
+          Simplify the planner module only. Do not edit tests. Do not touch any
+          other module. Commit nothing.
+        depends_on: [survey]
+        goals: [simplify]
+        tier: standard
+        weight: 3.0
+        isolation:
+          mode: container
+          # The network is on because this node is routed to a hosted model
+          # and could not reach it otherwise. Turn it off for a node whose
+          # provider is a local model — that is the configuration this shape
+          # exists for, and `loopsmith loop validate` says so either way.
+          network: true
+
+      - id: refactor-reporter
+        role: builder
+        instruction: >
+          Simplify the reporter module only. Do not edit tests. Do not touch any
+          other module. Commit nothing.
+        depends_on: [survey]
+        goals: [simplify]
+        tier: standard
+        weight: 2.0
+        isolation:
+          mode: container
+          # The network is on because this node is routed to a hosted model
+          # and could not reach it otherwise. Turn it off for a node whose
+          # provider is a local model — that is the configuration this shape
+          # exists for, and `loopsmith loop validate` says so either way.
+          network: true
+
+      - id: review
+        role: judge
+        instruction: >
+          Read the three diffs against the standard named in the check. Say which
+          changes alter behaviour. Fix nothing.
+        depends_on: [refactor-parser, refactor-planner, refactor-reporter]
+        goals: [still-green]
+        tier: strong
+        provider: openai
+        isolation:
+          mode: none
+
+    # The three builders are one wave and all of them must land: a suite that
+    # passes with two of three modules refactored has not been told the truth
+    # about the third.
+    join:
+      strategy: wait_for_all
+
+    concurrency:
+      mode: auto
+      cap: 4
+      min_marginal_gain: 0.05
+
+    # Every `container` node without its own image uses this one.
+    container_image: rust:1.75
+
+  providers:
+    providers:
+      - id: ollama
+        kind: ollama
+        tiers: [cheap]
+        command: ollama
+        args: ["run", "{model}"]
+        model: llama3
+        prompt_on_stdin: true
+        timeout_seconds: 120
+      - id: claude
+        kind: claude_code
+        tiers: [standard]
+        command: claude
+        args: ["-p", "{prompt}"]
+      # A second family, purely so the judge has somewhere to run. With one
+      # provider, judge independence refuses every judge and nothing can pass —
+      # which is correct, and is the thing people discover at 2am.
+      - id: openai
+        kind: openai
+        tiers: [strong]
+        command: curl
+        args: ["-sS", "https://api.openai.com/v1/chat/completions"]
+        requires_env: [OPENAI_API_KEY]
+        prompt_on_stdin: true
+    cascade:
+      cheap: [ollama, claude]
+      standard: [claude]
+      strong: [openai]
+    enforce_judge_independence: true
+
+  memory:
+    carry_summaries: 2
+    max_summary_chars: 1200
+
+  triggers:
+    triggers:
+      - on:
+          type: manual
+
+# --------------------------------------------------------------------
+# safety — what must not happen, and when to stop
+# --------------------------------------------------------------------
+safety:
+
+  checks:
+    - target: simplify
+      name: modules-are-smaller
+      mode: objective
+      statement: Every named module has fewer lines than it started with.
+      blocking: true
+      detector:
+        type: script
+        command: scripts/smaller.sh
+
+    - target: still-green
+      name: suite-passes
+      mode: objective
+      statement: The full test suite passes.
+      blocking: true
+      detector:
+        type: script
+        command: scripts/test.sh
+
+    - target: overall
+      name: tests-were-not-edited
+      mode: objective
+      statement: No file under tests/ was modified.
+      blocking: true
+      detector:
+        type: script
+        command: scripts/tests-untouched.sh
+
+  gates:
+    stop:
+      max_iterations: 6
+      max_revisions_per_node: 2
+      max_wall_clock_seconds: 5400
+      max_cost_usd: 4.0
+      no_progress_iterations: 3
+      no_progress_iterations_randomness: 2
+      stop_on_overall_success: true
+
+    # Nothing starts until the tree is clean. A refactor loop that begins on
+    # top of uncommitted work cannot tell its changes from yours.
+    entry:
+      - id: clean-tree
+        statement: The working tree has no uncommitted changes.
+        detector:
+          type: script
+          command: scripts/clean-tree.sh
+        on_fail: stop
+
+    # The suite is the gate, so a red suite mid-run means the last iteration
+    # is worth less than nothing to build on.
+    rollback:
+      - id: suite-still-green
+        statement: The test suite passes.
+        detector:
+          type: script
+          command: scripts/test.sh
+        on_fail: rollback
+
+  limits:
+    global:
+      rules:
+        - Never git stash. Never git reset.
+        - No git command except committing a specific file.
+        - Do not edit any file under tests/.
+      forbidden_paths: [".git/", "state/", "tests/"]
+      forbidden_commands: ["rm -rf", "git push", "git reset"]
+      max_seconds: 1200
+      human_checkpoint:
+        - pushing anything
+        - deleting data
+
+  recovery:
+    transient_error:
+      action: retry
+      max_attempts: 3
+      backoff: exponential
+    safety_violation:
+      action: stop
+
+  alerts:
+    - id: slow
+      metric: wall_clock_seconds
+      above: 3600
+      message: An hour in and still refactoring. Check whether a container is stuck.

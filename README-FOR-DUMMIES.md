@@ -25,7 +25,7 @@ and use [the browser version](#the-easy-way-do-it-all-in-a-browser) instead.
 
 ## What people use it for
 
-Thirteen ready-made loops you can copy. Click one and read it — it's the fastest
+Fifteen ready-made loops you can copy. Click one and read it — it's the fastest
 way to see what a loop actually looks like.
 
 | Loop | What it's for |
@@ -34,6 +34,8 @@ way to see what a loop actually looks like.
 | [trend-radar](config/examples/trend-radar-loop.md) | Track a topic across X, Instagram, TikTok |
 | [idea-radar](config/examples/idea-radar-loop.md) | Find product ideas in real customer complaints |
 | [account-watch](config/examples/account-watch-loop.md) | Watch accounts for topics about to spike |
+| [container-refactor](config/examples/container-refactor-loop.md) | Tidy up three parts of a codebase at once, safely |
+| [self-tuning](config/examples/self-tuning-loop.md) | A weekly report that suggests how to improve itself |
 | [blogger](config/examples/blogger-loop.md) | Write posts on trending topics, in your style |
 | [traffic](config/examples/traffic-loop.md) | Post where your audience already gathers |
 | [marketing-automation](config/examples/marketing-automation-loop.md) | Turn product docs into scheduled posts |
@@ -146,7 +148,7 @@ it's for. Next to the ones where the honest advice isn't obvious, there's an ⓘ
 that tells you *why the box exists* and what goes wrong if you get it wrong. You
 are not expected to know any of this in advance.
 
-**Thirteen finished loops, one click each.** Down the left is the same list from
+**Fifteen finished loops, one click each.** Down the left is the same list from
 [the table above](#what-people-use-it-for). Click **Load** on the closest one and
 every box fills in with a real working answer. Change the bits that are about
 your job. This is far easier than starting from nothing, and it's the fastest way

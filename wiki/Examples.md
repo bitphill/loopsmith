@@ -32,6 +32,8 @@ and then run it.
 | [`viral-game-loop`](https://github.com/bitphill/loopsmith/blob/main/config/examples/viral-game-loop.yaml) | A small Godot game gated on build health and time-to-first-play |
 | [`idea-radar-loop`](https://github.com/bitphill/loopsmith/blob/main/config/examples/idea-radar-loop.yaml) | Product ideas traced to dated public complaints, checked against what already sells |
 | [`account-watch-loop`](https://github.com/bitphill/loopsmith/blob/main/config/examples/account-watch-loop.yaml) | Watch accounts for pre-viral topics, and score yesterday's predictions |
+| [`container-refactor-loop`](https://github.com/bitphill/loopsmith/blob/main/config/examples/container-refactor-loop.yaml) | Refactor three modules at once, each in its own container over its own worktree |
+| [`self-tuning-loop`](https://github.com/bitphill/loopsmith/blob/main/config/examples/self-tuning-loop.yaml) | A weekly report that may propose changes to itself, measured against a recorded baseline |
 
 ## Which one to start from
 
@@ -43,3 +45,8 @@ and then run it.
   `marketing-automation-loop`. Both show `human_checkpoint` doing real work.
 - **Anything that spends money** — `x402-agent-loop`. It is the one built
   around a hard cap.
+- **Wide parallelism** — `container-refactor-loop`. Three builders in one wave,
+  each in its own container, with the test suite as the gate.
+- **Self-evolution** — `self-tuning-loop`. It is mostly about the fence: the
+  baseline a proposal is measured against and the components it may never
+  touch.

@@ -228,7 +228,7 @@ the rule that section already had.
 
 ### The example library
 
-All thirteen `config/examples/*.yaml` are compiled in with `include_str!`, since
+All fifteen `config/examples/*.yaml` are compiled in with `include_str!`, since
 `include_str!` cannot reach above the package root and `config/` is excluded from
 the published tarball. `tools/sync-examples.sh` copies them into
 `runtime/crates/loopsmith-web/templates/examples/`, and a test fails if the two

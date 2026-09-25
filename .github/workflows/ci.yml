@@ -110,7 +110,9 @@ jobs:
             bin="runtime/target/release/loopsmith"
           fi
           bad=0
+          seen=0
           for cfg in config/examples/*.yaml config/examples/*.md; do
+            seen=$((seen+1))
             out=$("$bin" loop validate "$cfg" 2>&1 || true)
             summary=$(printf '%s\n' "$out" | grep -E '[0-9]+ error\(s\), [0-9]+ warning\(s\)' | tail -1)
             errors=$(printf '%s' "$summary" | sed -E 's/^([0-9]+) error.*/\1/')
@@ -121,8 +123,20 @@ jobs:
               bad=$((bad+1))
             fi
           done
-          echo "26 examples checked, $bad off-spec"
+          # A glob that matched nothing would leave `seen` at 0 and this check
+          # passing without having read a single file.
+          [ "$seen" -ge 30 ] || { echo "::error::only $seen example files found"; exit 1; }
+          echo "$seen examples checked, $bad off-spec"
           [ "$bad" -eq 0 ]
+
+      # The .md twin of each example is generated from the .yaml, so an edit to
+      # either one that was not regenerated is drift nobody would see: both
+      # files still parse, and they describe different loops.
+      - name: Every example's two formats are in step
+        if: runner.os == 'Linux'
+        working-directory: .
+        shell: bash
+        run: ./tools/sync-examples.sh --check
 
       # A generated loop has to be startable on the host that generated it. On
       # Windows that means the `.cmd` launcher, which no POSIX host can execute —

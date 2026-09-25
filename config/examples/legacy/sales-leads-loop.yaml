@@ -1,0 +1,266 @@
+# Build a sales lead list from public sources, lawfully.
+#
+# This is the config where the constraints matter more than the graph. Lead
+# generation is ordinary commercial work and is also the fastest way to end up in
+# breach of GDPR, a platform's terms of service, or both. The rules below are not
+# decoration: `lawful-basis-recorded` is a blocking check, so a lead without a
+# recorded source and basis cannot satisfy the gate no matter how good it looks.
+#
+# Read your own obligations before running this. This config encodes a defensible
+# default, not legal advice.
+
+name: sales-leads-loop
+version: 0.1.0
+description: >
+  Find business contacts matching an ICP from public, permitted sources, with a
+  recorded source and lawful basis for every record.
+
+information:
+  - key: ideal_customer
+    value: >
+      Replace. Be specific: industry, company size, role, and the problem they
+      already know they have. A vague ICP produces a large, worthless list.
+  - key: my_site
+    value: https://example.com
+    note: Optional. Used to infer who already buys, not to make claims.
+  - key: competitor_sites
+    value: ""
+    note: Optional, comma-separated. Public pages only.
+  - key: permitted_sources
+    value: >
+      Company websites, public business directories, official APIs, and Google
+      Maps' Places API. Business contact details only.
+  - key: forbidden_sources
+    value: >
+      Anything behind a login, LinkedIn scraping (it breaches their terms),
+      personal social accounts, and any purchased list of unknown provenance.
+  - key: leads_file
+    value: out/leads.json
+    note: Each record carries source_url, collected_at, and lawful_basis.
+
+pre_execution:
+  - step: Found ten leads by hand and recorded where each came from
+    done: false
+    evidence: link the ten records
+  - step: Wrote down the lawful basis for processing, per jurisdiction you target
+    done: false
+    evidence: out/lawful-basis.md
+  - step: Confirmed a working suppression list and an opt-out route exist
+    done: false
+    evidence: out/suppression.json
+
+goals:
+  - name: sourced
+    description: >
+      Leads are collected only from permitted sources, each with a recorded source
+      URL and collection timestamp.
+    priority: 1
+  - name: lawful
+    description: >
+      Every record carries a lawful basis, and anyone on the suppression list is
+      absent.
+    depends_on: [sourced]
+    priority: 1
+  - name: qualified
+    description: >
+      Records match the ICP on evidence from the source, not on inference about a
+      named individual.
+    depends_on: [sourced]
+    priority: 2
+
+validations:
+  - target: sourced
+    name: leads-exist
+    mode: objective
+    statement: A leads file was produced.
+    detector: { type: file_exists, path: out/leads.json, non_empty: true }
+  - target: sourced
+    name: every-lead-has-a-source
+    mode: objective
+    statement: Every record carries source_url and collected_at.
+    detector: { type: script, command: scripts/check-provenance.sh, expect_exit: 0 }
+  - target: sourced
+    name: permitted-sources-only
+    mode: objective
+    statement: No record came from a forbidden source.
+    detector: { type: script, command: scripts/check-sources.sh, expect_exit: 0 }
+  - target: lawful
+    name: lawful-basis-recorded
+    mode: objective
+    statement: Every record states a lawful basis for processing.
+    detector: { type: script, command: scripts/check-basis.sh, expect_exit: 0 }
+  - target: lawful
+    name: suppression-honoured
+    mode: objective
+    statement: No record appears on the suppression list.
+    detector: { type: script, command: scripts/check-suppression.sh, expect_exit: 0 }
+  - target: qualified
+    name: icp-match-rate
+    mode: objective
+    statement: The share of records matching the ICP is above the floor.
+    detector: { type: threshold, metric: icp_match_rate, op: gte, value: 0.8 }
+  - target: overall
+    name: business-contacts-only
+    mode: subjective
+    statement: >
+      Records are business contact details for a role at a company, not personal
+      data about a private individual.
+    detector: { type: judge, standard: "GDPR Article 6(1)(f) legitimate interest as applied to B2B contact data, and the recorded lawful basis in out/lawful-basis.md", min_score: 8 }
+
+success:
+  - target: overall
+    name: usable-and-defensible
+    mode: percentage
+    statement: Every blocking check passes, including provenance and lawful basis.
+    threshold: 1.0
+
+stop_gates:
+  max_iterations: 8
+  max_revisions_per_node: 3
+  max_wall_clock_seconds: 7200
+  max_tokens: 2500000
+  max_cost_usd: 10.0
+  no_progress_iterations: 3
+  no_progress_iterations_randomness: 2
+  stop_on_overall_success: true
+
+schedules:
+  - { type: cron, expr: "0 6 * * 1" }
+
+constraints:
+  global:
+    rules:
+      - Collect business contact details only. Never personal addresses or personal phone numbers.
+      - Use official APIs where one exists. Honour robots.txt where one does not.
+      - Never access anything behind a login, and never create an account.
+      - Never scrape LinkedIn. It breaches their terms of service regardless of what the data is.
+      - Never solve a CAPTCHA or otherwise defeat bot detection.
+      - Rate-limit every source to at most one request per second.
+      - Record source_url, collected_at, and lawful_basis for every record, at collection time.
+      - Drop any record matching the suppression list, immediately and permanently.
+      - This loop collects. It does not contact anyone.
+    forbidden_paths: [".git/"]
+    forbidden_commands: ["git push", "rm -rf", "curl -X POST"]
+    max_seconds: 900
+    human_checkpoint:
+      - contacting anyone on this list
+      - exporting the list anywhere outside this directory
+      - adding a source not listed under permitted_sources
+
+execution_guidelines:
+  items:
+    - name: define
+      guideline: >
+        Turn the ICP into checkable criteria and confirm which sources are
+        permitted for it. Collect nothing yet.
+    - name: collect
+      guideline: >
+        Gather records from permitted sources only, recording provenance at the
+        moment of collection. A record whose source you cannot name is discarded,
+        not backfilled.
+    - name: qualify
+      guideline: >
+        Score records against the ICP using evidence already collected. Do not
+        fetch more data about a named person to improve a score.
+  dependency:
+    - define -> collect -> qualify
+
+default_skills:
+  - name: agent-reach
+    source: github
+    url: https://github.com/Panniantong/agent-reach
+    note: Finds where a given audience is publicly visible.
+
+graph:
+  nodes:
+    - id: define-icp
+      role: researcher
+      instruction: >
+        Turn the ICP into checkable criteria and write out/icp.md. List which of
+        the permitted sources can actually be used for it, and why.
+      goals: [sourced]
+      stage: define
+      tier: cheap
+      weight: 1.0
+    - id: collect-directories
+      role: researcher
+      instruction: >
+        Collect matching business records from public directories and company
+        websites. Record source_url, collected_at, and lawful_basis per record.
+      depends_on: [define-icp]
+      goals: [sourced, lawful]
+      stage: collect
+      skills: [agent-reach]
+      weight: 3.0
+    - id: collect-maps
+      role: researcher
+      instruction: >
+        Collect matching business records from the Google Maps Places API. Same
+        provenance fields. Stop at the API's documented rate limit.
+      depends_on: [define-icp]
+      goals: [sourced, lawful]
+      stage: collect
+      weight: 2.0
+    - id: qualify
+      role: builder
+      instruction: >
+        Merge, de-duplicate, drop suppressed records, and score each against the
+        ICP criteria. Write out/leads.json and icp_match_rate to metrics.json.
+      depends_on: [collect-directories, collect-maps]
+      goals: [qualified]
+      stage: qualify
+      isolated: true
+      weight: 2.0
+    - id: compliance-review
+      role: judge
+      instruction: >
+        Check a sample of records against the recorded lawful basis and the
+        permitted-source list. Report per-record pass or fail with the source URL
+        quoted. Treat a missing basis as a fail.
+      depends_on: [qualify]
+      goals: [lawful]
+      stage: qualify
+      tier: strong
+      provider: openai
+  concurrency:
+    mode: auto
+    cap: 4
+    min_marginal_gain: 0.05
+
+providers:
+  providers:
+    - id: ollama
+      kind: ollama
+      tiers: [cheap]
+      command: ollama
+      args: ["run", "{model}"]
+      model: qwen2.5-coder
+      prompt_on_stdin: true
+      timeout_seconds: 600
+    - id: claude
+      kind: claude_code
+      tiers: [standard]
+      command: claude
+      args: ["-p", "{prompt}"]
+      timeout_seconds: 1800
+    - id: openai
+      kind: openai
+      tiers: [strong]
+      command: curl
+      args: ["-sS", "https://api.openai.com/v1/chat/completions", "-H", "Content-Type: application/json", "-H", "Authorization: Bearer $OPENAI_API_KEY", "-d", "@-"]
+      model: gpt-4o
+      requires_env: [OPENAI_API_KEY]
+      prompt_on_stdin: true
+      timeout_seconds: 600
+  cascade:
+    cheap: [ollama, claude]
+    standard: [claude]
+    strong: [openai, claude]
+  enforce_judge_independence: true
+
+skills:
+  acquisition_order: [installed, marketplace, generate]
+  min_trials: 3
+
+context:
+  carry_summaries: 2

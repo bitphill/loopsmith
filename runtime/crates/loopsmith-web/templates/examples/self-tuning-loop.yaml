@@ -1,0 +1,323 @@
+name: self-tuning-loop
+version: 0.1.0
+description: >
+  A weekly report loop that is allowed to propose changes to itself, measured
+  against the numbers it currently achieves, and forbidden from touching the
+  parts that say no.
+
+# --------------------------------------------------------------------
+# What this example is for
+#
+# Self-evolution is the feature most likely to be switched on for the wrong
+# reason, so this example is mostly about the fence around it:
+#
+#   evolution.baseline   what the loop currently achieves, measured
+#   evolution.max_regression  how much worse a proposal may make any of it
+#   safety.protected     what a proposal may never touch, whatever it says
+#
+# Without a baseline every proposal looks like an improvement, because there
+# is nothing for it to be worse than. And a loop allowed to edit its own
+# limits does not have limits.
+#
+# loopsmith never applies a proposal. `loopsmith run proposals` shows them and
+# a person decides.
+# --------------------------------------------------------------------
+
+environment: dev
+
+features:
+  # The one that matters here. Off everywhere else in this library.
+  self_evolution: true
+  marketplace_skills: false
+  external_side_effects: false
+  parallel_execution: true
+  human_approval: true
+
+# --------------------------------------------------------------------
+# intent — what this loop is for
+# --------------------------------------------------------------------
+intent:
+
+  background:
+    - key: report_path
+      value: out/weekly.md
+      note: The deliverable. One file, overwritten each week.
+    - key: audience
+      value: The three people who run this product. They read on a phone, on Monday.
+    - key: length_rule
+      value: Under 600 words. A report nobody finishes is a report nobody read.
+
+  # The baseline below is the numbers from these runs. Do not invent them.
+  # A baseline pulled out of the air is worse than no baseline: it gives the
+  # regression gate something confident and wrong to compare against.
+  prerequisites:
+    - step: Ran this report by hand for three weeks and kept every draft
+      done: false
+      evidence: "link the three drafts"
+    - step: Recorded what each of those runs cost and how long it took
+      done: false
+    - step: Wrote down what makes a report good enough to send, in checkable terms
+      done: false
+
+  goals:
+    - name: draft
+      description: Produce the weekly report from this week's data, under the length rule.
+    - name: readable
+      description: The report is something the audience will actually finish.
+      depends_on: [draft]
+
+  success:
+    - target: overall
+      name: sendable
+      mode: percentage
+      statement: Every blocking check passes.
+      threshold: 1.0
+
+# --------------------------------------------------------------------
+# execution — how the work gets done
+# --------------------------------------------------------------------
+execution:
+
+  graph:
+    nodes:
+      - id: collect
+        role: researcher
+        instruction: >
+          Gather this week's numbers from the sources named in the background.
+          Record each with its source. Write no prose.
+        goals: [draft]
+        tier: cheap
+
+      - id: write
+        role: builder
+        instruction: >
+          Write the report from what collect gathered, under the length rule.
+          Every number carries where it came from.
+        depends_on: [collect]
+        goals: [draft]
+        tier: standard
+        weight: 2.0
+        isolation:
+          mode: worktree
+
+      - id: read
+        role: judge
+        instruction: >
+          Read it as the audience would, on a phone, on a Monday. Judge against
+          the standard named in the check. Rewrite nothing.
+        depends_on: [write]
+        goals: [readable]
+        tier: strong
+        provider: openai
+
+    concurrency:
+      mode: auto
+      cap: 4
+      min_marginal_gain: 0.05
+
+  providers:
+    providers:
+      - id: ollama
+        kind: ollama
+        tiers: [cheap]
+        command: ollama
+        args: ["run", "{model}"]
+        model: llama3
+        prompt_on_stdin: true
+        timeout_seconds: 120
+      - id: claude
+        kind: claude_code
+        tiers: [standard]
+        command: claude
+        args: ["-p", "{prompt}"]
+      - id: openai
+        kind: openai
+        tiers: [strong]
+        command: curl
+        args: ["-sS", "https://api.openai.com/v1/chat/completions"]
+        requires_env: [OPENAI_API_KEY]
+        prompt_on_stdin: true
+    cascade:
+      cheap: [ollama, claude]
+      standard: [claude]
+      strong: [openai]
+    enforce_judge_independence: true
+
+  # What a proposal is allowed to learn from. `procedural` and `failure` are
+  # written by the engine and promote themselves; `semantic` is written by the
+  # agents and waits for a person, because a loop that can promote its own
+  # beliefs can talk itself into anything.
+  memory:
+    carry_summaries: 3
+    max_summary_chars: 1500
+    namespaces:
+      episodic:
+        enabled: true
+        retention_days: 90
+        promotion:
+          rule: never
+      semantic:
+        enabled: true
+        promotion:
+          rule: human_approval
+        min_confidence: 0.75
+        require_provenance: true
+      procedural:
+        enabled: true
+        promotion:
+          rule: automatic
+      failure:
+        enabled: true
+        promotion:
+          rule: automatic
+
+  triggers:
+    triggers:
+      - on:
+          type: cron
+          expr: "0 6 * * 1"
+        idempotency_key: weekly-report
+    max_depth: 1
+    dedup_window_seconds: 86400
+
+# --------------------------------------------------------------------
+# safety — what must not happen, and when to stop
+# --------------------------------------------------------------------
+safety:
+
+  checks:
+    - target: draft
+      name: report-exists
+      mode: objective
+      statement: The report exists and is not empty.
+      blocking: true
+      detector:
+        type: file_exists
+        path: out/weekly.md
+        non_empty: true
+
+    - target: draft
+      name: under-the-length-rule
+      mode: objective
+      statement: The report is under 600 words.
+      blocking: true
+      detector:
+        type: script
+        command: scripts/word-count.sh
+
+    - target: readable
+      name: reads-well
+      mode: subjective
+      statement: >
+        Every number carries its source, there is no filler paragraph, and the
+        first sentence says the most important thing.
+      blocking: true
+      detector:
+        type: judge
+        standard: docs/report-standard.md
+
+    # An `overall` check is what lets the loop finish as a whole rather than
+    # only goal by goal — and here it is also what the baseline's
+    # `validation_pass_rate` is a rate of.
+    - target: overall
+      name: sendable-as-it-stands
+      mode: objective
+      statement: The report exists, is under the length rule, and names its sources.
+      blocking: true
+      detector:
+        type: script
+        command: scripts/sendable.sh
+
+  gates:
+    stop:
+      max_iterations: 6
+      max_revisions_per_node: 2
+      max_wall_clock_seconds: 1800
+      max_cost_usd: 2.0
+      no_progress_iterations: 3
+      no_progress_iterations_randomness: 2
+      stop_on_overall_success: true
+
+  limits:
+    global:
+      rules:
+        - Do not send anything. This loop writes a file and stops.
+      forbidden_paths: [".git/", "state/"]
+      forbidden_commands: ["git push", "rm -rf"]
+      max_seconds: 600
+      human_checkpoint:
+        - sending a message
+        - publishing anything
+
+  recovery:
+    transient_error:
+      action: retry
+      max_attempts: 3
+      backoff: exponential
+    invalid_output:
+      action: revise
+      max_attempts: 2
+    safety_violation:
+      action: stop
+
+  alerts:
+    - id: drifting-up
+      metric: cost_usd
+      above: 1.0
+      message: Half the ceiling for a 600-word report. Something is retrying.
+    - id: failing-more
+      metric: validation_pass_rate
+      below: 0.6
+      message: Most checks are failing. The proposals are probably making it worse.
+
+  # The fence. A proposal that would rewrite any of these is refused before it
+  # is evaluated, not after — so the loop cannot argue its way past its own
+  # limits by proposing a smaller limit first.
+  protected:
+    components:
+      - gates
+      - limits
+      - recovery
+      - protected
+      - approvals
+      - credentials
+      - audit
+      - baselines
+      - retention
+      - environment
+    extra_paths:
+      - scripts/word-count.sh
+      - docs/report-standard.md
+
+# --------------------------------------------------------------------
+# evolution — how the loop may improve itself
+# --------------------------------------------------------------------
+evolution:
+  enabled: true
+
+  # Measured from the three manual runs in intent.prerequisites. Replace every
+  # number with your own before turning this on.
+  baseline:
+    completion_rate: 0.67
+    validation_pass_rate: 0.80
+    cost_usd: 0.45
+    latency_seconds: 420
+    iterations_to_success: 3.0
+    measured_at: "2026-01-12"
+
+  # Five per cent. A proposal that makes any baseline number worse by more than
+  # this is refused by the gate rather than by a reviewer's patience.
+  max_regression: 0.05
+
+  # What a proposal may be about. Everything not on this list is refused,
+  # including — deliberately — `validation_change` and `success_criteria`:
+  # a loop that can move its own goalposts cannot certify that it met them.
+  allowed_kinds:
+    - prompt_change
+    - graph_change
+    - provider_routing
+    - new_skill
+
+  require_sandbox: true
+  require_approval: true
+  keep_rollback: true

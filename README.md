@@ -41,7 +41,7 @@ terminal — no browser, so it works over SSH and in a bare shell.
 
 ### ➜ [START-HERE — README-FOR-DUMMIES.md](README-FOR-DUMMIES.md)
 
-A plain-English guide: one install line, thirteen ready-made loops to copy, the
+A plain-English guide: one install line, fifteen ready-made loops to copy, the
 six settings you actually edit, and how to leave it running on a schedule.
 
 ---
@@ -230,7 +230,7 @@ planner, and permission derivation the CLI uses, in-process:
 - the exact permission grant the loop will need
 - parallel builders that would overwrite each other for want of a worktree
 
-All thirteen examples are compiled into the binary and load with one click, which
+All fifteen examples are compiled into the binary and load with one click, which
 is the fastest way to read a working config with the explanations attached. The
 buttons — check, plan, create, dry run, run, watch, install schedule, grant
 permissions — spawn the real `loopsmith` binary and stream its output live, so the
@@ -313,11 +313,12 @@ default skills. Write YAML or Markdown; they are the same model, and
 
 ## Examples
 
-Thirteen worked loops in [`config/examples/`](config/examples/), each as a `.yaml`
+Fifteen worked loops in [`config/examples/`](config/examples/), each as a `.yaml`
 and an equivalent `.md`, all shipping with `pre_execution` unfinished. Annotated
 index in [the wiki](https://github.com/bitphill/loopsmith/wiki/Examples).
 
 **Build** [`refactor`](config/examples/refactor-loop.yaml) ·
+[`container-refactor`](config/examples/container-refactor-loop.yaml) ·
 [`landing-page`](config/examples/landing-page-loop.yaml) ·
 [`viral-game`](config/examples/viral-game-loop.yaml) —
 **Find out** [`research`](config/examples/research-loop.yaml) ·
@@ -329,7 +330,8 @@ index in [the wiki](https://github.com/bitphill/loopsmith/wiki/Examples).
 [`cold-outreach`](config/examples/cold-outreach-loop.yaml) ·
 [`sales-leads`](config/examples/sales-leads-loop.yaml) ·
 [`marketing-automation`](config/examples/marketing-automation-loop.yaml) —
-**Spend money** [`x402-agent`](config/examples/x402-agent-loop.yaml)
+**Spend money** [`x402-agent`](config/examples/x402-agent-loop.yaml) —
+**Improve itself** [`self-tuning`](config/examples/self-tuning-loop.yaml)
 
 Start from one with `loopsmith loop new --path … --config-file <example>` rather than
 from the blank template.

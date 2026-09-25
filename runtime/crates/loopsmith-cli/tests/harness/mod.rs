@@ -212,12 +212,29 @@ impl Fixture {
     }
 
     /// Every distinct `scripts/…` path the config's detectors name.
+    ///
+    /// Gate rules as well as checks. A gate is a detector too, and an entry
+    /// gate whose script does not exist stops the run while it is still
+    /// validating — before `RunStarted` reaches the ledger, so the failure
+    /// arrives as "a run must open the ledger" and says nothing about the
+    /// missing file. That is exactly how the first example to use an entry
+    /// gate found this.
     pub fn script_detectors(&self) -> BTreeSet<String> {
+        let gates = &self.cfg.safety.gates;
+        let rules = gates
+            .entry
+            .iter()
+            .chain(gates.approval.iter())
+            .chain(gates.rollback.iter())
+            .map(|r| &r.detector);
+
         self.cfg
             .safety
             .checks
             .iter()
-            .filter_map(|v| match &v.detector {
+            .map(|v| &v.detector)
+            .chain(rules)
+            .filter_map(|d| match d {
                 Detector::Script { command, .. } => Some(command.clone()),
                 _ => None,
             })

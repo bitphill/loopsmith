@@ -34,7 +34,7 @@ two front ends build one for you: `loopsmith --web` in a browser, or
 
 ### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.3.1/README-FOR-DUMMIES.md)
 
-A plain-English guide: one install line, thirteen ready-made loops to copy, the
+A plain-English guide: one install line, fifteen ready-made loops to copy, the
 six settings you actually edit, and how to leave it running on a schedule.
 
 There is also a generated **code wiki** mapping the crates, the execution engine,
@@ -125,7 +125,7 @@ the field it belongs to, what a run could cost at the ceilings currently set (or
 **unbounded** if none is), the wave schedule and the speedup ceiling no worker
 count beats, and parallel builders that would overwrite each other.
 
-All thirteen examples are compiled into the binary and load with one click. The
+All fifteen examples are compiled into the binary and load with one click. The
 buttons spawn the real `loopsmith` binary and stream its output live, so the
 browser can never drift from the CLI and can never do anything `loopsmith --help`
 does not list. A run belongs to the server, not the page: close the tab and it
@@ -379,7 +379,7 @@ registered on both by unrelated projects. The installed command is always
 - [Architecture and the reasoning behind it](https://github.com/bitphill/loopsmith/wiki/Architecture)
 - [Blank template](https://github.com/bitphill/loopsmith/blob/main/LOOP-TEMPLATE.md)
 - [JSON schema](https://github.com/bitphill/loopsmith/blob/main/config/loop.schema.json)
-- [Thirteen worked examples](https://github.com/bitphill/loopsmith/tree/main/config/examples)
+- [Fifteen worked examples](https://github.com/bitphill/loopsmith/tree/main/config/examples)
 - [Changelog](https://github.com/bitphill/loopsmith/blob/main/CHANGELOG.md)
 
 MIT licensed. © bitphill
