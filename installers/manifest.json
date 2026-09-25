@@ -22,7 +22,7 @@
   "build_dir": "runtime",
   "built_unix": "runtime/target/release/loopsmith",
   "built_windows": "runtime/target/release/loopsmith.exe",
-  "min_rust": "1.75",
+  "min_rust": "1.85",
 
   "build_args": ["build", "--release", "--bin", "loopsmith"],
   "requires": ["cargo", "git"],

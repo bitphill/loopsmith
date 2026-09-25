@@ -64,7 +64,7 @@
   - min_marginal_gain: 0.05
 - join:
   - strategy: wait_for_all
-- container_image: rust:1.75
+- container_image: rust:1.85
 
 ### survey
 - isolation:

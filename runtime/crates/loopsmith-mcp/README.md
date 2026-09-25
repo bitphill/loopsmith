@@ -6,7 +6,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/loopsmith-mcp?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-mcp)
 [![license](https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
-![rust](https://img.shields.io/badge/rust-1.75%2B-C1272D?logo=rust&logoColor=white)
+![rust](https://img.shields.io/badge/rust-1.85%2B-C1272D?logo=rust&logoColor=white)
 
 Part of **[loopsmith](https://github.com/bitphill/loopsmith)** — self-evolving
 agent loops behind a deterministic verification gate.

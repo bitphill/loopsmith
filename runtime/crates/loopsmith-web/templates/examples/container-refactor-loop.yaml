@@ -157,7 +157,7 @@ execution:
       min_marginal_gain: 0.05
 
     # Every `container` node without its own image uses this one.
-    container_image: rust:1.75
+    container_image: rust:1.85
 
   providers:
     providers:

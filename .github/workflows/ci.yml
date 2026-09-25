@@ -240,6 +240,68 @@ jobs:
           "$LOOPSMITH_HOME/bin/loopsmith" doctor >/dev/null
           echo "aarch64: $("$LOOPSMITH_HOME/bin/loopsmith" --version)"
 
+  # The minimum supported Rust version, which has been a claim in the README
+  # and in four package manifests with nothing behind it. `rust-version` in
+  # Cargo.toml makes cargo refuse an older toolchain; it does not make anything
+  # notice when a 1.82 API lands in the code and the claim quietly becomes
+  # false. This is what notices.
+  #
+  # `--all-targets` so the tests are checked too: a test using a newer API
+  # compiles for the author and not for the person following the README.
+  msrv:
+    name: rust 1.85, the version the README promises
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 1.85
+        shell: bash
+        run: |
+          rustup toolchain install 1.85 --profile minimal --no-self-update
+          rustup default 1.85
+          rustc --version
+
+      # `cargo check`, not `cargo test`: this asks whether the code compiles on
+      # the oldest toolchain the project claims. Whether it *behaves* is the
+      # matrix's question, and running the suite three more times to re-answer
+      # it would double the workflow for nothing.
+      - name: It still compiles
+        run: cargo check --workspace --all-targets --locked
+
+  # Container isolation, against a real daemon.
+  #
+  # `isolation: container` runs a node's provider inside `docker run --rm`.
+  # The decision — which image, network or not, degrade or not — has unit
+  # tests; the argv has unit tests; and until this job, nothing had ever handed
+  # that argv to a daemon. The dev machine this was written on has no Docker,
+  # which is exactly why the code degrades gracefully and exactly why the path
+  # went untested for two phases.
+  docker:
+    name: a container node really runs in a container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: What runtime is here
+        shell: bash
+        run: docker version --format '{{.Server.Version}}'
+
+      - name: Install the toolchain
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+
+      # Pulled explicitly so a registry hiccup fails here, with a clear message,
+      # rather than inside the test as an assertion about the mount.
+      - name: Pull the image the test uses
+        run: docker pull alpine:3
+
+      - name: Run it
+        env:
+          LOOPSMITH_STRESS_DOCKER: "1"
+        run: cargo test -p loopsmith --test opt_in a_container_node -- --nocapture
+
   # The web UI is compiled into the binary with `include_str!` from a committed
   # `src/dist/`. That is what makes `loopsmith --web` work with no Node on
   # the machine, and it is also a trap: a frontend change that is not rebuilt
