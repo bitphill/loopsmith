@@ -93,7 +93,7 @@ impl Phases {
     /// May this node be dispatched right now?
     ///
     /// Nodes without a stage are always eligible. Gating work that never joined
-    /// a phase would make adding section I a breaking change for every config
+    /// a phase would make adding `execution.phases` a breaking change for every config
     /// that does not use it.
     pub fn eligible(&self, node: &NodeSpec) -> bool {
         match &node.stage {

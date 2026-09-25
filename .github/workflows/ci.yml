@@ -111,7 +111,7 @@ jobs:
           fi
           bad=0
           for cfg in config/examples/*.yaml config/examples/*.md; do
-            out=$("$bin" validate "$cfg" 2>&1 || true)
+            out=$("$bin" loop validate "$cfg" 2>&1 || true)
             summary=$(printf '%s\n' "$out" | grep -E '[0-9]+ error\(s\), [0-9]+ warning\(s\)' | tail -1)
             errors=$(printf '%s' "$summary" | sed -E 's/^([0-9]+) error.*/\1/')
             warnings=$(printf '%s' "$summary" | sed -E 's/.*, ([0-9]+) warning.*/\1/')
@@ -138,7 +138,7 @@ jobs:
           fi
           scratch="${RUNNER_TEMP}/ci-loop"
           rm -rf "$scratch"
-          "$bin" new --path "$scratch" --purpose "prove the launchers work"
+          "$bin" loop new --path "$scratch" --purpose "prove the launchers work"
           cd "$scratch"
           for f in run.sh resume.sh run.cmd resume.cmd scripts/compat.sh; do
             test -f "$f" || { echo "::error::$f was not generated"; exit 1; }

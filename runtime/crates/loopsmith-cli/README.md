@@ -62,7 +62,7 @@ back. A system that can only promote is a burndown chart with extra steps.
 ## Guided terminal setup
 
 ```bash
-loopsmith --guided        # or: loopsmith guided
+loopsmith --guided        # or: loopsmith loop guided
 ```
 
 The config the browser paints, built by answering one question at a time — no
@@ -71,7 +71,7 @@ itself, then shows its default in `[brackets]`; choices are numbered and you typ
 the number (or the name). Installed agent CLIs are offered as a menu, pre-filled
 with a working argv. `:back`, `:next`, `:help`, and `:quit` work at every prompt,
 and nothing is written until the config passes the same validator `loopsmith
-validate` runs. `loopsmith guided --edit <file>` walks through changing an
+loop validate` runs. `loopsmith loop guided --edit <file>` walks through changing an
 existing loop instead of starting fresh.
 
 ## The browser UI
@@ -142,12 +142,12 @@ cargo install loopsmith
 
 # --path must be outside any repo you care about: a loop edits files and writes
 # state, so it does not get pointed at the tool that runs it.
-loopsmith new --path ~/loops/nightly-refactor --purpose "keep the module simple"
+loopsmith loop new --path ~/loops/nightly-refactor --purpose "keep the module simple"
 
 cd ~/loops/nightly-refactor
 $EDITOR loop.yaml           # your goals, and how each one is checked
-loopsmith validate loop.yaml
-loopsmith plan     loop.yaml
+loopsmith loop validate loop.yaml
+loopsmith loop plan     loop.yaml
 ./run.sh                    # run.cmd on Windows
 ```
 
@@ -172,7 +172,7 @@ have actually done it.
 Ten sections, **A** to **J**: information, the manual work list, goals,
 validations, success criteria, stop gates, schedules, constraints, execution
 guidelines, default skills. YAML or Markdown — the same model either way, and
-`loopsmith convert` translates between them.
+`loopsmith loop convert` translates between them.
 
 ```yaml
 name: nightly-refactor
@@ -249,13 +249,13 @@ can satisfy a goal — a model's opinion of its own work never does.
 
 | Question | Command |
 |---|---|
-| What does the gate say? | `loopsmith status <config> <run-id>` |
-| What happened? | `loopsmith ledger <config> <run-id>` |
+| What does the gate say? | `loopsmith run status <config> <run-id>` |
+| What happened? | `loopsmith run ledger <config> <run-id>` |
 | Why did it stop? | the last line of `logs/<run-id>.log` |
-| What does it want changed about itself? | `loopsmith proposals <config> <run-id>` |
+| What does it want changed about itself? | `loopsmith run proposals <config> <run-id>` |
 | Which providers can it reach? | `loopsmith providers <config>` |
 | Will this machine get in the way? | `loopsmith doctor <config>` |
-| Ask the gate right now | `loopsmith gate <config> --target <goal>` |
+| Ask the gate right now | `loopsmith run gate <config> --target <goal>` |
 
 **The loop never edits its own config.** Goals, validations, success criteria, and
 sub-agent adoption are written as *proposals* for a human to apply.
@@ -311,8 +311,8 @@ cascade move on.
 A loop that runs once is a script. Two ways to make one live:
 
 ```bash
-loopsmith watch    ~/loops/nightly-refactor/loop.yaml            # stay resident
-loopsmith schedule ~/loops/nightly-refactor/loop.yaml --install  # hand it to the OS
+loopsmith run watch    ~/loops/nightly-refactor/loop.yaml            # stay resident
+loopsmith run schedule ~/loops/nightly-refactor/loop.yaml --install  # hand it to the OS
 ```
 
 Triggers are declared in section **G**: `cron`, `interval`, `file_change`,
@@ -376,7 +376,7 @@ registered on both by unrelated projects. The installed command is always
 
 - [Full README](https://github.com/bitphill/loopsmith#readme)
 - [Section-by-section config reference](https://github.com/bitphill/loopsmith/blob/main/HOW-TO-USE.md)
-- [Architecture and the reasoning behind it](https://github.com/bitphill/loopsmith/blob/main/README-DETAIL.md)
+- [Architecture and the reasoning behind it](https://github.com/bitphill/loopsmith/wiki/Architecture)
 - [Blank template](https://github.com/bitphill/loopsmith/blob/main/LOOP-TEMPLATE.md)
 - [JSON schema](https://github.com/bitphill/loopsmith/blob/main/config/loop.schema.json)
 - [Thirteen worked examples](https://github.com/bitphill/loopsmith/tree/main/config/examples)

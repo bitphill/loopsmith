@@ -80,7 +80,7 @@ back. A system that can only promote is a burndown chart with extra steps.
 ## Guided setup, in the terminal
 
 ```bash
-loopsmith --guided        # or: loopsmith guided
+loopsmith --guided        # or: loopsmith loop guided
 ```
 
 The same config the browser paints, built by answering one question at a time —
@@ -94,8 +94,8 @@ command line.
 Four commands work at every prompt: `:back` to change the last answer, `:next` to
 keep the default, `:help` to explain the field again, and `:quit` to leave with a
 draft you can resume. Nothing is written until the finished config passes the same
-check `loopsmith validate` runs on a hand-written file, and
-`loopsmith guided --edit <file>` walks through changing a loop you already have.
+check `loopsmith loop validate` runs on a hand-written file, and
+`loopsmith loop guided --edit <file>` walks through changing a loop you already have.
 
 ## The browser UI
 
@@ -165,12 +165,12 @@ npm install -g @bitphill/loopsmith
 
 # --path must be outside any repo you care about: a loop edits files and writes
 # state, so it does not get pointed at the tool that runs it.
-loopsmith new --path ~/loops/nightly-refactor --purpose "keep the module simple"
+loopsmith loop new --path ~/loops/nightly-refactor --purpose "keep the module simple"
 
 cd ~/loops/nightly-refactor
 $EDITOR loop.yaml           # your goals, and how each one is checked
-loopsmith validate loop.yaml
-loopsmith plan     loop.yaml
+loopsmith loop validate loop.yaml
+loopsmith loop plan     loop.yaml
 ./run.sh                    # run.cmd on Windows
 ```
 
@@ -250,10 +250,10 @@ can satisfy a goal — a model's opinion of its own work never does.
 
 | Question | Command |
 |---|---|
-| What does the gate say? | `loopsmith status <config> <run-id>` |
-| What happened? | `loopsmith ledger <config> <run-id>` |
+| What does the gate say? | `loopsmith run status <config> <run-id>` |
+| What happened? | `loopsmith run ledger <config> <run-id>` |
 | Why did it stop? | the last line of `logs/<run-id>.log` |
-| What does it want changed about itself? | `loopsmith proposals <config> <run-id>` |
+| What does it want changed about itself? | `loopsmith run proposals <config> <run-id>` |
 | Which providers can it reach? | `loopsmith providers <config>` |
 | Will this machine get in the way? | `loopsmith doctor <config>` |
 
@@ -314,7 +314,7 @@ Elsewhere: [`loopsmith`](https://crates.io/crates/loopsmith) on crates.io,
 
 - [Full README](https://github.com/bitphill/loopsmith#readme)
 - [Section-by-section config reference](https://github.com/bitphill/loopsmith/blob/main/HOW-TO-USE.md)
-- [Architecture and the reasoning behind it](https://github.com/bitphill/loopsmith/blob/main/README-DETAIL.md)
+- [Architecture and the reasoning behind it](https://github.com/bitphill/loopsmith/wiki/Architecture)
 - [Thirteen worked examples](https://github.com/bitphill/loopsmith/tree/main/config/examples)
 - [Changelog](https://github.com/bitphill/loopsmith/blob/main/CHANGELOG.md)
 

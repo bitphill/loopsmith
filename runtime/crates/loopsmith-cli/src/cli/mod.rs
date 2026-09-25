@@ -391,7 +391,7 @@ pub enum SkillsAction {
         /// Skill name, or an `owner/repo@skill` spec.
         name: String,
     },
-    /// Install everything this loop declares under `default_skills` (section J).
+    /// Install everything this loop declares under `execution.default_skills`.
     Install { config: PathBuf },
     /// Rank sub-agents by the gate outcomes that followed their use.
     Scores { config: PathBuf },

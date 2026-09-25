@@ -96,7 +96,7 @@ pub fn execute(config: Option<&Path>) -> Result<ExitCode, String> {
     if loopsmith_util::which("git").is_none() {
         notes.push(
             "git is not on PATH: `isolated: true` nodes will run in the shared working \
-             directory and say so, and section J `github` sub-agents cannot be fetched"
+             directory and say so, and `github` sub-agents cannot be fetched"
                 .into(),
         );
     }
@@ -184,7 +184,7 @@ fn config_notes(path: &Path) -> Vec<String> {
 
     if !cfg.execution.default_skills.is_empty() && loopsmith_util::which("git").is_none() {
         out.push(format!(
-            "{} section J sub-agent(s) declared, and git is not on PATH to fetch them",
+            "{} declared sub-agent(s), and git is not on PATH to fetch them",
             cfg.execution.default_skills.len()
         ));
     }

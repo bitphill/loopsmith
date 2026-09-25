@@ -7,10 +7,16 @@
 #   ./tools/publish-wiki.sh --pages-only # only the gh-pages branch
 #   ./tools/publish-wiki.sh --wiki-only  # only the repository Wiki tab
 #
-# `gitnexus wiki loops` writes `.gitnexus/wiki/` — an HTML viewer plus one
-# Markdown page per subsystem. That directory is gitignored, so publishing is a
-# separate step, and it has to happen twice because the two surfaces want the
-# same content in different shapes:
+# There are two sources. `gitnexus wiki loops` writes `.gitnexus/wiki/` — an
+# HTML viewer plus one Markdown page per subsystem, derived from the code and
+# regenerated wholesale. `wiki/` in this repository holds the pages a generator
+# cannot write: the architecture rationale, the command surface, the migration
+# guide. Both are published together, and a name collision between them is an
+# error rather than a silent overwrite.
+#
+# `.gitnexus/` is gitignored, so publishing is a separate step, and it has to
+# happen twice because the two surfaces want the same content in different
+# shapes:
 #
 #   gh-pages branch          -> https://bitphill.github.io/loopsmith/wiki/
 #   repository Wiki tab      -> https://github.com/bitphill/loopsmith/wiki
@@ -35,6 +41,7 @@ set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="$PWD"
 SRC="$ROOT/.gitnexus/wiki"
+HAND="$ROOT/wiki"
 VIEWER="https://bitphill.github.io/loopsmith/wiki/"
 WIKI_REMOTE="https://github.com/bitphill/loopsmith.wiki.git"
 
@@ -77,6 +84,22 @@ if [ "$DO_PAGES" -eq 1 ]; then
   mkdir -p "$TMP/pages/wiki"
   cp -R "$SRC/." "$TMP/pages/wiki/"
 
+  # The hand-written pages go beside the generated ones rather than into them:
+  # the viewer compiles its content into `index.html`, so there is no way to
+  # add a page to it without regenerating it. They are served as Markdown and
+  # linked from the landing page and from the wiki tab, which is where prose
+  # gets read anyway.
+  for f in "$HAND"/*.md; do
+    [ -e "$f" ] || continue
+    base="$(basename "$f")"
+    # `[ … ] && err` would be a failing command under `set -e` on every run
+    # where there is no collision, which is every run.
+    if [ -e "$SRC/$base" ]; then
+      err "wiki/$base and the generated wiki both claim that name"
+    fi
+    cp "$f" "$TMP/pages/wiki/$base"
+  done
+
   # The landing page, beside the wiki rather than instead of it. The root of
   # gh-pages used to be a meta-refresh into `wiki/`, which meant the project's
   # own address was a redirect to its generated API documentation — the least
@@ -115,11 +138,22 @@ it overwrites that page on the first push."
 
   find "$TMP/wiki" -maxdepth 1 -name '*.md' -delete
 
-  SRC="$SRC" DST="$TMP/wiki" VIEWER="$VIEWER" python3 - <<'PY'
+  SRC="$SRC" HAND="$HAND" DST="$TMP/wiki" VIEWER="$VIEWER" python3 - <<'PY'
 import os, re
 
 src, dst, viewer = os.environ['SRC'], os.environ['DST'], os.environ['VIEWER']
-mds = [f for f in sorted(os.listdir(src)) if f.endswith('.md')]
+hand = os.environ['HAND']
+
+# Two sources, one set of pages. A generated page is named after the subsystem
+# it describes (`gating-success-criteria.md`); a hand-written one is already
+# named as a wiki page (`Migration-0-3-To-1-0.md`), because that is the name it
+# is cross-linked by from the READMEs and from the other pages.
+gen = [f for f in sorted(os.listdir(src)) if f.endswith('.md')]
+own = ([f for f in sorted(os.listdir(hand)) if f.endswith('.md')]
+       if os.path.isdir(hand) else [])
+mds = gen + own
+where = {f: src for f in gen}
+where.update({f: hand for f in own})
 
 def page_name(stem):
     # `overview` is the entry point, and a GitHub wiki's entry point is `Home`.
@@ -127,7 +161,12 @@ def page_name(stem):
         return 'Home'
     return '-'.join(w.capitalize() if w.islower() else w for w in stem.split('-'))
 
-stem2page = {f[:-3]: page_name(f[:-3]) for f in mds}
+def page_of(f):
+    # A hand-written file is already named as its page; leaving it alone is
+    # what keeps `](Migration-0-3-To-1-0)` resolving from outside the wiki.
+    return f[:-3] if where[f] is hand else page_name(f[:-3])
+
+stem2page = {f[:-3]: page_of(f) for f in mds}
 
 def heading(page, text):
     m = re.search(r'^#\s+(.+)$', text, re.M)
@@ -137,7 +176,7 @@ titles = {}
 for f in mds:
     stem = f[:-3]
     page = stem2page[stem]
-    text = open(os.path.join(src, f)).read()
+    text = open(os.path.join(where[f], f)).read()
     # `](foo-bar.md)` addresses a file. A wiki addresses a page.
     text = re.sub(r'\]\(([a-z0-9._-]+)\.md\)',
                   lambda m: '](%s)' % stem2page.get(m.group(1), m.group(1)), text)
@@ -178,7 +217,8 @@ broken = sorted({t for t in re.findall(r'\]\(([A-Z][A-Za-z0-9-]*)\)',
 if broken:
     raise SystemExit("cross-links with no page: " + ", ".join(broken))
 
-print(f"    {len(mds)} pages, {len(pages)} cross-link targets, all resolved")
+print(f"    {len(gen)} generated + {len(own)} hand-written pages, "
+      f"{len(pages)} cross-link targets, all resolved")
 PY
 
   if [ -z "$(git -C "$TMP/wiki" status --porcelain)" ]; then

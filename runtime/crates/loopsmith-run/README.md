@@ -41,7 +41,7 @@ Two properties are structural rather than advisory:
 
 The same crate holds the pieces a run leans on: worktree isolation, the
 plain-text run log that mirrors the ledger, judge-verdict parsing, and the
-trigger watcher behind `loopsmith watch` and `loopsmith schedule`.
+trigger watcher behind `loopsmith run watch` and `loopsmith run schedule`.
 
 ## Where it sits
 

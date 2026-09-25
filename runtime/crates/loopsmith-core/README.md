@@ -1,7 +1,7 @@
 <div align="center">
   <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.3.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="140" />
   <h1>loopsmith-core</h1>
-  <p><em>The A–J config model for loopsmith loops, and its validation.</em></p>
+  <p><em>The config model for loopsmith loops — four bundles, eight top-level keys — and its validation.</em></p>
 </div>
 
 [![crates.io](https://img.shields.io/crates/v/loopsmith-core?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-core)

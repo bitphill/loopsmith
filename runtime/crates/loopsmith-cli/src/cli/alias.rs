@@ -281,4 +281,193 @@ mod tests {
             );
         }
     }
+
+    /// Documents that live above this crate, and are read rather than run.
+    ///
+    /// The repository root is three directories above the crate: this is a
+    /// workspace under `runtime/`, and the docs are beside it.
+    fn repo_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .expect("the crate is three deep in the repository")
+            .to_path_buf()
+    }
+
+    /// Files whose whole job is to record what the old spelling was.
+    ///
+    /// `CHANGELOG.md` is history and must not be rewritten; the migration page
+    /// is the mapping table itself. Everything else is telling a reader what
+    /// to type today.
+    const KEEPS_THE_OLD_SPELLING: &[&str] =
+        &["CHANGELOG.md", "wiki/Migration-0-3-To-1-0.md"];
+
+    fn documents(dir: &std::path::Path, into: &mut Vec<std::path::PathBuf>) {
+        const SKIP: &[&str] = &[
+            ".git", ".gitnexus", "target", "node_modules", "dist", "docs", "proposals",
+            ".claude", "build",
+        ];
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if path.is_dir() {
+                if !SKIP.contains(&name.as_ref()) {
+                    documents(&path, into);
+                }
+            } else if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("md" | "sh" | "bat" | "cmd" | "ps1" | "rb" | "html")
+            ) {
+                into.push(path);
+            }
+        }
+    }
+
+    /// No document tells anyone to type a spelling that moved.
+    ///
+    /// The same question the web UI is held to by
+    /// `the_browser_never_asks_for_a_spelling_that_moved`, asked of the other
+    /// surface a user copies commands from. It is asked through [`rewrite`]
+    /// rather than against a list of strings, so a verb that moves later is
+    /// caught in the documents on the same commit that moves it.
+    ///
+    /// A deprecation notice is not an error, which is exactly why this is
+    /// worth a test: every README could tell every reader to type the 0.3
+    /// spelling for a year and nothing would fail.
+    #[test]
+    fn no_document_tells_anyone_to_type_a_spelling_that_moved() {
+        let root = repo_root();
+        let mut docs = Vec::new();
+        documents(&root, &mut docs);
+        assert!(docs.len() > 20, "found only {} documents to check", docs.len());
+
+        let mut wrong: Vec<String> = Vec::new();
+        let mut seen = 0usize;
+        for doc in docs {
+            let rel = doc.strip_prefix(&root).unwrap_or(&doc).to_string_lossy().replace('\\', "/");
+            if KEEPS_THE_OLD_SPELLING.contains(&rel.as_ref()) {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&doc) else {
+                continue;
+            };
+            for (n, line) in text.lines().enumerate() {
+                for command in commands_in(line) {
+                    seen += 1;
+                    let argv: Vec<String> = std::iter::once("loopsmith".to_string())
+                        .chain(command.iter().map(|s| s.to_string()))
+                        .collect();
+                    if let (_, Some(moved)) = rewrite(argv) {
+                        wrong.push(format!(
+                            "{}:{}: `loopsmith {}` is now `loopsmith {}`",
+                            rel,
+                            n + 1,
+                            moved.was,
+                            moved.now
+                        ));
+                    }
+                }
+            }
+        }
+        // A scanner that finds nothing passes, and would go on passing after
+        // someone changed the extension list or the walk.
+        assert!(seen > 100, "only {seen} invocations found; the scan is not reading the documents");
+        assert!(wrong.is_empty(), "documents still teaching 0.3:\n{}", wrong.join("\n"));
+    }
+
+    #[test]
+    fn an_invocation_is_read_out_of_prose_and_a_crate_name_is_not() {
+        assert_eq!(commands_in("run `loopsmith loop validate loop.yaml` first"), [["loop", "validate"]]);
+        assert_eq!(commands_in("    loopsmith run start ./loop.yaml"), [["run", "start"]]);
+        assert_eq!(commands_in("`loopsmith run <config>` is the same command"), [["run"]]);
+        assert_eq!(commands_in("loopsmith.exe doctor"), [["doctor"]]);
+        // Two on one line, which a table row usually is.
+        assert_eq!(
+            commands_in("| `loopsmith loop new` | then `loopsmith doctor` |"),
+            [vec!["loop", "new"], vec!["doctor"]]
+        );
+        // Not invocations.
+        assert!(commands_in("`loopsmith-core` owns the model").is_empty());
+        assert!(commands_in("target/release/loopsmith plan x").is_empty());
+        assert!(commands_in("the loopsmith").is_empty());
+    }
+
+    /// Every `loopsmith …` invocation on one line, as argv without the program.
+    ///
+    /// Prose is not a shell. The command ends at the first character that ends
+    /// one in running text — a closing backtick, a quote, a pipe, a `<`
+    /// opening a placeholder — and only the two tokens after `loopsmith` are
+    /// kept, which is all [`rewrite`] reads.
+    ///
+    /// Stopping at `<` means `loopsmith run <config>` is read as the bare noun
+    /// and passes. That is deliberate: it is the one 0.3 spelling the grammar
+    /// still documents as current, because it is in every generated launcher.
+    /// A concrete path — `loopsmith run loop.yaml` — is still caught.
+    fn commands_in(line: &str) -> Vec<Vec<&str>> {
+        let mut found = Vec::new();
+        let mut rest = line;
+        while let Some(at) = rest.find("loopsmith") {
+            let before = rest[..at].chars().next_back();
+            let after = &rest[at + "loopsmith".len()..];
+            rest = after;
+            // `loopsmith-core`, `my-loopsmith`, `loopsmithery`.
+            if before.is_some_and(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/') {
+                continue;
+            }
+            let after = after.strip_prefix(".exe").unwrap_or(after);
+            if !after.starts_with(' ') {
+                continue;
+            }
+            let end = after.find(|c: char| "`'\"|;&<>\n".contains(c)).unwrap_or(after.len());
+            let argv: Vec<&str> = after[..end].split_whitespace().take(2).collect();
+            if !argv.is_empty() {
+                found.push(argv);
+            }
+        }
+        found
+    }
+
+    /// The reference in `HOW-TO-USE.md` is the one the browser shows.
+    ///
+    /// `help.rs` says in as many words that the browser, the YAML, the schema
+    /// and `HOW-TO-USE.md` describe the same sections in the same sequence.
+    /// Until 1.0 that sentence was false — the document was still lettered
+    /// `A` to `J` while the model had four bundles — and nothing said so. This
+    /// is what says so.
+    #[cfg(feature = "web")]
+    #[test]
+    fn the_written_reference_walks_the_sections_in_the_models_own_order() {
+        let doc = repo_root().join("HOW-TO-USE.md");
+        let text = std::fs::read_to_string(&doc).expect("HOW-TO-USE.md is beside the workspace");
+
+        // Each section of the reference is headed by the dotted path it
+        // documents, in backticks, which is also what the validator names in
+        // an issue and what the form puts on a card.
+        let headed: Vec<&str> = text
+            .lines()
+            .filter_map(|l| l.strip_prefix("### `"))
+            .filter_map(|l| l.split('`').next())
+            .collect();
+
+        let expected: Vec<&str> = loopsmith_web::help::SECTIONS.iter().map(|s| s.key).collect();
+        let covered: Vec<&str> = headed
+            .iter()
+            .copied()
+            .filter(|k| expected.contains(k))
+            .collect();
+        assert_eq!(
+            covered, expected,
+            "HOW-TO-USE.md documents the sections in a different order, or is \
+             missing one the model has"
+        );
+
+        assert!(
+            !text.contains("A–J") && !text.contains("A-J"),
+            "the lettered model is gone from the code; it should be gone from the reference too"
+        );
+    }
 }

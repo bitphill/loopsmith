@@ -77,4 +77,4 @@ $env:PATH = "$BinDir;$env:PATH"
 
 Write-Log 'done. next:'
 Write-Log '  loopsmith doctor          # what this machine is, and what that stops you doing'
-Write-Log '  loopsmith new --path %USERPROFILE%\loops\my-loop --purpose "..."'
+Write-Log '  loopsmith loop new --path %USERPROFILE%\loops\my-loop --purpose "..."'

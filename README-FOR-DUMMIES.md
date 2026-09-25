@@ -263,7 +263,7 @@ curl -O https://raw.githubusercontent.com/bitphill/loopsmith/main/config/example
 **2. Make it yours, in a brand-new folder:**
 
 ```bash
-loopsmith new --path ~/loops/my-radar --config-file trend-radar-loop.md
+loopsmith loop new --path ~/loops/my-radar --config-file trend-radar-loop.md
 ```
 
 You now have `~/loops/my-radar/loop.md`. **That one file is everything you
@@ -274,7 +274,7 @@ work:
 
 ```bash
 cd ~/loops/my-radar
-loopsmith validate loop.md
+loopsmith loop validate loop.md
 ```
 
 **4. Run it:**
@@ -291,13 +291,13 @@ loopsmith validate loop.md
 <summary>Starting from nothing instead of from an example</summary>
 
 ```bash
-loopsmith new --path ~/loops/my-first-loop --purpose "weekly competitor roundup"
+loopsmith loop new --path ~/loops/my-first-loop --purpose "weekly competitor roundup"
 cd ~/loops/my-first-loop
-loopsmith convert loop.yaml -o loop.md
+loopsmith loop convert loop.yaml -o loop.md
 ```
 
 The `convert` line turns the settings into the Markdown you'll edit. In this
-case ignore `run.sh` and start the loop with `loopsmith run loop.md`.
+case ignore `run.sh` and start the loop with `loopsmith run start loop.md`.
 
 </details>
 
@@ -406,7 +406,7 @@ Money, attempts, time. Whichever runs out first stops the loop. **Always set
 Anything on this list stops and waits for you. Keep publishing and sending on it
 until you trust the output.
 
-Save the file, then run `loopsmith validate loop.md` again. `ok: loop.md is valid`
+Save the file, then run `loopsmith loop validate loop.md` again. `ok: loop.md is valid`
 means you're ready.
 
 ---
@@ -416,13 +416,13 @@ means you're ready.
 Set the interval in section **G**, then pick one:
 
 ```bash
-loopsmith watch loop.md
+loopsmith run watch loop.md
 ```
 
 Runs on your schedule while that Terminal window stays open. Good for trying it out.
 
 ```bash
-loopsmith schedule loop.md --install
+loopsmith run schedule loop.md --install
 ```
 
 Hands the schedule to your computer. It keeps running after you close Terminal
@@ -431,8 +431,8 @@ and after you restart. This is the hands-off one.
 ```mermaid
 flowchart LR
     A["G. Schedules<br/>seconds: 86400"] --> B{"Which one?"}
-    B -->|just testing| C["loopsmith watch loop.md<br/>needs Terminal open"]
-    B -->|leave it running| D["loopsmith schedule loop.md --install<br/>survives restarts"]
+    B -->|just testing| C["loopsmith run watch loop.md<br/>needs Terminal open"]
+    B -->|leave it running| D["loopsmith run schedule loop.md --install<br/>survives restarts"]
     C --> E["Results land in out/"]
     D --> E
 ```
@@ -443,11 +443,11 @@ flowchart LR
 
 | You want to know | Type this |
 |---|---|
-| Is it done? | `loopsmith status loop.md <run-id>` |
-| What happened? | `loopsmith ledger loop.md <run-id>` |
+| Is it done? | `loopsmith run status loop.md <run-id>` |
+| What happened? | `loopsmith run ledger loop.md <run-id>` |
 | Why did it stop? | open the newest file in `logs/` |
-| What does it want changed? | `loopsmith proposals loop.md <run-id>` |
-| It died halfway | `loopsmith resume loop.md <run-id>` |
+| What does it want changed? | `loopsmith run proposals loop.md <run-id>` |
+| It died halfway | `loopsmith run resume loop.md <run-id>` |
 
 The run id is printed at the end of every run.
 
@@ -480,11 +480,11 @@ Optional. None of it is needed to run a loop.
 - [README.md](README.md) — the short version for developers
 - [HOW-TO-USE.md](HOW-TO-USE.md) — every section explained, one by one
 - [LOOP-TEMPLATE.md](LOOP-TEMPLATE.md) — a blank loop with notes in every slot
-- [README-DETAIL.md](README-DETAIL.md) — how it's built, and why
+- [Architecture](https://github.com/bitphill/loopsmith/wiki/Architecture) — how it's built, and why
 - [Code wiki](https://bitphill.github.io/loopsmith/wiki/#overview) — an auto-generated tour of the code, for the
   developer you hand this to
 - [CHANGELOG.md](CHANGELOG.md) — what changed in each release
-- [loops-engineering-cheat-sheet.md](loops-engineering-cheat-sheet.md) — the thinking behind loops
+- [HOW-TO-USE.md §14](HOW-TO-USE.md#14-where-the-design-came-from) — the thinking behind loops
 - [config/loop.schema.json](config/loop.schema.json) — every setting that exists
 - [skills/loopsmith/SKILL.md](skills/loopsmith/SKILL.md) — the Claude skill for running loops
 - [skills/loopsmith-reference/SKILL.md](skills/loopsmith-reference/SKILL.md) — the Claude skill for designing them

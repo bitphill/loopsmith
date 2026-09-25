@@ -16,7 +16,7 @@
     <a href="https://pypi.org/project/loopsmith-cli/"><img alt="PyPI" src="https://img.shields.io/pypi/v/loopsmith-cli?logo=python&logoColor=white&label=PyPI&color=3775a9" /></a>
     <a href="https://github.com/bitphill/homebrew-loopsmith"><img alt="Homebrew" src="https://img.shields.io/badge/Homebrew-tap-FBB040?logo=homebrew&logoColor=white" /></a>
   </p>
-  <p><a href="#install">Install</a> · <a href="#five-minutes">Five minutes</a> · <a href="#guided-terminal-setup">Guided</a> · <a href="#examples">Examples</a> · <a href="#scheduling">Scheduling</a> · <a href="#portability">Portability</a> · <a href="README-DETAIL.md">Full reference</a> · <a href="https://bitphill.github.io/loopsmith/wiki/#overview">Code wiki</a></p>
+  <p><a href="#install">Install</a> · <a href="#five-minutes">Five minutes</a> · <a href="#guided-terminal-setup">Guided</a> · <a href="#examples">Examples</a> · <a href="#scheduling">Scheduling</a> · <a href="#portability">Portability</a> · <a href="https://github.com/bitphill/loopsmith/wiki/Architecture">Architecture</a> · <a href="https://bitphill.github.io/loopsmith/wiki/#overview">Code wiki</a></p>
 </div>
 
 ---
@@ -134,7 +134,7 @@ too. They compile automatically as dependencies and need no separate install.
 ## Guided terminal setup
 
 ```bash
-loopsmith --guided        # or: loopsmith guided
+loopsmith --guided        # or: loopsmith loop guided
 ```
 
 <div align="center"><img src="assets/guided-flow.png" alt="the guided wizard flow" width="640" /></div>
@@ -162,13 +162,13 @@ Four commands work at **every** prompt:
 - `:quit` — leave; you are offered a saved draft to resume from later
 
 Nothing is written until the finished config passes the **same** validator
-`loopsmith validate` runs — errors are shown with the field they belong to, and
+`loopsmith loop validate` runs — errors are shown with the field they belong to, and
 you can step back through the sections to fix them. When it passes, the wizard
 writes the loop, offers to `git init` it, and offers a first **dry run** that
 spends nothing. To revise an existing loop instead of starting fresh:
 
 ```bash
-loopsmith guided --edit path/to/loop.yaml
+loopsmith loop guided --edit path/to/loop.yaml
 ```
 
 which loads the file, shows every current value as the default, and writes the
@@ -201,7 +201,7 @@ answer:
   `--guided` runs in the terminal**, drawn as cards.
 
 The walk-through asks the sections in the order `--guided` asks them: identity,
-providers, goals, validations, stop gates, then each advanced section (A–J)
+providers, goals, checks, stop gates, then each advanced section
 behind its own opt-in card. One field per card, with that field's explanation in
 place. A repeating section — goals, validations, nodes — collects entries in a
 single card with a `+`, and stays there until you say **This part is done**. A
@@ -261,11 +261,11 @@ cargo install loopsmith                  # or: cd runtime && cargo build --relea
 
 # --path must be outside this repository: a loop edits files and writes state,
 # so it does not get pointed at the tool that runs it.
-loopsmith new --path ~/loops/nightly-refactor --purpose "keep the module simple"
+loopsmith loop new --path ~/loops/nightly-refactor --purpose "keep the module simple"
 
 cd ~/loops/nightly-refactor
 $EDITOR loop.yaml            # your goals, and how each one is checked
-loopsmith validate loop.yaml && loopsmith plan loop.yaml && ./run.sh   # run.cmd on Windows
+loopsmith loop validate loop.yaml && loopsmith loop plan loop.yaml && ./run.sh   # run.cmd on Windows
 ```
 
 `new` writes the config, the directories, an MCP definition, a permission grant,
@@ -303,10 +303,10 @@ configuration that converged, the gate's evidence, and the artifacts.
 Ten sections, **A** to **J** — information, the manual work list, goals,
 validations, success, stop gates, schedules, constraints, execution guidelines,
 default skills. Write YAML or Markdown; they are the same model, and
-`loopsmith convert` translates either way.
+`loopsmith loop convert` translates either way.
 
 [Section reference](HOW-TO-USE.md) · [Template](LOOP-TEMPLATE.md) ·
-[Schema](config/loop.schema.json) · [Architecture and reasoning](README-DETAIL.md) ·
+[Schema](config/loop.schema.json) · [Architecture and reasoning](https://github.com/bitphill/loopsmith/wiki/Architecture) ·
 [Code wiki](https://bitphill.github.io/loopsmith/wiki/#overview)
 
 ---
@@ -315,7 +315,7 @@ default skills. Write YAML or Markdown; they are the same model, and
 
 Thirteen worked loops in [`config/examples/`](config/examples/), each as a `.yaml`
 and an equivalent `.md`, all shipping with `pre_execution` unfinished. Annotated
-index in [`README-DETAIL.md`](README-DETAIL.md#the-examples).
+index in [the wiki](https://github.com/bitphill/loopsmith/wiki/Examples).
 
 **Build** [`refactor`](config/examples/refactor-loop.yaml) ·
 [`landing-page`](config/examples/landing-page-loop.yaml) ·
@@ -331,7 +331,7 @@ index in [`README-DETAIL.md`](README-DETAIL.md#the-examples).
 [`marketing-automation`](config/examples/marketing-automation-loop.yaml) —
 **Spend money** [`x402-agent`](config/examples/x402-agent-loop.yaml)
 
-Start from one with `loopsmith new --path … --config-file <example>` rather than
+Start from one with `loopsmith loop new --path … --config-file <example>` rather than
 from the blank template.
 
 ---
@@ -341,15 +341,15 @@ from the blank template.
 A loop that runs once is a script. Two ways to make one live:
 
 ```bash
-loopsmith watch    ~/loops/nightly-refactor/loop.yaml            # stay resident
-loopsmith schedule ~/loops/nightly-refactor/loop.yaml --install  # hand it to the OS
+loopsmith run watch    ~/loops/nightly-refactor/loop.yaml            # stay resident
+loopsmith run schedule ~/loops/nightly-refactor/loop.yaml --install  # hand it to the OS
 ```
 
 Triggers are declared in section **G**: `cron`, `interval`, `file_change`,
 `goal_satisfied`, or `manual`. Cron is evaluated in UTC. `schedule` uses whichever
 scheduler this machine actually has, not whichever its OS is famous for. Every run
 writes a plain-text log to `logs/run-<id>.log` beside the queryable ledger, so
-`tail -f` works and `loopsmith ledger` still answers questions.
+`tail -f` works and `loopsmith run ledger` still answers questions.
 
 ---
 
@@ -386,13 +386,13 @@ something written down.
 
 | Question | Command |
 |---|---|
-| What does the gate say? | `loopsmith status <config> <run-id>` |
-| What happened? | `loopsmith ledger <config> <run-id>` |
+| What does the gate say? | `loopsmith run status <config> <run-id>` |
+| What happened? | `loopsmith run ledger <config> <run-id>` |
 | Why did it stop? | the last line of `logs/<run-id>.log` |
-| What does it want changed about itself? | `loopsmith proposals <config> <run-id>` |
+| What does it want changed about itself? | `loopsmith run proposals <config> <run-id>` |
 | Which providers can it reach? | `loopsmith providers <config>` |
 | Will this machine get in the way? | `loopsmith doctor <config>` |
-| Ask the gate right now | `loopsmith gate <config> --target <goal>` |
+| Ask the gate right now | `loopsmith run gate <config> --target <goal>` |
 
 The loop never edits its own config. Goals, validations, success criteria, and
 sub-agent adoption are written as proposals for you to apply.

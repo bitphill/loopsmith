@@ -249,7 +249,7 @@ fn fingerprint(secret: &str) -> String {
     format!("{head}…{tail}")
 }
 
-/// Skills already visible to this machine, for section J's picker.
+/// Skills already visible to this machine, for the `default_skills` picker.
 pub fn skills() -> Vec<SkillEntry> {
     let mut out = Vec::new();
     let mut seen = BTreeMap::new();

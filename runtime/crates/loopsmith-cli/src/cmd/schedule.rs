@@ -91,8 +91,8 @@ fn schtasks(label: &str, exe: &Path, abs: &Path, install: bool) {
     println!("{}", loopsmith_run::schedule::schtasks_command(label, exe, abs));
     println!();
     println!("# Run that in an elevated-or-not shell to register the task.");
-    println!("# It keeps `loopsmith run watch` alive; the watcher evaluates the triggers in");
-    println!("# section G itself, so Task Scheduler only has to restart one process.");
+    println!("# It keeps `loopsmith run watch` alive; the watcher evaluates");
+    println!("# `execution.triggers` itself, so Task Scheduler only has to restart one process.");
     println!("# Remove it later with: schtasks /Delete /TN \"{label}\" /F");
     if install {
         nothing_to_install(

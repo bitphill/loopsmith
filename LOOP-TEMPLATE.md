@@ -19,7 +19,7 @@ disable-model-invocation: true
 > in a config file can be checked, diffed, and scheduled. Prose in a skill
 > body cannot.
 >
-> Faster path: `loopsmith new --path <dir>` writes both files for you, then
+> Faster path: `loopsmith loop new --path <dir>` writes both files for you, then
 > edit them.
 
 ## What this loop is for
@@ -35,16 +35,16 @@ Without it you get several half-finished loops writing into each other's
 state.
 
 ```bash
-loopsmith new --path ./loops/my-purpose --purpose "what it is for"
+loopsmith loop new --path ./loops/my-purpose --purpose "what it is for"
 ```
 
 ## Run it
 
 ```bash
-loopsmith validate <path>/loop.yaml      # A–H model complete and consistent
-loopsmith plan     <path>/loop.yaml      # waves, critical path, real speedup
-loopsmith permissions <path>/loop.yaml --write .claude/settings.local.json
-loopsmith run      <path>/loop.yaml      # hands-off from here
+loopsmith loop validate <path>/loop.yaml      # A–H model complete and consistent
+loopsmith loop plan     <path>/loop.yaml      # waves, critical path, real speedup
+loopsmith loop permissions <path>/loop.yaml --write .claude/settings.local.json
+loopsmith run start <path>/loop.yaml      # hands-off from here
 ```
 
 `validate` fails while any `pre_execution` step is unfinished. That is the
@@ -58,7 +58,7 @@ produces fast, confident garbage.
 Everything below lives in `loop.yaml`. The runtime validates it against
 `config/loop.schema.json`; anything the schema cannot express (every goal
 having a blocking validation, targets resolving, cycles) is checked by
-`loopsmith validate`.
+`loopsmith loop validate`.
 
 ## A · Information
 
@@ -192,8 +192,8 @@ schedules:
     goal: gather
 ```
 
-`loopsmith watch <config>` stays resident and runs the loop whenever one of
-these fires; `loopsmith schedule <config> --install` hands the job to launchd
+`loopsmith run watch <config>` stays resident and runs the loop whenever one of
+these fires; `loopsmith run schedule <config> --install` hands the job to launchd
 or cron so it survives a reboot. File and goal triggers fire on the *edge*, so
 a goal that stays satisfied does not retrigger.
 
@@ -258,7 +258,7 @@ step actually *read* the previous step's output? Yes is a real edge. No was
 never an edge — run them together.
 
 `auto` derives the parallel fraction from the graph and adds workers only while
-the next one still buys `min_marginal_gain` of Amdahl speedup. `loopsmith plan`
+the next one still buys `min_marginal_gain` of Amdahl speedup. `loopsmith loop plan`
 shows the arithmetic before you spend anything.
 
 ---
@@ -334,7 +334,7 @@ satisfied goals becomes a proposal:
 
 ```bash
 loopsmith skills scores loop.yaml       # ranked by satisfaction rate
-loopsmith proposals loop.yaml <run-id>  # adopt / drop suggestions
+loopsmith run proposals loop.yaml <run-id>  # adopt / drop suggestions
 ```
 
 It is off by default because exploration spends real money, and below
@@ -364,7 +364,7 @@ it is judged against cannot certify that it met them.
 - [ ] Judge nodes pinned to a different provider family than their builder
 - [ ] Parallel builders marked `isolated: true`
 - [ ] `human_checkpoint` covers everything irreversible in your domain
-- [ ] `loopsmith plan` speedup looks like the work you expect
+- [ ] `loopsmith loop plan` speedup looks like the work you expect
 - [ ] Permission grant reviewed and written once
 - [ ] A budget ceiling that can actually fire — set `usage_regex` or accept the estimate
 - [ ] For a long-lived loop: a non-manual trigger, or `watch` refuses to start

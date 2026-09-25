@@ -82,7 +82,7 @@ class Loopsmith < Formula
     assert_path_exists testpath/"demo/run.sh"
     assert_path_exists testpath/"demo/run.cmd"
 
-    output = shell_output("#{bin}/loopsmith validate #{testpath}/demo/loop.yaml 2>&1", 1)
+    output = shell_output("#{bin}/loopsmith loop validate #{testpath}/demo/loop.yaml 2>&1", 1)
     assert_match "pre_execution", output
   end
 end

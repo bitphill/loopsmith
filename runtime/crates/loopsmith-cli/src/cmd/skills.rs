@@ -119,7 +119,8 @@ pub fn acquire(config: &Path, name: &str) -> Result<ExitCode, String> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// `loopsmith skills install <config>` — materialise section J on demand,
+/// `loopsmith skills install <config>` — materialise `execution.default_skills`
+/// on demand,
 /// without starting a run.
 pub fn install(config: &Path) -> Result<ExitCode, String> {
     let cfg = loopsmith_core::load(config).map_err(|e| e.to_string())?;

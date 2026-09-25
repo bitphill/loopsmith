@@ -73,7 +73,7 @@ pub fn speedup_ceiling(p: f64) -> f64 {
 /// what it waits for, and what it costs.
 ///
 /// This exists so the scheduler is not welded to `NodeSpec`. The execution
-/// graph (section G) and the execution-guideline phase graph (section I) are
+/// graph (`execution.graph`) and the phase graph (`execution.phases`) are
 /// different types with different fields, but they are the same DAG problem,
 /// and a second copy of Kahn's algorithm is a second place for a cycle bug to
 /// hide.
@@ -97,7 +97,7 @@ impl DagNode for NodeSpec {
     }
 }
 
-/// Execution guidelines (section I) are a second DAG over the same scheduler.
+/// Execution phases (`execution.phases`) are a second DAG over the same scheduler.
 /// Phases carry no cost of their own — the work is in the nodes assigned to
 /// them — so every phase weighs the same and the critical path through the
 /// phase graph is simply its longest chain.

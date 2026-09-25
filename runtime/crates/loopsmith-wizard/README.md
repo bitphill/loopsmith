@@ -23,7 +23,7 @@ agent loops behind a deterministic verification gate.
 
 ## What this crate is
 
-`loopsmith guided` in a terminal and `loopsmith web` in a browser build the same
+`loopsmith loop guided` in a terminal and `loopsmith web` in a browser build the same
 config by asking the same questions. This crate is what they share:
 
 - **`catalog`** — the agent CLIs loopsmith knows how to drive, each with the

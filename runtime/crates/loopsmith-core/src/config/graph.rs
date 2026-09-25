@@ -121,7 +121,7 @@ pub struct NodeSpec {
     /// Skills this node needs. Acquired per the skill policy.
     #[serde(default)]
     pub skills: Vec<String>,
-    /// Execution guideline (section I) this node belongs to. A node with a
+    /// Execution phase (`execution.phases`) this node belongs to. A node with a
     /// stage is not dispatched until that phase is active. A node without one
     /// is always eligible — unstaged work is not gated by a phase it never
     /// joined.

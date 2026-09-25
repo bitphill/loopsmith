@@ -97,4 +97,4 @@ fi
 
 log "done. next:"
 log "  loopsmith doctor          # what this machine is, and what that stops you doing"
-log "  loopsmith new --path ~/loops/my-loop --purpose \"...\""
+log "  loopsmith loop new --path ~/loops/my-loop --purpose \"...\""

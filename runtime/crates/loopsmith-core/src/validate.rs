@@ -1,4 +1,4 @@
-//! A–J validation.
+//! Validation of the four-bundle model.
 //!
 //! The rules here are the corpus rules made mechanical. The most important one
 //! is that every goal carries at least one blocking validation: a goal you
