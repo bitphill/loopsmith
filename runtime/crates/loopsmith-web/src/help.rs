@@ -12,17 +12,20 @@
 //! that ten is a starting point rather than a recommendation.
 //!
 //! Ordering matters here: [`SECTIONS`] is the order the UI lays the form out
-//! in, and it is the A–J order of the model itself, so the browser, the YAML,
-//! the schema, and `HOW-TO-USE.md` all describe the same thing in the same
-//! sequence.
+//! in, and it is the order of the model itself — what the loop is for, how the
+//! work gets done, what stops it — so the browser, the YAML, the schema, and
+//! `HOW-TO-USE.md` all describe the same thing in the same sequence.
 
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SectionHelp {
-    /// `A`–`J`, or a bare id for the sections outside the lettered model.
-    pub letter: &'static str,
-    /// Config key this section edits.
+    /// Which of the four bundles this section lives in, shown as its badge.
+    /// 1.0 grouped the config by what a key is *for*, so the badge says
+    /// `intent` or `safety` where 0.3 said `A` or `F`.
+    pub bundle: &'static str,
+    /// Dotted config path this section edits, which is also what the
+    /// validator names in an issue.
     pub key: &'static str,
     pub title: &'static str,
     /// One line, shown under the section heading.
@@ -47,11 +50,11 @@ pub struct FieldHelp {
     pub example: &'static str,
 }
 
-/// The lettered model, in order.
+/// Every section, in the config's own order.
 pub const SECTIONS: &[SectionHelp] = &[
     SectionHelp {
-        letter: "A",
-        key: "information",
+        bundle: "intent",
+        key: "intent.background",
         title: "Information",
         summary: "Facts every step of the loop should know, written once.",
         detail: "Anything durable and specific: the repository this works on, the brand voice, \
@@ -64,8 +67,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "B",
-        key: "pre_execution",
+        bundle: "intent",
+        key: "intent.prerequisites",
         title: "Pre-execution work",
         summary: "What you must do by hand, once, before letting this run unattended.",
         detail: "The list of things that have to be proven manually first: publish one post \
@@ -78,8 +81,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "C",
-        key: "goals",
+        bundle: "intent",
+        key: "intent.goals",
         title: "Goals",
         summary: "What you want, in plain language, one named goal at a time.",
         detail: "Each goal gets a short name the rest of the config refers to, and a \
@@ -91,8 +94,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: true,
     },
     SectionHelp {
-        letter: "D",
-        key: "validations",
+        bundle: "safety",
+        key: "safety.checks",
         title: "Validations",
         summary: "How each goal is checked. This is the part that makes a loop trustworthy.",
         detail: "A validation names a goal and says how a machine decides whether it is met. \
@@ -106,8 +109,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: true,
     },
     SectionHelp {
-        letter: "E",
-        key: "success",
+        bundle: "intent",
+        key: "intent.success",
         title: "Success scenarios",
         summary: "What counts as good enough — all of it, or a proportion.",
         detail: "Validations say what is checked; success says how much of it has to pass. \
@@ -120,8 +123,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "F",
-        key: "stop_gates",
+        bundle: "safety",
+        key: "safety.gates.stop",
         title: "Stop gates",
         summary: "Every way this loop is allowed to end. Set these before the first run.",
         detail: "Layered exits, all checked every iteration, any one of which halts the run. \
@@ -134,8 +137,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "G",
-        key: "schedules",
+        bundle: "execution",
+        key: "execution.triggers",
         title: "Schedules",
         summary: "What makes this loop start. Leave it empty to run it only by hand.",
         detail: "A cron expression, a plain interval, a file changing, another goal being met, \
@@ -148,8 +151,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "H",
-        key: "constraints",
+        bundle: "safety",
+        key: "safety.limits",
         title: "Constraints",
         summary: "What the loop may not do, and what it must stop and ask about.",
         detail: "Rules in plain language, paths and commands that are off limits, and per-node \
@@ -161,8 +164,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "I",
-        key: "execution_guidelines",
+        bundle: "execution",
+        key: "execution.phases",
         title: "Execution guidelines",
         summary: "Named phases, each with a standing instruction and a place in the order.",
         detail: "Optional. Use it when the work has real stages — gather, then draft, then \
@@ -174,8 +177,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "J",
-        key: "default_skills",
+        bundle: "execution",
+        key: "execution.default_skills",
         title: "Sub-agents",
         summary: "Specialist agents installed before the loop starts.",
         detail: "Skills the loop should have available from the first iteration. Installation \
@@ -187,8 +190,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "graph",
-        key: "graph",
+        bundle: "execution",
+        key: "execution.graph",
         title: "Nodes and dependencies",
         summary: "The units of work, who they are, and what genuinely feeds what.",
         detail: "Each node has a role, an instruction, and optionally the nodes whose output \
@@ -202,8 +205,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "providers",
-        key: "providers",
+        bundle: "execution",
+        key: "execution.providers",
         title: "Providers",
         summary: "Which models do the work, and which fallback runs when one is unreachable.",
         detail: "Every provider is a command template, which is why any CLI on this machine \
@@ -216,8 +219,8 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: false,
     },
     SectionHelp {
-        letter: "context",
-        key: "context",
+        bundle: "execution",
+        key: "execution.memory",
         title: "Carried context",
         summary: "How much of the previous iterations each prompt drags along.",
         detail: "Every iteration produces a summary; this decides how many of them the next \
@@ -249,14 +252,14 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "Draft, fact-check, and publish one post a week in the house voice.",
     },
     FieldHelp {
-        path: "goals[].name",
+        path: "intent.goals[].name",
         label: "Goal name",
         hint: "A short handle. Validations and nodes refer to the goal by this.",
         detail: "`overall` is reserved for the loop as a whole. Everything else is yours.",
         example: "draft-quality",
     },
     FieldHelp {
-        path: "validations[].detector",
+        path: "safety.checks[].detector",
         label: "How it is checked",
         hint: "Script, file, pattern, and threshold are decided by machine. Judge is a model.",
         detail: "Prefer a deterministic detector wherever one exists. A script's exit code \
@@ -267,7 +270,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "script: `npm test`, expecting exit 0",
     },
     FieldHelp {
-        path: "validations[].blocking",
+        path: "safety.checks[].blocking",
         label: "Blocking",
         hint: "Blocking checks hold the gate shut. Non-blocking ones are recorded only.",
         detail: "Make a check non-blocking when you want to watch a number without letting it \
@@ -275,7 +278,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "on",
     },
     FieldHelp {
-        path: "stop_gates.max_iterations",
+        path: "safety.gates.stop.max_iterations",
         label: "Maximum iterations",
         hint: "Hard ceiling on how many times round the loop goes.",
         detail: "Ten is the default, not a recommendation. Work out roughly what one iteration \
@@ -284,7 +287,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "10",
     },
     FieldHelp {
-        path: "stop_gates.no_progress_iterations",
+        path: "safety.gates.stop.no_progress_iterations",
         label: "Stop after no progress",
         hint: "Halt after this many iterations that change nothing measurable.",
         detail: "The quiet money-saver. A loop can look busy for hours while making no \
@@ -293,7 +296,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "3",
     },
     FieldHelp {
-        path: "stop_gates.max_cost_usd",
+        path: "safety.gates.stop.max_cost_usd",
         label: "Cost ceiling",
         hint: "Dollars. The run halts when the ledger crosses this.",
         detail: "The one ceiling to set before leaving a loop unattended. It needs each \
@@ -303,7 +306,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "5.00",
     },
     FieldHelp {
-        path: "schedules[].expr",
+        path: "execution.triggers.triggers[].on.expr",
         label: "Cron expression",
         hint: "Five fields, read in UTC. Minute, hour, day, month, weekday.",
         detail: "UTC is the usual explanation for a job that fires an hour off. If you want \
@@ -312,7 +315,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "0 9 * * 1  (09:00 UTC every Monday)",
     },
     FieldHelp {
-        path: "constraints.global.human_checkpoint",
+        path: "safety.limits.global.human_checkpoint",
         label: "Human checkpoints",
         hint: "Irreversible actions. These stop and wait however much permission was granted.",
         detail: "The backstop that makes an unattended loop safe to leave alone. Sending mail, \
@@ -321,7 +324,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "send email, publish post, delete files",
     },
     FieldHelp {
-        path: "graph.nodes[].role",
+        path: "execution.graph.nodes[].role",
         label: "Role",
         hint: "Builder does the work. Judge grades it. Others plan, attack, or research.",
         detail: "A judge must run on a different provider family from the builder whose work \
@@ -331,7 +334,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "builder",
     },
     FieldHelp {
-        path: "graph.nodes[].depends_on",
+        path: "execution.graph.nodes[].depends_on",
         label: "Depends on",
         hint: "Only nodes whose output this node actually reads.",
         detail: "The most common way to make a loop needlessly slow is to list an ordering \
@@ -340,7 +343,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "research, outline",
     },
     FieldHelp {
-        path: "graph.nodes[].isolated",
+        path: "execution.graph.nodes[].isolation",
         label: "Isolated",
         hint: "Runs in its own git worktree. Required for builders that may run in parallel.",
         detail: "Two builders writing to one directory at the same time will corrupt each \
@@ -349,7 +352,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "on, for any parallel builder",
     },
     FieldHelp {
-        path: "graph.nodes[].tier",
+        path: "execution.graph.nodes[].tier",
         label: "Tier",
         hint: "Which rung of the cascade serves this node: cheap, standard, or strong.",
         detail: "Tiers are how one config runs on a fast cheap model for routine work and an \
@@ -358,7 +361,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "standard",
     },
     FieldHelp {
-        path: "providers[].command",
+        path: "execution.providers.providers[].command",
         label: "Command",
         hint: "Any executable on this machine. Placeholders are substituted before it runs.",
         detail: "`{prompt}` `{system}` `{model}` `{tier}` `{node}` are replaced in the \
@@ -367,7 +370,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "claude",
     },
     FieldHelp {
-        path: "providers[].prompt_on_stdin",
+        path: "execution.providers.providers[].prompt_on_stdin",
         label: "Prompt on stdin",
         hint: "Send the prompt through stdin instead of as an argument.",
         detail: "Turn this on for anything that reads a document, and for any prompt long \
@@ -376,7 +379,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "on, for ollama",
     },
     FieldHelp {
-        path: "providers[].requires_env",
+        path: "execution.providers.providers[].requires_env",
         label: "Required keys",
         hint: "Variable names only. loopsmith never reads or logs the values.",
         detail: "Names here are checked for presence before a run, so a missing key fails \
@@ -386,7 +389,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "ANTHROPIC_API_KEY",
     },
     FieldHelp {
-        path: "providers.cascade",
+        path: "execution.providers.cascade",
         label: "Cascade",
         hint: "Ordered fallback per tier. The first reachable provider serves the call.",
         detail: "This is what keeps a loop alive when a provider is rate-limited or down at \
@@ -395,7 +398,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "standard: claude, gemini",
     },
     FieldHelp {
-        path: "context.carry_summaries",
+        path: "execution.memory.carry_summaries",
         label: "Carry summaries",
         hint: "How many previous iteration summaries each prompt includes. 0 disables it.",
         detail: "Two is a good default. A loop that carries too much starts rehearsing its \
@@ -403,7 +406,7 @@ pub const FIELDS: &[FieldHelp] = &[
         example: "2",
     },
     FieldHelp {
-        path: "skills.explore",
+        path: "execution.skills.explore",
         label: "Explore new sub-agents",
         hint: "Let the loop trial a specialist that is not in this config.",
         detail: "Off by default, and it should stay off until a loop is working. When on, \
@@ -420,23 +423,28 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
-    fn the_sections_are_the_lettered_model_in_order() {
-        let letters: Vec<&str> = SECTIONS
-            .iter()
-            .map(|s| s.letter)
-            .filter(|l| l.len() == 1)
-            .collect();
-        assert_eq!(
-            letters,
-            vec!["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"],
-            "the browser must lay the form out in the model's own order"
-        );
+    fn every_section_names_a_bundle_and_a_real_config_path() {
+        // The key is what the form edits *and* what the validator names in an
+        // issue, so the rail's "jump to this field" has something to aim at.
+        for s in SECTIONS {
+            assert!(
+                ["intent", "execution", "safety", "evolution"].contains(&s.bundle),
+                "{} is in no bundle",
+                s.key
+            );
+            assert!(
+                s.key.starts_with(&format!("{}.", s.bundle)),
+                "{} is not inside {}",
+                s.key,
+                s.bundle
+            );
+        }
     }
 
     #[test]
     fn the_two_required_sections_are_the_two_the_model_requires() {
         let required: Vec<&str> = SECTIONS.iter().filter(|s| s.required).map(|s| s.key).collect();
-        assert_eq!(required, vec!["goals", "validations"]);
+        assert_eq!(required, vec!["intent.goals", "safety.checks"]);
     }
 
     #[test]
@@ -459,6 +467,43 @@ mod tests {
         }
     }
 
+    /// A config with nothing in it but a name, as a document.
+    fn plain() -> serde_yaml::Value {
+        let cfg = loopsmith_core::parse_str("name: baseline\n", "<help>").expect("parses");
+        serde_yaml::to_value(&cfg).expect("serialises")
+    }
+
+    /// Walk a dotted path, stopping at the first `[]`.
+    fn resolves(doc: &serde_yaml::Value, path: &str) -> bool {
+        let mut cur = doc;
+        for part in path.split('.') {
+            let leaf = part.split_once("[]").map(|(head, _)| head).unwrap_or(part);
+            match cur.get(leaf) {
+                Some(next) => cur = next,
+                None => return false,
+            }
+            if part.contains("[]") {
+                return true;
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn every_note_is_keyed_by_a_path_the_config_actually_has() {
+        // These strings are three things at once: what the form edits, what
+        // the validator names in an issue, and what the rail scrolls to. A
+        // renamed key that nobody updated here goes quiet rather than wrong,
+        // which is the worst way for it to break.
+        let doc = plain();
+        for s in SECTIONS {
+            assert!(resolves(&doc, s.key), "no config path `{}`", s.key);
+        }
+        for f in FIELDS {
+            assert!(resolves(&doc, f.path), "no config path `{}`", f.path);
+        }
+    }
+
     #[test]
     fn no_field_is_documented_twice() {
         let mut seen = BTreeSet::new();
@@ -470,10 +515,10 @@ mod tests {
     #[test]
     fn the_fields_most_likely_to_cost_money_are_all_explained() {
         for path in [
-            "stop_gates.max_iterations",
-            "stop_gates.max_cost_usd",
-            "stop_gates.no_progress_iterations",
-            "constraints.global.human_checkpoint",
+            "safety.gates.stop.max_iterations",
+            "safety.gates.stop.max_cost_usd",
+            "safety.gates.stop.no_progress_iterations",
+            "safety.limits.global.human_checkpoint",
         ] {
             assert!(
                 FIELDS.iter().any(|f| f.path == path),

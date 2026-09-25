@@ -1,10 +1,16 @@
 /**
  * The wire types, mirroring the Rust side field for field.
  *
- * `LoopConfig` here is the same A–J model `loopsmith-core` deserializes, and
- * it is posted back verbatim. There is deliberately no second schema and no
+ * `LoopConfig` here is the same model `loopsmith-core` deserializes, and it is
+ * posted back verbatim. There is deliberately no second schema and no
  * transformation layer: a field the browser renames is a field the config
  * model rejects, loudly, the moment it is typed.
+ *
+ * 1.0 groups the config by what a key is *for* — what the loop is for
+ * (`intent`), how the work gets done (`execution`), what must not happen and
+ * when to stop (`safety`), and how it may change itself (`evolution`). The
+ * form reaches into those bundles through [`at`] and [`put`] rather than
+ * spreading four levels of object literal at every call site.
  */
 
 export type Tier = "cheap" | "standard" | "strong";
@@ -21,12 +27,23 @@ export type Detector =
   | { type: "threshold"; metric: string; op: CompareOp; value: number }
   | { type: "judge"; standard: string; min_score?: number | null };
 
-export type Trigger =
+export type Fires =
   | { type: "cron"; expr: string }
   | { type: "interval"; seconds: number }
   | { type: "file_change"; path: string }
   | { type: "goal_satisfied"; goal: string }
   | { type: "manual" };
+
+/**
+ * One trigger. What fires it is nested under `on`, because 1.0 gave a trigger
+ * things of its own to say — whether it is enabled, and the key that makes two
+ * firings of the same event count once.
+ */
+export interface Trigger {
+  on: Fires;
+  enabled?: boolean;
+  idempotency_key?: string | null;
+}
 
 export type Concurrency =
   | { mode: "sequential" }
@@ -80,7 +97,7 @@ export interface Constraints {
 }
 
 export interface Guideline { name: string; guideline: string; note?: string | null }
-export interface ExecutionGuidelines { items?: Guideline[]; dependency?: string[] }
+export interface Phases { items?: Guideline[]; dependency?: string[] }
 
 export interface DefaultSkill {
   name: string;
@@ -88,6 +105,13 @@ export interface DefaultSkill {
   url?: string | null;
   init_command?: string | null;
   note?: string | null;
+}
+
+/** Where a node runs. A container degrades to a worktree when Docker is absent. */
+export interface Isolation {
+  mode: "none" | "worktree" | "container";
+  image?: string | null;
+  network?: boolean;
 }
 
 export interface NodeSpec {
@@ -101,10 +125,20 @@ export interface NodeSpec {
   skills?: string[];
   stage?: string | null;
   weight?: number;
-  isolated?: boolean;
+  isolation?: Isolation;
 }
 
-export interface GraphSpec { nodes?: NodeSpec[]; concurrency?: Concurrency }
+export interface Join {
+  strategy: "wait_for_all" | "quorum" | "first_success";
+  count?: number | null;
+}
+
+export interface GraphSpec {
+  nodes?: NodeSpec[];
+  concurrency?: Concurrency;
+  join?: Join;
+  container_image?: string | null;
+}
 
 export interface ProviderSpec {
   id: string;
@@ -136,30 +170,132 @@ export interface SkillPolicy {
   min_trials?: number;
 }
 
-export interface ContextPolicy {
+/**
+ * What each iteration remembers.
+ *
+ * `namespaces` is a policy table the form does not edit — the promotion rule
+ * for episodic memory is not a first-config decision — but it is described
+ * here so it survives a round trip through the editor rather than being an
+ * untyped hole in the middle of the config.
+ */
+export interface Memory {
   carry_summaries?: number;
   summary_provider?: string | null;
   max_summary_chars?: number;
+  max_retrieved?: number;
+  namespaces?: Record<string, unknown>;
+}
+
+/** One number of the run's own, watched. */
+export interface Alert {
+  id: string;
+  metric: string;
+  above?: number | null;
+  below?: number | null;
+  message?: string;
+}
+
+export interface Gates {
+  stop?: StopGates;
+  entry?: unknown[];
+  approval?: unknown[];
+  rollback?: unknown[];
+}
+
+export interface Evolution {
+  enabled?: boolean;
+  baseline?: unknown | null;
+  allowed_kinds?: string[];
+  max_regression?: number;
+  require_sandbox?: boolean;
+  require_approval?: boolean;
+  keep_rollback?: boolean;
+}
+
+export interface Features {
+  self_evolution?: boolean;
+  marketplace_skills?: boolean;
+  external_side_effects?: boolean;
+  parallel_execution?: boolean;
+  human_approval?: boolean;
+}
+
+/* --- the four bundles ---------------------------------------------------- */
+
+export interface Intent {
+  background?: InfoItem[];
+  prerequisites?: WorkItem[];
+  goals?: Goal[];
+  success?: SuccessScenario[];
+}
+
+export interface Execution {
+  graph?: GraphSpec;
+  providers?: ProviderRouting;
+  phases?: Phases;
+  skills?: SkillPolicy;
+  default_skills?: DefaultSkill[];
+  memory?: Memory;
+  triggers?: { triggers?: Trigger[]; max_depth?: number; dedup_window_seconds?: number };
+}
+
+export interface Safety {
+  checks?: Validation[];
+  gates?: Gates;
+  limits?: Constraints;
+  alerts?: Alert[];
+  /** Policy tables the form does not edit, kept so an edit does not drop them. */
+  recovery?: Record<string, unknown>;
+  protected?: { components?: string[]; extra_paths?: string[] };
 }
 
 export interface LoopConfig {
   name: string;
   version?: string;
   description?: string;
-  information?: InfoItem[];
-  pre_execution?: WorkItem[];
-  goals: Goal[];
-  validations: Validation[];
-  success?: SuccessScenario[];
-  stop_gates?: StopGates;
-  schedules?: Trigger[];
-  constraints?: Constraints;
-  execution_guidelines?: ExecutionGuidelines;
-  default_skills?: DefaultSkill[];
-  graph?: GraphSpec;
-  providers?: ProviderRouting;
-  skills?: SkillPolicy;
-  context?: ContextPolicy;
+  environment?: "dev" | "staging" | "prod";
+  intent?: Intent;
+  execution?: Execution;
+  safety?: Safety;
+  evolution?: Evolution;
+  features?: Features;
+}
+
+/* --- reaching into the bundles ------------------------------------------- */
+
+/**
+ * Read a dotted path out of the config.
+ *
+ * The form's sections each own one path — `intent.goals`, `safety.gates.stop`
+ * — and reaching them through the path rather than through four chained
+ * optional accesses is what keeps a section readable as a section. The path is
+ * the same string the validator names in an issue and `help.rs` keys its notes
+ * by, so all three agree about what a section *is*.
+ */
+export function at<T>(cfg: LoopConfig, path: string): T | undefined {
+  let cur: unknown = cfg;
+  for (const part of path.split(".")) {
+    if (cur == null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[part];
+  }
+  return cur as T | undefined;
+}
+
+/**
+ * The patch that puts `value` at a dotted path.
+ *
+ * Every branch above it is copied rather than replaced, so writing
+ * `execution.graph.nodes` leaves `execution.providers` — and anything else in
+ * the file the form has no editor for — exactly where it was.
+ */
+export function put(cfg: LoopConfig, path: string, value: unknown): Partial<LoopConfig> {
+  const [head, ...rest] = path.split(".");
+  if (rest.length === 0) return { [head]: value } as Partial<LoopConfig>;
+  const branch = (cfg as unknown as Record<string, unknown>)[head];
+  const inner = (branch ?? {}) as LoopConfig;
+  return {
+    [head]: { ...(inner as object), ...put(inner, rest.join("."), value) },
+  } as Partial<LoopConfig>;
 }
 
 /* --- detection ---------------------------------------------------------- */
@@ -291,7 +427,9 @@ export interface ExampleCard {
 export interface LibraryEntry { path: string; name: string; config_file: string; created_ms: number }
 
 export interface SectionHelp {
-  letter: string;
+  /** Which of the four bundles the section lives in, shown as its badge. */
+  bundle: string;
+  /** The dotted path it edits, which the validator also names in an issue. */
   key: string;
   title: string;
   summary: string;

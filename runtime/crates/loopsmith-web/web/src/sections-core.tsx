@@ -1,11 +1,15 @@
 /**
- * Sections A–F: what the loop knows, what it is for, and how it ends.
+ * What the loop is for, and what proves it: `intent`, and the `safety` half
+ * that decides whether a goal is satisfied.
  *
- * Each maps one-to-one onto a key of `LoopConfig`. The section order here is
- * the model's own order, so the form, the YAML, the schema, and HOW-TO-USE.md
- * all describe the same thing in the same sequence.
+ * Each section owns one dotted path of `LoopConfig` — the same path the
+ * validator names in an issue and `help.rs` keys its notes by — reached
+ * through `at` and `put` rather than four chained optional accesses. The
+ * section order here is the model's own order, so the form, the YAML, the
+ * schema, and HOW-TO-USE.md all describe the same thing in the same sequence.
  */
 import { Card, Field, Text, Area, Num, Select, Toggle, Repeater, Note, ListInput } from "./ui";
+import { at, put } from "./types";
 import type {
   LoopConfig, SectionHelp, Goal, Validation, Detector, Mode, CompareOp,
   InfoItem, WorkItem, SuccessScenario, StopGates,
@@ -18,6 +22,12 @@ const MODES: readonly { value: Mode; label: string }[] = [
   { value: "objective", label: "Objective — a machine decides" },
   { value: "subjective", label: "Subjective — a judgement is recorded" },
   { value: "percentage", label: "Percentage — a proportion must pass" },
+];
+
+/** What a check or a success scenario can be aimed at. */
+const goalNames = (cfg: LoopConfig): string[] => [
+  "overall",
+  ...(at<Goal[]>(cfg, "intent.goals") ?? []).map((g) => g.name).filter(Boolean),
 ];
 
 const OPS: readonly { value: CompareOp; label: string }[] = [
@@ -43,7 +53,8 @@ export function Section({
   return (
     <Card
       title={h?.title ?? k}
-      letter={h?.letter}
+      badge={h?.bundle}
+      anchor={k}
       summary={h?.summary}
       detail={h?.detail}
       failure={h?.failure}
@@ -61,10 +72,10 @@ export function Section({
 
 export function Information({ cfg, patch, help }: SectionProps) {
   return (
-    <Section k="information" help={help} count={cfg.information?.length}>
+    <Section k="intent.background" help={help} count={at<InfoItem[]>(cfg, "intent.background")?.length}>
       <Repeater<InfoItem>
-        items={cfg.information}
-        onChange={(information) => patch({ information })}
+        items={at<InfoItem[]>(cfg, "intent.background")}
+        onChange={(items) => patch(put(cfg, "intent.background", items))}
         blank={() => ({ key: "", value: "" })}
         addLabel="Add a fact"
         empty="Nothing yet. Add the facts that stay true for the whole loop: the repository, the audience, the brand voice, the API being called."
@@ -89,17 +100,18 @@ export function Information({ cfg, patch, help }: SectionProps) {
 /* --- B ------------------------------------------------------------------- */
 
 export function PreExecution({ cfg, patch, help }: SectionProps) {
-  const pending = (cfg.pre_execution ?? []).filter((w) => !w.done).length;
+  const steps = at<WorkItem[]>(cfg, "intent.prerequisites") ?? [];
+  const pending = steps.filter((w) => !w.done).length;
   return (
     <Section
       k="pre_execution"
       help={help}
-      count={cfg.pre_execution?.length}
+      count={steps.length}
       actions={pending > 0 ? <span className="chip chip-warn">{pending} not done</span> : undefined}
     >
       <Repeater<WorkItem>
-        items={cfg.pre_execution}
-        onChange={(pre_execution) => patch({ pre_execution })}
+        items={steps}
+        onChange={(items) => patch(put(cfg, "intent.prerequisites", items))}
         blank={() => ({ step: "", done: false })}
         addLabel="Add a step"
         empty="Nothing yet. List what you must do by hand before automating it — publish one post yourself, send one email, run the change on one file."
@@ -130,16 +142,16 @@ export function PreExecution({ cfg, patch, help }: SectionProps) {
 
 export function Goals({ cfg, patch, help }: SectionProps) {
   return (
-    <Section k="goals" help={help} count={cfg.goals?.length}>
+    <Section k="intent.goals" help={help} count={at<Goal[]>(cfg, "intent.goals")?.length}>
       <Repeater<Goal>
-        items={cfg.goals}
-        onChange={(goals) => patch({ goals })}
+        items={at<Goal[]>(cfg, "intent.goals")}
+        onChange={(items) => patch(put(cfg, "intent.goals", items))}
         blank={() => ({ name: "", description: "" })}
         addLabel="Add a goal"
         empty="A loop needs at least one goal. Give it a short name and say what done looks like."
         render={(item, set) => (
           <>
-            <Field label="Name" helpPath="goals[].name" required>
+            <Field label="Name" helpPath="intent.goals[].name" required>
               {(id) => <Text id={id} mono value={item.name} onChange={(name) => set({ name })} placeholder="draft-quality" />}
             </Field>
             <Field label="Depends on" hint="Other goal names that must be met first. Usually none.">
@@ -177,7 +189,7 @@ function DetectorEditor({ value, onChange }: { value: Detector; onChange: (d: De
 
   return (
     <>
-      <Field label="How it is checked" helpPath="validations[].detector" required>
+      <Field label="How it is checked" helpPath="safety.checks[].detector" required>
         {(id) => (
           <Select
             id={id}
@@ -271,14 +283,15 @@ function DetectorEditor({ value, onChange }: { value: Detector; onChange: (d: De
 }
 
 export function Validations({ cfg, patch, help }: SectionProps) {
-  const targets = ["overall", ...(cfg.goals ?? []).map((g) => g.name).filter(Boolean)];
-  const deterministic = (cfg.validations ?? []).filter((v) => v.detector.type !== "judge").length;
+  const targets = goalNames(cfg);
+  const checks = at<Validation[]>(cfg, "safety.checks") ?? [];
+  const deterministic = checks.filter((v) => v.detector.type !== "judge").length;
 
   return (
     <Section
       k="validations"
       help={help}
-      count={cfg.validations?.length}
+      count={checks.length}
       actions={
         <span className={`chip ${deterministic > 0 ? "chip-quench" : "chip-warn"}`}>
           {deterministic} deterministic
@@ -286,8 +299,8 @@ export function Validations({ cfg, patch, help }: SectionProps) {
       }
     >
       <Repeater<Validation>
-        items={cfg.validations}
-        onChange={(validations) => patch({ validations })}
+        items={checks}
+        onChange={(items) => patch(put(cfg, "safety.checks", items))}
         blank={() => ({
           target: targets[1] ?? "overall",
           name: "",
@@ -330,12 +343,12 @@ export function Validations({ cfg, patch, help }: SectionProps) {
 /* --- E ------------------------------------------------------------------- */
 
 export function Success({ cfg, patch, help }: SectionProps) {
-  const targets = ["overall", ...(cfg.goals ?? []).map((g) => g.name).filter(Boolean)];
+  const targets = goalNames(cfg);
   return (
-    <Section k="success" help={help} count={cfg.success?.length}>
+    <Section k="intent.success" help={help} count={at<SuccessScenario[]>(cfg, "intent.success")?.length}>
       <Repeater<SuccessScenario>
-        items={cfg.success}
-        onChange={(success) => patch({ success })}
+        items={at<SuccessScenario[]>(cfg, "intent.success")}
+        onChange={(items) => patch(put(cfg, "intent.success", items))}
         blank={() => ({ target: "overall", name: "", mode: "objective", statement: "" })}
         addLabel="Add a success scenario"
         empty="Without one, the loop runs to its iteration limit even after it has already done the job."
@@ -371,8 +384,8 @@ export function Success({ cfg, patch, help }: SectionProps) {
 /* --- F ------------------------------------------------------------------- */
 
 export function StopGatesSection({ cfg, patch, help }: SectionProps) {
-  const g = cfg.stop_gates ?? {};
-  const set = (p: Partial<StopGates>) => patch({ stop_gates: { ...g, ...p } });
+  const g = at<StopGates>(cfg, "safety.gates.stop") ?? {};
+  const set = (p: Partial<StopGates>) => patch(put(cfg, "safety.gates.stop", { ...g, ...p }));
   const unbounded = g.max_cost_usd == null && g.max_wall_clock_seconds == null;
 
   return (
@@ -386,13 +399,13 @@ export function StopGatesSection({ cfg, patch, help }: SectionProps) {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Field label="Maximum iterations" helpPath="stop_gates.max_iterations">
+        <Field label="Maximum iterations" helpPath="safety.gates.stop.max_iterations">
           {(id) => <Num id={id} min={1} value={g.max_iterations ?? 10} onChange={(v) => set({ max_iterations: v ?? 10 })} />}
         </Field>
         <Field label="Maximum revisions per node" hint="How many times one node may redo its own work before the loop moves on.">
           {(id) => <Num id={id} min={1} value={g.max_revisions_per_node ?? 3} onChange={(v) => set({ max_revisions_per_node: v ?? 3 })} />}
         </Field>
-        <Field label="Cost ceiling" helpPath="stop_gates.max_cost_usd">
+        <Field label="Cost ceiling" helpPath="safety.gates.stop.max_cost_usd">
           {(id) => <Num id={id} step={0.5} min={0} suffix="USD" value={g.max_cost_usd ?? null} onChange={(max_cost_usd) => set({ max_cost_usd })} />}
         </Field>
         <Field label="Wall-clock ceiling" hint="Seconds. The run halts when it has been going this long.">
@@ -401,7 +414,7 @@ export function StopGatesSection({ cfg, patch, help }: SectionProps) {
         <Field label="Token ceiling" hint="Total tokens across the whole run.">
           {(id) => <Num id={id} min={1} value={g.max_tokens ?? null} onChange={(max_tokens) => set({ max_tokens })} />}
         </Field>
-        <Field label="Stop after no progress" helpPath="stop_gates.no_progress_iterations">
+        <Field label="Stop after no progress" helpPath="safety.gates.stop.no_progress_iterations">
           {(id) => <Num id={id} min={0} value={g.no_progress_iterations ?? 3} onChange={(v) => set({ no_progress_iterations: v ?? 3 })} />}
         </Field>
         <Field label="Perturb after stalling" hint="Optional. Shake the run up after this many stalled iterations instead of waiting for the halt.">

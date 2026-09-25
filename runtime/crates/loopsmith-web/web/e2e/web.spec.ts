@@ -137,6 +137,22 @@ test.describe("with the tour dismissed", () => {
     await expect(page.getByText(/Nothing is on disk yet/)).toBeVisible();
   });
 
+  test("a loaded loop fills the whole form, not just its name", async ({ page }) => {
+    // The form edits the 1.0 config the server actually serves. When it was
+    // still reading the 0.3 keys, every section but the name came up empty
+    // and nothing said so.
+    const rail = page.locator("aside").first();
+    await rail.locator("article").first().getByRole("button", { name: "Load" }).click();
+
+    await page.getByRole("tab", { name: "Intent" }).click();
+    await expect(field(page, "Name").first()).not.toHaveValue("");
+
+    await page.getByRole("tab", { name: "Proof" }).click();
+    await expect(page.getByText(/error/i).first()).toBeVisible();
+    // The stop gates came from the file too, not from the form's defaults.
+    await expect(field(page, "Maximum iterations")).not.toHaveValue("");
+  });
+
   test("loading over a filled form asks before discarding it", async ({ page }) => {
     await field(page, "Loop name").fill("my-own-loop");
 

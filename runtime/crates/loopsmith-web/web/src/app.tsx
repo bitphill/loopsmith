@@ -33,12 +33,19 @@ import { SmithGate, type Smith } from "./smith-gate";
 import { ExamplesPicker } from "./examples-picker";
 import { Guided } from "./guided/guided";
 import type { Answers, Assembled, Spec } from "./guided/wire";
+import { at } from "./types";
 import type {
   LoopConfig, Detection, Help, SectionHelp, Review, ExampleCard, LibraryEntry,
   Format, PathFacts, JobSummary, ProviderSpec, Meta,
 } from "./types";
 
-const BLANK: LoopConfig = { name: "", version: "0.1.0", description: "", goals: [], validations: [] };
+const BLANK: LoopConfig = {
+  name: "",
+  version: "0.1.0",
+  description: "",
+  intent: { goals: [] },
+  safety: { checks: [] },
+};
 
 /**
  * Where the loop will actually live: a directory of its own, named after it,
@@ -58,15 +65,37 @@ function loopDir(parent: string, name: string): string {
     return `${base}/${leaf}`;
 }
 
-/** Which config keys each step owns, so a problem can route to a step. */
+/**
+ * Which config paths each step owns, so a problem can route to a step.
+ *
+ * Matched as dotted prefixes rather than by first segment: in 1.0 the first
+ * segment is the bundle, and `safety` alone owns the checks on one step and
+ * the limits on another.
+ */
 const STEP_KEYS: Record<string, string[]> = {
-  place: ["name", "description", "version"],
-  power: ["providers"],
-  intent: ["information", "pre_execution", "goals"],
-  proof: ["validations", "success", "stop_gates"],
-  work: ["graph", "execution_guidelines", "default_skills", "constraints", "context", "skills"],
-  ship: ["schedules"],
+  place: ["name", "description", "version", "environment"],
+  power: ["execution.providers"],
+  intent: ["intent.background", "intent.prerequisites", "intent.goals"],
+  proof: ["safety.checks", "intent.success", "safety.gates"],
+  work: [
+    "execution.graph", "execution.phases", "execution.default_skills",
+    "safety.limits", "execution.memory", "execution.skills", "safety.alerts",
+  ],
+  ship: ["execution.triggers", "evolution", "features"],
 };
+
+/** The step that owns a config path, by the longest prefix that matches it. */
+function stepOwning(field: string): string | undefined {
+  let best: { step: string; len: number } | undefined;
+  for (const [step, paths] of Object.entries(STEP_KEYS)) {
+    for (const p of paths) {
+      if ((field === p || field.startsWith(`${p}.`) || field.startsWith(`${p}[`)) && (!best || p.length > best.len)) {
+        best = { step, len: p.length };
+      }
+    }
+  }
+  return best?.step;
+}
 
 /** Actions worth offering on each step, in the order they are usually wanted. */
 const STEP_ACTIONS: Record<string, ActionId[]> = {
@@ -91,22 +120,42 @@ const ACTION_LABEL: Record<ActionId, { label: string; note: string; spends: bool
 };
 
 function isEmpty(c: LoopConfig): boolean {
+  const empty = (path: string) => (at<unknown[]>(c, path)?.length ?? 0) === 0;
   return (
     !c.name.trim() && !(c.description ?? "").trim() &&
-    (c.goals?.length ?? 0) === 0 && (c.validations?.length ?? 0) === 0 &&
-    (c.information?.length ?? 0) === 0 && (c.pre_execution?.length ?? 0) === 0 &&
-    (c.graph?.nodes?.length ?? 0) === 0 && (c.providers?.providers?.length ?? 0) === 0
+    empty("intent.goals") && empty("safety.checks") &&
+    empty("intent.background") && empty("intent.prerequisites") &&
+    empty("execution.graph.nodes") && empty("execution.providers.providers")
   );
 }
 
-function fillBlanks(current: LoopConfig, incoming: LoopConfig): LoopConfig {
-  const out: LoopConfig = { ...incoming, ...current };
-  (Object.keys(incoming) as (keyof LoopConfig)[]).forEach((k) => {
-    const mine = current[k] as unknown;
-    const empty = mine == null || (typeof mine === "string" && !mine.trim()) || (Array.isArray(mine) && mine.length === 0);
-    if (empty && incoming[k] != null) (out[k] as unknown) = incoming[k];
-  });
-  return out;
+/** Nothing the author put there: absent, blank, or an empty list. */
+function blank(v: unknown): boolean {
+  if (v == null) return true;
+  if (typeof v === "string") return !v.trim();
+  if (Array.isArray(v)) return v.length === 0;
+  return false;
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * "Fill blanks only": take from `incoming` wherever the author has left a gap.
+ *
+ * Recursive, because 1.0 nests. A top-level merge would look at `intent`,
+ * find an object, decide it is filled in, and leave every goal inside it
+ * untouched — which is the opposite of what the button says.
+ */
+function fillBlanks<T>(current: T, incoming: T): T {
+  if (!isRecord(current) || !isRecord(incoming)) {
+    return blank(current) && !blank(incoming) ? incoming : current;
+  }
+  const out: Record<string, unknown> = { ...incoming, ...current };
+  for (const k of Object.keys(incoming)) {
+    out[k] = fillBlanks(current[k], incoming[k]);
+  }
+  return out as T;
 }
 
 type ThemeChoice = "system" | "light" | "dark";
@@ -293,19 +342,20 @@ export default function App() {
     const out: Record<string, number> = {};
     for (const issue of review?.issues ?? []) {
       if (issue.severity !== "error") continue;
-      const key = issue.field.split(/[.[]/)[0];
-      const owner = Object.entries(STEP_KEYS).find(([, keys]) => keys.includes(key))?.[0] ?? "place";
+      const owner = stepOwning(issue.field) ?? "place";
       out[owner] = (out[owner] ?? 0) + 1;
     }
     return out;
   }, [review]);
 
+  const filled = (path: string) => (at<unknown[]>(cfg, path)?.length ?? 0) > 0;
+
   const STEPS: Step[] = [
     { id: "place", label: "Place", icon: Icon.folder({ size: 14 }), problems: problemsByStep.place, done: !!path && !!cfg.name },
-    { id: "power", label: "Power", icon: Icon.bolt({ size: 14 }), problems: problemsByStep.power, done: (cfg.providers?.providers?.length ?? 0) > 0 },
-    { id: "intent", label: "Intent", icon: Icon.target({ size: 14 }), problems: problemsByStep.intent, done: (cfg.goals?.length ?? 0) > 0 },
-    { id: "proof", label: "Proof", icon: Icon.shield({ size: 14 }), problems: problemsByStep.proof, done: (cfg.validations?.length ?? 0) > 0 },
-    { id: "work", label: "Work", icon: Icon.graph({ size: 14 }), problems: problemsByStep.work, done: (cfg.graph?.nodes?.length ?? 0) > 0 },
+    { id: "power", label: "Power", icon: Icon.bolt({ size: 14 }), problems: problemsByStep.power, done: filled("execution.providers.providers") },
+    { id: "intent", label: "Intent", icon: Icon.target({ size: 14 }), problems: problemsByStep.intent, done: filled("intent.goals") },
+    { id: "proof", label: "Proof", icon: Icon.shield({ size: 14 }), problems: problemsByStep.proof, done: filled("safety.checks") },
+    { id: "work", label: "Work", icon: Icon.graph({ size: 14 }), problems: problemsByStep.work, done: filled("execution.graph.nodes") },
     { id: "ship", label: "Ship", icon: Icon.play({ size: 14 }), problems: problemsByStep.ship, done: created },
   ];
 
@@ -474,17 +524,23 @@ export default function App() {
     } finally { setTesting(null); }
   };
 
-  /** Send a problem to the step that owns it, then to the field. */
+  /** Send a problem to the step that owns it, then to the section. */
   const jump = (field: string) => {
-    const key = field.split(/[.[]/)[0];
-    const owner = Object.entries(STEP_KEYS).find(([, keys]) => keys.includes(key))?.[0];
+    const owner = stepOwning(field);
     if (owner) goStep(owner);
+    // The anchor is the section's own path, so the longest prefix that names
+    // a section is the one to scroll to.
+    const section = Object.values(STEP_KEYS)
+      .flat()
+      .filter((p) => field === p || field.startsWith(`${p}.`) || field.startsWith(`${p}[`))
+      .sort((a, b) => b.length - a.length)[0];
     window.setTimeout(
-      () => document.getElementById(`section-${key}`)?.scrollIntoView({ block: "start" }), 220);
+      () => document.getElementById(`section-${section ?? field}`)?.scrollIntoView({ block: "start" }), 220);
   };
 
   const neededKeys = useMemo(
-    () => (cfg.providers?.providers ?? []).flatMap((p) => p.requires_env ?? []), [cfg.providers]);
+    () => (at<ProviderSpec[]>(cfg, "execution.providers.providers") ?? []).flatMap((p) => p.requires_env ?? []),
+    [cfg]);
 
   const sectionProps = { cfg, patch, help: sectionHelp };
 
@@ -514,7 +570,7 @@ export default function App() {
       run: () => goStep(s.id),
     })),
     ...help.sections.map((s) => ({
-      id: `sec-${s.key}`, group: "Sections", label: s.title, hint: s.letter.length === 1 ? s.letter : undefined,
+      id: `sec-${s.key}`, group: "Sections", label: s.title, hint: s.bundle,
       run: () => jump(s.key),
     })),
     ...(Object.keys(ACTION_LABEL) as ActionId[]).map((a) => ({

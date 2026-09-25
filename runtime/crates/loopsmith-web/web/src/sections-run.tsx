@@ -1,16 +1,28 @@
 /**
- * Sections G–J plus the graph, the provider routing, and carried context.
+ * How the work actually gets done: `execution`, and the `safety` limits that
+ * bound it.
  *
- * These are the ones that decide how the loop actually runs: what starts it,
- * what it may not do, who does the work, and how much of the past each prompt
- * drags along.
+ * These are the sections that decide what starts the loop, what it may not do,
+ * who does the work, and how much of the past each prompt drags along. Like
+ * the intent sections, each owns one dotted path and reaches it through `at`
+ * and `put`.
  */
 import { Section, type SectionProps } from "./sections-core";
 import { Field, Text, Area, Num, Select, Toggle, Repeater, Note, ListInput, Icon } from "./ui";
+import { at, put } from "./types";
 import type {
-  Trigger, Guideline, DefaultSkill, NodeSpec, ProviderSpec, Role, Tier,
-  Concurrency, ConstraintSet, Detection,
+  Fires, Goal, GraphSpec, Guideline, DefaultSkill, Memory, NodeSpec, Phases,
+  ProviderRouting, ProviderSpec, Role, SkillPolicy, Tier, Trigger,
+  Concurrency, ConstraintSet, Constraints, Detection,
 } from "./types";
+
+/** Every goal named so far, for the selects that point at one. */
+const goalNames = (cfg: import("./types").LoopConfig): string[] =>
+  (at<Goal[]>(cfg, "intent.goals") ?? []).map((g) => g.name).filter(Boolean);
+
+/** Every provider id declared so far, for the selects that pin one. */
+const providerNames = (cfg: import("./types").LoopConfig): string[] =>
+  (at<ProviderRouting>(cfg, "execution.providers")?.providers ?? []).map((p) => p.id).filter(Boolean);
 
 const TIERS: readonly { value: Tier; label: string }[] = [
   { value: "cheap", label: "cheap — routine work" },
@@ -29,35 +41,42 @@ const ROLES: readonly { value: Role; label: string }[] = [
 /* --- G ------------------------------------------------------------------- */
 
 export function Schedules({ cfg, patch, help }: SectionProps) {
-  const change = (type: Trigger["type"]): Trigger => {
-    const blanks: Record<Trigger["type"], Trigger> = {
+  const triggers = at<Trigger[]>(cfg, "execution.triggers.triggers") ?? [];
+  const setAll = (items: Trigger[]) => patch(put(cfg, "execution.triggers.triggers", items));
+
+  const change = (type: Fires["type"]): Fires => {
+    const blanks: Record<Fires["type"], Fires> = {
       manual: { type: "manual" },
       cron: { type: "cron", expr: "0 9 * * 1" },
       interval: { type: "interval", seconds: 3600 },
       file_change: { type: "file_change", path: "" },
-      goal_satisfied: { type: "goal_satisfied", goal: cfg.goals?.[0]?.name ?? "" },
+      goal_satisfied: { type: "goal_satisfied", goal: goalNames(cfg)[0] ?? "" },
     };
     return blanks[type];
   };
 
   return (
-    <Section k="schedules" help={help} count={cfg.schedules?.length}>
+    <Section k="execution.triggers" help={help} count={triggers.length}>
       <Repeater<Trigger>
-        items={cfg.schedules}
-        onChange={(schedules) => patch({ schedules })}
-        blank={() => ({ type: "manual" })}
+        items={triggers}
+        onChange={setAll}
+        blank={() => ({ on: { type: "manual" } })}
         addLabel="Add a trigger"
         empty="No triggers means this loop only runs when you press a button, which is the right place to start."
-        render={(item, set, i) => (
+        render={(item, set, i) => {
+          // Bound once so TypeScript can narrow it: `item.on` re-reads the
+          // union on every access and narrows nothing.
+          const fires = item.on;
+          return (
           <>
             <Field label="Trigger type">
               {(id) => (
                 <Select
                   id={id}
-                  value={item.type}
+                  value={fires.type}
                   // Replacing rather than merging: each trigger shape has its
                   // own required field and the model denies unknown ones.
-                  onChange={(t) => patch({ schedules: (cfg.schedules ?? []).map((s, j) => (j === i ? change(t) : s)) })}
+                  onChange={(t) => setAll(triggers.map((s, j) => (j === i ? { ...s, on: change(t) } : s)))}
                   options={[
                     { value: "manual", label: "Manual — only when you press run" },
                     { value: "interval", label: "Interval — every N seconds" },
@@ -68,33 +87,38 @@ export function Schedules({ cfg, patch, help }: SectionProps) {
                 />
               )}
             </Field>
-            {item.type === "cron" && (
-              <Field label="Cron expression" helpPath="schedules[].expr">
-                {(id) => <Text id={id} mono value={item.expr} onChange={(expr) => set({ expr } as Partial<Trigger>)} placeholder="0 9 * * 1" />}
+            {fires.type === "cron" && (
+              <Field label="Cron expression" helpPath="execution.triggers.triggers[].on.expr">
+                {(id) => <Text id={id} mono value={fires.expr}
+                  onChange={(expr) => set({ on: { type: "cron", expr } })} placeholder="0 9 * * 1" />}
               </Field>
             )}
-            {item.type === "interval" && (
+            {fires.type === "interval" && (
               <Field label="Every" hint="Seconds. Confirm a run finishes faster than this, or runs pile up.">
-                {(id) => <Num id={id} min={1} suffix="sec" value={item.seconds} onChange={(v) => set({ seconds: v ?? 3600 } as Partial<Trigger>)} />}
+                {(id) => <Num id={id} min={1} suffix="sec" value={fires.seconds}
+                  onChange={(v) => set({ on: { type: "interval", seconds: v ?? 3600 } })} />}
               </Field>
             )}
-            {item.type === "file_change" && (
+            {fires.type === "file_change" && (
               <Field label="Path to watch">
-                {(id) => <Text id={id} mono value={item.path} onChange={(path) => set({ path } as Partial<Trigger>)} placeholder="src/" />}
+                {(id) => <Text id={id} mono value={fires.path}
+                  onChange={(path) => set({ on: { type: "file_change", path } })} placeholder="src/" />}
               </Field>
             )}
-            {item.type === "goal_satisfied" && (
+            {fires.type === "goal_satisfied" && (
               <Field label="Which goal">
                 {(id) => (
-                  <Select id={id} value={item.goal} onChange={(goal) => set({ goal } as Partial<Trigger>)}
-                    options={(cfg.goals ?? []).map((g) => ({ value: g.name, label: g.name }))} />
+                  <Select id={id} value={fires.goal}
+                    onChange={(goal) => set({ on: { type: "goal_satisfied", goal } })}
+                    options={goalNames(cfg).map((n) => ({ value: n, label: n }))} />
                 )}
               </Field>
             )}
           </>
-        )}
+          );
+        }}
       />
-      {(cfg.schedules ?? []).some((t) => t.type === "cron") && (
+      {triggers.some((t) => t.on.type === "cron") && (
         <div className="mt-3">
           <Note>
             Cron expressions are read in UTC. That is the usual explanation for a job that fires
@@ -109,9 +133,10 @@ export function Schedules({ cfg, patch, help }: SectionProps) {
 /* --- H ------------------------------------------------------------------- */
 
 export function ConstraintsSection({ cfg, patch, help }: SectionProps) {
-  const c = cfg.constraints ?? {};
+  const c = at<Constraints>(cfg, "safety.limits") ?? {};
   const g: ConstraintSet = c.global ?? {};
-  const set = (p: Partial<ConstraintSet>) => patch({ constraints: { ...c, global: { ...g, ...p } } });
+  const set = (p: Partial<ConstraintSet>) =>
+    patch(put(cfg, "safety.limits", { ...c, global: { ...g, ...p } }));
 
   return (
     <Section
@@ -124,7 +149,7 @@ export function ConstraintsSection({ cfg, patch, help }: SectionProps) {
       }
     >
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Field label="Human checkpoints" helpPath="constraints.global.human_checkpoint" wide>
+        <Field label="Human checkpoints" helpPath="safety.limits.global.human_checkpoint" wide>
           {(id) => <ListInput id={id} value={g.human_checkpoint} onChange={(human_checkpoint) => set({ human_checkpoint })} placeholder="send email, publish post, spend money, delete files" />}
         </Field>
         <Field label="Rules" hint="Plain-language limits, comma separated. Handed to every node." wide>
@@ -159,12 +184,12 @@ export function ConstraintsSection({ cfg, patch, help }: SectionProps) {
 /* --- I ------------------------------------------------------------------- */
 
 export function Guidelines({ cfg, patch, help }: SectionProps) {
-  const eg = cfg.execution_guidelines ?? {};
+  const eg = at<Phases>(cfg, "execution.phases") ?? {};
   return (
     <Section k="execution_guidelines" help={help} count={eg.items?.length} defaultOpen={false}>
       <Repeater<Guideline>
         items={eg.items}
-        onChange={(items) => patch({ execution_guidelines: { ...eg, items } })}
+        onChange={(items) => patch(put(cfg, "execution.phases", { ...eg, items }))}
         blank={() => ({ name: "", guideline: "" })}
         addLabel="Add a phase"
         empty="Optional. Only worth using when the work has genuinely ordered stages."
@@ -187,7 +212,7 @@ export function Guidelines({ cfg, patch, help }: SectionProps) {
           {(id) => (
             <Area id={id} mono rows={2}
               value={(eg.dependency ?? []).join("\n")}
-              onChange={(v) => patch({ execution_guidelines: { ...eg, dependency: v.split("\n").map((s) => s.trim()).filter(Boolean) } })}
+              onChange={(v) => patch(put(cfg, "execution.phases", { ...eg, dependency: v.split("\n").map((s) => s.trim()).filter(Boolean) }))}
               placeholder="gather -> draft -> review" />
           )}
         </Field>
@@ -204,13 +229,13 @@ export function Skills({ cfg, patch, help, detection }: SectionProps & { detecti
     <Section
       k="default_skills"
       help={help}
-      count={cfg.default_skills?.length}
+      count={at<DefaultSkill[]>(cfg, "execution.default_skills")?.length}
       defaultOpen={false}
       actions={installed.length > 0 ? <span className="chip">{installed.length} on this machine</span> : undefined}
     >
       <Repeater<DefaultSkill>
-        items={cfg.default_skills}
-        onChange={(default_skills) => patch({ default_skills })}
+        items={at<DefaultSkill[]>(cfg, "execution.default_skills")}
+        onChange={(items) => patch(put(cfg, "execution.default_skills", items))}
         blank={() => ({ name: "", source: "marketplace" })}
         addLabel="Add a sub-agent"
         empty="Optional. Nothing breaks without one; nodes simply work without the specialist."
@@ -258,17 +283,19 @@ export function Skills({ cfg, patch, help, detection }: SectionProps & { detecti
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="self-start">
           <Toggle
-            checked={cfg.skills?.explore ?? false}
-            onChange={(explore) => patch({ skills: { ...(cfg.skills ?? {}), explore } })}
+            checked={at<SkillPolicy>(cfg, "execution.skills")?.explore ?? false}
+            onChange={(explore) =>
+              patch(put(cfg, "execution.skills", { ...(at<SkillPolicy>(cfg, "execution.skills") ?? {}), explore }))}
             label="Let the loop trial new sub-agents"
             hint="Off until a loop is working. Candidates are scored against gate outcomes and written up as proposals the loop cannot apply itself."
           />
         </div>
-        {cfg.skills?.explore && (
+        {at<SkillPolicy>(cfg, "execution.skills")?.explore && (
           <Field label="Candidates to trial" hint="Comma separated.">
             {(id) => (
-              <ListInput id={id} mono value={cfg.skills?.explore_candidates}
-                onChange={(explore_candidates) => patch({ skills: { ...(cfg.skills ?? {}), explore_candidates } })} />
+              <ListInput id={id} mono value={at<SkillPolicy>(cfg, "execution.skills")?.explore_candidates}
+                onChange={(explore_candidates) =>
+                  patch(put(cfg, "execution.skills", { ...(at<SkillPolicy>(cfg, "execution.skills") ?? {}), explore_candidates }))} />
             )}
           </Field>
         )}
@@ -280,17 +307,18 @@ export function Skills({ cfg, patch, help, detection }: SectionProps & { detecti
 /* --- graph --------------------------------------------------------------- */
 
 export function Graph({ cfg, patch, help }: SectionProps) {
-  const nodes = cfg.graph?.nodes ?? [];
-  const graph = cfg.graph ?? {};
+  const graph = at<GraphSpec>(cfg, "execution.graph") ?? {};
+  const nodes = graph.nodes ?? [];
+  const setGraph = (p: Partial<GraphSpec>) => patch(put(cfg, "execution.graph", { ...graph, ...p }));
   const conc: Concurrency = graph.concurrency ?? { mode: "auto", cap: 16, min_marginal_gain: 0.05 };
-  const providerIds = (cfg.providers?.providers ?? []).map((p) => p.id).filter(Boolean);
-  const stages = (cfg.execution_guidelines?.items ?? []).map((g) => g.name).filter(Boolean);
+  const providerIds = providerNames(cfg);
+  const stages = (at<Phases>(cfg, "execution.phases")?.items ?? []).map((g) => g.name).filter(Boolean);
 
   return (
     <Section k="graph" help={help} count={nodes.length}>
       <Repeater<NodeSpec>
         items={nodes}
-        onChange={(n) => patch({ graph: { ...graph, nodes: n } })}
+        onChange={(n) => setGraph({ nodes: n })}
         blank={() => ({ id: "", role: "builder", instruction: "", tier: "standard", weight: 1, isolated: false })}
         addLabel="Add a node"
         empty="No nodes yet. A node is one unit of work: who does it, what they are told, and what they read first."
@@ -299,7 +327,7 @@ export function Graph({ cfg, patch, help }: SectionProps) {
             <Field label="Node id" required>
               {(id) => <Text id={id} mono value={item.id} onChange={(v) => set({ id: v })} placeholder="draft" />}
             </Field>
-            <Field label="Role" helpPath="graph.nodes[].role" required>
+            <Field label="Role" helpPath="execution.graph.nodes[].role" required>
               {(id) => <Select id={id} value={item.role} onChange={(role) => set({ role })} options={ROLES} />}
             </Field>
             <Field label="Instruction" hint="Tight instructions produce tight output. At least 16 characters." required wide>
@@ -308,13 +336,13 @@ export function Graph({ cfg, patch, help }: SectionProps) {
                   placeholder="Draft the post from the gathered sources. Cite every factual claim inline." />
               )}
             </Field>
-            <Field label="Depends on" helpPath="graph.nodes[].depends_on">
+            <Field label="Depends on" helpPath="execution.graph.nodes[].depends_on">
               {(id) => <ListInput id={id} mono value={item.depends_on} onChange={(depends_on) => set({ depends_on })} placeholder="research" />}
             </Field>
             <Field label="Goals it serves" hint="Which goals this node's work counts toward.">
               {(id) => <ListInput id={id} mono value={item.goals} onChange={(goals) => set({ goals })} />}
             </Field>
-            <Field label="Tier" helpPath="graph.nodes[].tier">
+            <Field label="Tier" helpPath="execution.graph.nodes[].tier">
               {(id) => <Select id={id} value={item.tier ?? "standard"} onChange={(tier) => set({ tier })} options={TIERS} />}
             </Field>
             <Field label="Pin to a provider" hint="Optional. Judges should be pinned to a different family from the builder.">
@@ -335,7 +363,9 @@ export function Graph({ cfg, patch, help }: SectionProps) {
               {(id) => <Num id={id} step={0.5} min={0.1} value={item.weight ?? 1} onChange={(v) => set({ weight: v ?? 1 })} />}
             </Field>
             <div className="self-end pb-1">
-              <Toggle checked={item.isolated ?? false} onChange={(isolated) => set({ isolated })}
+              <Toggle
+                checked={(item.isolation?.mode ?? "none") !== "none"}
+                onChange={(on) => set({ isolation: { mode: on ? "worktree" : "none" } })}
                 label="Isolated" hint="Its own git worktree. Required for builders that may run in parallel." />
             </div>
           </>
@@ -355,7 +385,7 @@ export function Graph({ cfg, patch, help }: SectionProps) {
                   fixed: { mode: "fixed", max_parallel: 2 },
                   auto: { mode: "auto", cap: 16, min_marginal_gain: 0.05 },
                 };
-                patch({ graph: { ...graph, concurrency: blanks[mode] } });
+                setGraph({ concurrency: blanks[mode] });
               }}
               options={[
                 { value: "auto", label: "Auto — sized from the graph" },
@@ -369,7 +399,7 @@ export function Graph({ cfg, patch, help }: SectionProps) {
           <Field label="Workers" hint="How many nodes may run at the same time.">
             {(id) => (
               <Num id={id} min={1} value={conc.max_parallel}
-                onChange={(v) => patch({ graph: { ...graph, concurrency: { mode: "fixed", max_parallel: v ?? 1 } } })} />
+                onChange={(v) => setGraph({ concurrency: { mode: "fixed", max_parallel: v ?? 1 } })} />
             )}
           </Field>
         )}
@@ -377,7 +407,7 @@ export function Graph({ cfg, patch, help }: SectionProps) {
           <Field label="Worker cap" hint="Auto never goes above this, however parallel the graph looks.">
             {(id) => (
               <Num id={id} min={1} value={conc.cap ?? 16}
-                onChange={(v) => patch({ graph: { ...graph, concurrency: { ...conc, cap: v ?? 16 } } })} />
+                onChange={(v) => setGraph({ concurrency: { ...conc, cap: v ?? 16 } })} />
             )}
           </Field>
         )}
@@ -396,7 +426,9 @@ export function Providers({
   testing: string | null;
   results: Record<string, { ok: boolean; text: string }>;
 }) {
-  const routing = cfg.providers ?? {};
+  const routing = at<ProviderRouting>(cfg, "execution.providers") ?? {};
+  const setRouting = (p: Partial<ProviderRouting>) =>
+    patch(put(cfg, "execution.providers", { ...routing, ...p }));
   const providers = routing.providers ?? [];
   const cascade = routing.cascade ?? {};
   const agents = detection?.agents ?? [];
@@ -420,7 +452,7 @@ export function Providers({
     // configured but in no tier is never reached by anything.
     const next = { ...cascade };
     for (const t of a.tiers) next[t] = [...(next[t] ?? []), a.id];
-    patch({ providers: { ...routing, providers: [...providers, spec], cascade: next } });
+    setRouting({ providers: [...providers, spec], cascade: next });
   };
 
   return (
@@ -455,7 +487,7 @@ export function Providers({
 
       <Repeater<ProviderSpec>
         items={providers}
-        onChange={(v) => patch({ providers: { ...routing, providers: v } })}
+        onChange={(v) => setRouting({ providers: v })}
         blank={() => ({ id: "", kind: "byok", command: "", args: [], tiers: ["standard"] })}
         addLabel="Add a provider by hand"
         empty="No providers configured. A loop needs at least one thing to call."
@@ -481,7 +513,7 @@ export function Providers({
                     ]} />
                 )}
               </Field>
-              <Field label="Command" helpPath="providers[].command" required>
+              <Field label="Command" helpPath="execution.providers.providers[].command" required>
                 {(id) => <Text id={id} mono value={item.command} onChange={(command) => set({ command })} placeholder="claude" />}
               </Field>
               <Field label="Arguments" hint="Comma separated. {prompt} {system} {model} {tier} {node} are substituted.">
@@ -504,7 +536,7 @@ export function Providers({
               <Field label="Serves which tiers" hint="Comma separated: cheap, standard, strong.">
                 {(id) => <ListInput id={id} mono value={item.tiers} onChange={(t) => set({ tiers: t as Tier[] })} />}
               </Field>
-              <Field label="Required keys" helpPath="providers[].requires_env">
+              <Field label="Required keys" helpPath="execution.providers.providers[].requires_env">
                 {(id) => <ListInput id={id} mono value={item.requires_env} onChange={(requires_env) => set({ requires_env })} />}
               </Field>
               <Field label="Cost per 1000 tokens" hint="Makes the cost ceiling real rather than estimated.">
@@ -547,7 +579,7 @@ export function Providers({
           <Field key={tier} label={tier} hint={`Tried in order for ${tier} nodes.`}>
             {(id) => (
               <ListInput id={id} mono value={cascade[tier]}
-                onChange={(v) => patch({ providers: { ...routing, cascade: { ...cascade, [tier]: v } } })}
+                onChange={(v) => setRouting({ cascade: { ...cascade, [tier]: v } })}
                 placeholder="claude, gemini" />
             )}
           </Field>
@@ -556,7 +588,7 @@ export function Providers({
       <div className="mt-4">
         <Toggle
           checked={routing.enforce_judge_independence ?? true}
-          onChange={(enforce_judge_independence) => patch({ providers: { ...routing, enforce_judge_independence } })}
+          onChange={(enforce_judge_independence) => setRouting({ enforce_judge_independence })}
           label="Refuse a judge that grades its own family's work"
           hint="On by default, and it should stay on. A model marking its own homework is not a check."
         />
@@ -577,20 +609,21 @@ export function Providers({
 /* --- context ------------------------------------------------------------- */
 
 export function Context({ cfg, patch, help }: SectionProps) {
-  const c = cfg.context ?? {};
-  const providerIds = (cfg.providers?.providers ?? []).map((p) => p.id).filter(Boolean);
+  const c = at<Memory>(cfg, "execution.memory") ?? {};
+  const set = (p: Partial<Memory>) => patch(put(cfg, "execution.memory", { ...c, ...p }));
+  const providerIds = providerNames(cfg);
   return (
     <Section k="context" help={help} defaultOpen={false}>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <Field label="Carry summaries" helpPath="context.carry_summaries">
-          {(id) => <Num id={id} min={0} value={c.carry_summaries ?? 2} onChange={(v) => patch({ context: { ...c, carry_summaries: v ?? 0 } })} />}
+        <Field label="Carry summaries" helpPath="execution.memory.carry_summaries">
+          {(id) => <Num id={id} min={0} value={c.carry_summaries ?? 2} onChange={(v) => set({ carry_summaries: v ?? 0 })} />}
         </Field>
         <Field label="Summary length ceiling" hint="Characters. A summary with no ceiling eventually crowds out the instruction.">
-          {(id) => <Num id={id} min={100} value={c.max_summary_chars ?? 1200} onChange={(v) => patch({ context: { ...c, max_summary_chars: v ?? 1200 } })} />}
+          {(id) => <Num id={id} min={100} value={c.max_summary_chars ?? 1200} onChange={(v) => set({ max_summary_chars: v ?? 1200 })} />}
         </Field>
         <Field label="Who writes the summary" hint="Optional. A cheap provider is the right choice here.">
           {(id) => (
-            <Select id={id} value={c.summary_provider ?? ""} onChange={(v) => patch({ context: { ...c, summary_provider: v || null } })}
+            <Select id={id} value={c.summary_provider ?? ""} onChange={(v) => set({ summary_provider: v || null })}
               options={[{ value: "", label: "no prose summary" }, ...providerIds.map((p) => ({ value: p, label: p }))]} />
           )}
         </Field>
