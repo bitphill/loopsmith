@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Publish the generated code wiki to both of the places that serve it.
+# Publish the project site and the generated code wiki to the places that
+# serve them.
 #
 #   ./tools/publish-wiki.sh              # publish to GitHub Pages and the Wiki tab
 #   ./tools/publish-wiki.sh --dry-run    # show what would change, push nothing
@@ -13,6 +14,9 @@
 #
 #   gh-pages branch          -> https://bitphill.github.io/loopsmith/wiki/
 #   repository Wiki tab      -> https://github.com/bitphill/loopsmith/wiki
+#
+# The gh-pages root gets the landing page too, assembled by
+# `tools/build-site.sh` out of `site/` and `assets/`.
 #
 # The Pages copy is verbatim: the viewer is a single self-contained HTML file.
 #
@@ -73,6 +77,13 @@ if [ "$DO_PAGES" -eq 1 ]; then
   mkdir -p "$TMP/pages/wiki"
   cp -R "$SRC/." "$TMP/pages/wiki/"
 
+  # The landing page, beside the wiki rather than instead of it. The root of
+  # gh-pages used to be a meta-refresh into `wiki/`, which meant the project's
+  # own address was a redirect to its generated API documentation — the least
+  # useful page it has for anyone arriving without context.
+  "$ROOT/tools/build-site.sh" "$TMP/site" >/dev/null
+  cp -R "$TMP/site/." "$TMP/pages/"
+
   if [ -z "$(git -C "$TMP/pages" status --porcelain)" ]; then
     log "gh-pages: already current"
   elif [ "$DRY" -eq 1 ]; then
@@ -80,9 +91,10 @@ if [ "$DO_PAGES" -eq 1 ]; then
     git -C "$TMP/pages" status --short | sed 's/^/    /'
   else
     git -C "$TMP/pages" add -A
-    git -C "$TMP/pages" commit -q -m "Regenerate the code wiki
+    git -C "$TMP/pages" commit -q -m "Regenerate the site and the code wiki
 
-Output of \`gitnexus wiki\`, published by tools/publish-wiki.sh."
+The landing page from site/, the wiki from \`gitnexus wiki\`. Published by
+tools/publish-wiki.sh."
     git -C "$TMP/pages" push -q origin gh-pages
     log "gh-pages: published -> $VIEWER"
   fi

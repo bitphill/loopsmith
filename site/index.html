@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+
+    <title>loopsmith — self-evolving agent loops with a gate that is code</title>
+    <meta
+      name="description"
+      content="Describe a job once in a plain text file. loopsmith puts an AI to work on it, checks the result with code you wrote, sends it back when it falls short, and stops when it passes. The model never gets to say it is done."
+    />
+    <meta name="author" content="loopsmith" />
+
+    <link rel="canonical" href="https://bitphill.github.io/loopsmith/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="loopsmith" />
+    <meta property="og:title" content="loopsmith — self-evolving agent loops with a gate that is code" />
+    <meta
+      property="og:description"
+      content="Describe a job once. loopsmith runs it until a deterministic check says it is done — and the check can revoke, so a goal that stops being true stops being satisfied."
+    />
+    <meta property="og:url" content="https://bitphill.github.io/loopsmith/" />
+    <meta property="og:image" content="https://bitphill.github.io/loopsmith/loopsmith-logo-512.png" />
+    <meta property="og:image:width" content="512" />
+    <meta property="og:image:height" content="512" />
+    <meta property="og:image:alt" content="The loopsmith mark: a hammer struck through a loop." />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="loopsmith — self-evolving agent loops" />
+    <meta
+      name="twitter:description"
+      content="Describe a job once. loopsmith runs it until a deterministic check says it is done."
+    />
+    <meta name="twitter:image" content="https://bitphill.github.io/loopsmith/loopsmith-logo-512.png" />
+
+    <link rel="icon" type="image/png" href="./loopsmith-logo-256.png" />
+    <link rel="apple-touch-icon" href="./loopsmith-logo-256.png" />
+
+    <!--
+      One stylesheet, inline, because it is smaller than the request that would
+      fetch it and this page has exactly one job: load instantly on a phone on
+      a train and say what loopsmith is. No fonts are fetched either — the
+      system stack is what the reader's device already has, so nothing here can
+      reflow half a second after it paints.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        /* Forge, the same palette the app uses: the accent is the heat, and
+           the secondary is the quench — it only appears where something has
+           been verified. */
+        --ground: #faf7f2;
+        --surface: #fff;
+        --raised: #f4efe6;
+        --line: #e2dacd;
+        --text: #191410;
+        --dim: #6a6055;
+        --ember: #c2410c;
+        --on-ember: #fffaf5;
+        --quench: #0e7490;
+        --r: 10px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ground: #14100d;
+          --surface: #1b1613;
+          --raised: #221c18;
+          --line: #332b25;
+          --text: #f2ece4;
+          --dim: #a89c8f;
+          --ember: #fb7a3c;
+          /* Ink on the heat, not bone: the dark theme's ember is bright
+             enough that pale text on it fails contrast outright. Same value
+             the app uses. */
+          --on-ember: #1a0c02;
+          --quench: #38bdf8;
+        }
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: var(--ground);
+        color: var(--text);
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      a { color: var(--ember); }
+      a:focus-visible, button:focus-visible {
+        outline: 2px solid var(--quench);
+        outline-offset: 2px;
+      }
+      .wrap { max-width: 56rem; margin: 0 auto; padding: 0 20px; }
+      header.top {
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+      header.top .wrap {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding-block: 12px;
+        flex-wrap: wrap;
+      }
+      header.top img { display: block; border-radius: 6px; background: #fff; }
+      header.top .name { font-weight: 800; letter-spacing: -0.02em; font-size: 18px; }
+      nav.top { margin-left: auto; display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+
+      .hero { padding-block: 56px 40px; }
+      .hero h1 {
+        margin: 0 0 12px;
+        font-size: clamp(30px, 6vw, 46px);
+        line-height: 1.12;
+        letter-spacing: -0.03em;
+      }
+      .hero p.lede { margin: 0 0 8px; font-size: clamp(17px, 2.4vw, 20px); color: var(--dim); }
+      .hero p.rule { margin: 20px 0 28px; font-size: 17px; }
+      .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+      .btn {
+        display: inline-block;
+        padding: 10px 18px;
+        border-radius: var(--r);
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .btn.primary { background: var(--ember); border-color: var(--ember); color: var(--on-ember); }
+
+      section { padding-block: 32px; border-top: 1px solid var(--line); }
+      section h2 { margin: 0 0 6px; font-size: 24px; letter-spacing: -0.02em; }
+      section > .wrap > p { color: var(--dim); max-width: 46rem; }
+      pre {
+        background: var(--raised);
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        padding: 14px 16px;
+        overflow-x: auto;
+        font-size: 13.5px;
+        line-height: 1.7;
+      }
+      pre .c { color: var(--dim); }
+
+      ul.cards { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 14px; }
+      @media (min-width: 40rem) { ul.cards { grid-template-columns: 1fr 1fr; } }
+      ul.cards li {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+        padding: 14px 16px;
+      }
+      ul.cards h3 { margin: 0 0 4px; font-size: 15px; }
+      ul.cards p { margin: 0; font-size: 14px; color: var(--dim); }
+
+      dl.facts { margin: 18px 0 0; display: grid; gap: 14px; }
+      @media (min-width: 40rem) { dl.facts { grid-template-columns: 1fr 1fr; } }
+      dl.facts dt { font-weight: 700; font-size: 15px; }
+      dl.facts dd { margin: 2px 0 0; color: var(--dim); font-size: 14.5px; }
+
+      footer { border-top: 1px solid var(--line); padding-block: 28px 40px; font-size: 14px; color: var(--dim); }
+      footer a { color: inherit; }
+    </style>
+  </head>
+
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <img src="./loopsmith-logo-256.png" width="30" height="30" alt="" />
+        <span class="name">loopsmith</span>
+        <nav class="top" aria-label="Project">
+          <a href="#what">What it is</a>
+          <a href="#install">Install</a>
+          <a href="#examples">Examples</a>
+          <a href="./wiki/">Code wiki</a>
+          <a href="https://github.com/bitphill/loopsmith">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap hero">
+        <h1>Describe a job once. It runs until it is actually done.</h1>
+        <p class="lede">
+          You have a job you redo every week and are fussy about — a competitor roundup, a lead
+          list, a landing page, a research brief. Write down what you want and how anyone would
+          tell it is good, in one plain text file.
+        </p>
+        <p class="lede">
+          loopsmith puts an AI to work on it, checks the result, sends it back when it falls short,
+          and stops when it passes. It can run on a schedule for weeks without you.
+        </p>
+        <p class="rule">
+          The rule that makes it safe to walk away: <strong>the model never gets to say
+          “done”.</strong> A deterministic checker reads the actual files and decides — and it can
+          revoke, so a goal that stops being true stops being satisfied.
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="#install">Install it</a>
+          <a class="btn" href="https://github.com/bitphill/loopsmith#five-minutes">Five-minute start</a>
+          <a class="btn" href="./wiki/">Read the code wiki</a>
+        </div>
+      </div>
+
+      <section id="what">
+        <div class="wrap">
+          <h2>What it is</h2>
+          <p>
+            A single binary. A loop is one config file — YAML or Markdown, both the same model —
+            describing what you want, what proves it, and every way the run is allowed to end.
+          </p>
+          <dl class="facts">
+            <div>
+              <dt>The gate is compiled code</dt>
+              <dd>
+                It is the only thing that may mark a goal satisfied, it reads the files rather than
+                the model’s opinion of them, and it can take a verdict back.
+              </dd>
+            </div>
+            <div>
+              <dt>Judges cannot mark their own work</dt>
+              <dd>
+                A judge running on the same provider as the work it is grading is refused, not
+                warned about.
+              </dd>
+            </div>
+            <div>
+              <dt>Real parallelism, derived</dt>
+              <dd>
+                The schedule comes from the dependencies you declare: waves, a critical path, and a
+                predicted speedup, all before anything runs.
+              </dd>
+            </div>
+            <div>
+              <dt>Crash-resumable</dt>
+              <dd>
+                Every iteration is checkpointed and written to an append-only ledger, so a run that
+                dies at 4am resumes rather than restarts.
+              </dd>
+            </div>
+            <div>
+              <dt>Bounded on purpose</dt>
+              <dd>
+                Iteration, cost, token and wall-clock ceilings, plus a no-progress cap for the loop
+                that is still busy and no longer changing anything.
+              </dd>
+            </div>
+            <div>
+              <dt>Bring your own model</dt>
+              <dd>
+                Every provider is a command template, so any agent CLI already on your machine can
+                serve a loop without a code change.
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section id="install">
+        <div class="wrap">
+          <h2>Install</h2>
+          <p>Pick whichever package manager you already have. All of them put a <code>loopsmith</code> on your <code>PATH</code>.</p>
+          <pre><code><span class="c"># crates.io — builds from source</span>
+cargo install loopsmith
+
+<span class="c"># npm — downloads a prebuilt binary</span>
+npm install -g @bitphill/loopsmith
+
+<span class="c"># PyPI — downloads a prebuilt binary on first run</span>
+pip install loopsmith-cli
+
+<span class="c"># Homebrew</span>
+brew install bitphill/loopsmith/loopsmith</code></pre>
+          <p>Then pick a front end. All three build the same config file.</p>
+          <pre><code>loopsmith --web        <span class="c"># a browser, bound to 127.0.0.1 and nothing else</span>
+loopsmith --guided     <span class="c"># question and answer, in the terminal — works over SSH</span>
+loopsmith loop new -p ~/loops/my-loop</code></pre>
+        </div>
+      </section>
+
+      <section id="examples">
+        <div class="wrap">
+          <h2>Examples</h2>
+          <p>
+            Thirteen working loops ship with the binary, in both formats. Loading one fills in
+            every section, which is the quickest way to see what a validation or a stop gate looks
+            like in practice.
+          </p>
+          <ul class="cards">
+            <li>
+              <h3>Research brief</h3>
+              <p>Gathers sources, drafts a brief, and refuses it until every claim carries a citation a script can check.</p>
+            </li>
+            <li>
+              <h3>Refactor</h3>
+              <p>Two builders working side by side on one module, with the test suite as the gate and edits to the tests forbidden.</p>
+            </li>
+            <li>
+              <h3>Landing page</h3>
+              <p>Builds a static page and holds it until it is accessible, fast, and actually deploys.</p>
+            </li>
+            <li>
+              <h3>Lead list</h3>
+              <p>Qualifies leads against written criteria and stops when the list is long enough and clean enough.</p>
+            </li>
+          </ul>
+          <p style="margin-top: 18px">
+            <a href="https://github.com/bitphill/loopsmith/tree/main/config/examples">All of them, on GitHub →</a>
+          </p>
+        </div>
+      </section>
+
+      <section id="learn">
+        <div class="wrap">
+          <h2>Read more</h2>
+          <ul class="cards">
+            <li>
+              <h3><a href="./wiki/">Code wiki</a></h3>
+              <p>How it is built: the execution engine, the gate, the config schema, the memory store.</p>
+            </li>
+            <li>
+              <h3><a href="https://github.com/bitphill/loopsmith#readme">README</a></h3>
+              <p>Install, a five-minute example, scheduling, and portability.</p>
+            </li>
+            <li>
+              <h3><a href="https://github.com/bitphill/loopsmith/blob/main/README-FOR-DUMMIES.md">Start from nothing</a></h3>
+              <p>The same thing without jargon, for someone who has never run a command before.</p>
+            </li>
+            <li>
+              <h3><a href="https://github.com/bitphill/loopsmith/blob/main/HOW-TO-USE.md">How to use it</a></h3>
+              <p>Every section of a config, what it is for, and what goes wrong when it is skipped.</p>
+            </li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <p>
+          MIT licensed · <a href="https://github.com/bitphill/loopsmith">github.com/bitphill/loopsmith</a>
+          · <a href="https://github.com/bitphill/loopsmith/releases">Releases</a>
+        </p>
+      </div>
+    </footer>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "loopsmith",
+        "alternateName": "loopsmith CLI",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "description": "Runs agent loops: a config describes goals, checks and stop gates, and a deterministic gate — never a model — decides whether a goal is satisfied, and can revoke that decision.",
+        "url": "https://bitphill.github.io/loopsmith/",
+        "downloadUrl": "https://github.com/bitphill/loopsmith/releases",
+        "codeRepository": "https://github.com/bitphill/loopsmith",
+        "license": "https://opensource.org/licenses/MIT",
+        "programmingLanguage": "Rust",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
+  </body>
+</html>

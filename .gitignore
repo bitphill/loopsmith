@@ -76,3 +76,6 @@ docs/
 runtime/test-results/
 runtime/crates/loopsmith-web/web/test-results/
 runtime/crates/loopsmith-web/web/playwright-report/
+
+# Assembled by tools/build-site.sh; the sources are site/ and assets/.
+/build/

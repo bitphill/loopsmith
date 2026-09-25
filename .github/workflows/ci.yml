@@ -201,6 +201,81 @@ jobs:
           fi
           echo "dist is current"
 
+  # The landing page at the root of gh-pages. It is the first thing anyone sees
+  # and the only page of this project a search engine has ever indexed, so the
+  # things that decide both — does it load fast, is it readable, does it say
+  # what it is in a form a machine can read — are checked here rather than
+  # discovered months later in a console nobody opens.
+  #
+  # Blocking, unlike the audit below, because every input is in this repository:
+  # a failure here is something that was changed in `site/`, not somebody else's
+  # disclosure.
+  site:
+    name: the landing page is fast and legible
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: What is this machine
+        run: node --version && npm --version
+
+      - name: Assemble the site
+        run: ./tools/build-site.sh build/site
+
+      # Cheap structural checks first. Lighthouse will not tell you that the
+      # canonical URL is missing or that the sitemap does not parse, and both
+      # are the kind of thing that stays broken for a year.
+      - name: The page says what it is
+        run: |
+          set -eu
+          page=build/site/index.html
+          for tag in \
+            'rel="canonical"' \
+            'name="description"' \
+            'property="og:title"' \
+            'property="og:image"' \
+            'name="twitter:card"' \
+            '"@type": "SoftwareApplication"'
+          do
+            grep -qF "$tag" "$page" || { echo "::error::$page is missing $tag"; exit 1; }
+          done
+          python3 -c 'import xml.dom.minidom; xml.dom.minidom.parse("build/site/sitemap.xml")'
+          grep -q "^Sitemap: " build/site/robots.txt
+          # Every image needs alt text, including the empty alt that marks one
+          # as decorative. A missing attribute is the one a screen reader reads
+          # the filename for.
+          python3 -c 'import re,sys; h=open("build/site/index.html").read(); bad=[t for t in re.findall(r"<img\b[^>]*>", h) if "alt=" not in t]; sys.exit("::error::img without alt: " + "; ".join(bad)) if bad else None'
+          echo "the page is complete"
+
+      # Category scores only, and no preset. A preset asserts a hundred
+      # individual audits, most of which have nothing to say about a static
+      # page, and a check that fails for reasons nobody acts on is a check
+      # that gets switched off.
+      #
+      # SEO and accessibility block, because both are decided entirely by what
+      # is in `site/index.html`. Performance and best practices warn: they
+      # move with whatever a shared runner is doing at the time, and a red
+      # build caused by a busy machine teaches the wrong lesson.
+      - name: Lighthouse
+        run: |
+          set -eu
+          # Not `-s`: that is SPA mode, which would serve index.html for
+          # /sitemap.xml and /robots.txt.
+          npx --yes serve build/site --listen 8099 --no-clipboard &
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8099/ >/dev/null && break
+            sleep 1
+          done
+          npx --yes @lhci/cli@0.14.x collect --url=http://localhost:8099/ --numberOfRuns=1
+          npx --yes @lhci/cli@0.14.x assert \
+            --assertions.categories:seo=error:0.95 \
+            --assertions.categories:accessibility=error:0.95 \
+            --assertions.categories:best-practices=warn:0.9 \
+            --assertions.categories:performance=warn:0.9
+
   # Deliberately separate and non-blocking. An advisory audit that can fail the
   # merge queue on somebody else's CVE disclosure teaches people to ignore it.
   audit:
