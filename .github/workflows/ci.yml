@@ -300,6 +300,15 @@ jobs:
       - name: Flesch-Kincaid grade 6 or below
         run: ./tools/check-readability.sh
 
+      # `assets/architecture.mmd` is the source; the PNG and the text form are
+      # rendered from it. The text is compared byte for byte, because the same
+      # input gives the same bytes on every machine. The PNG is compared by the
+      # hash of the source it was drawn from — a headless browser's output
+      # differs between hosts over font hinting alone, so comparing the image
+      # would fail for reasons that have nothing to do with the diagram.
+      - name: The rendered diagrams match their source
+        run: ./tools/render-diagrams.sh --check
+
       # The worst sentences, whether or not the ceiling held. On a failure this
       # is the fix list; on a pass it is what the next edit should avoid.
       - name: The longest sentences in it

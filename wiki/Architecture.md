@@ -12,27 +12,31 @@ burndown chart with extra steps.
 
 ## Three planes
 
-```
-INVOCATION      loopsmith loop new --path <dir>
-                  └─ permission preflight (one grant) → hands-off
-                       │
-CONTROL PLANE   loopsmith (Rust)                  ← owns truth
-                  ├─ core      the four-bundle config model and validation
-                  ├─ graph     DAG, waves, critical path, Amdahl sizing
-                  ├─ memory    sled: episodes, goal state, ledger, checkpoints
-                  ├─ gate      deterministic verdicts — the ONLY writer of
-                  │            goal_satisfied, and able to revoke it
-                  ├─ provider  command-template routing to any CLI or API
-                  ├─ skills    acquire, trial, rank, propose
-                  ├─ run       the run lifecycle and its state machine
-                  ├─ wizard    the interview, as data both front ends render
-                  ├─ web       the browser UI, which spawns this same binary
-                  ├─ util      platform differences, in one place
-                  └─ mcp       stdio server: plan, ledger, gate, scratchpad
-                       │
-EXECUTION       Any provider                       ← owns judgment
-                  Claude Code · Ollama · Grok CLI · Grok Build · OpenAI ·
-                  Gemini · Hermes · any BYOK command · any MCP server
+![The three planes: invocation, the control plane's crates, and any provider](https://raw.githubusercontent.com/bitphill/loopsmith/main/assets/architecture.png)
+
+The same thing in text, which is what the rest of the documentation uses —
+both are rendered from `assets/architecture.mmd`:
+
+```text
+INVOCATION
+  ├─ loopsmith loop new --path <dir>  or --guided, or --web
+  └─ permission preflight             one grant, then hands-off
+       │
+CONTROL PLANE — loopsmith (Rust), owns truth
+  ├─ core      the four-bundle config model, validation, and the 0.3 migration
+  ├─ graph     DAG, waves, critical path, Amdahl sizing
+  ├─ memory    sled — episodes, goal state, ledger, checkpoints
+  ├─ gate      deterministic verdicts — the ONLY writer of goal_satisfied, and able to revoke it
+  ├─ provider  command-template routing, token and cost accounting
+  ├─ skills    acquire, trial, rank, propose
+  ├─ run       the run lifecycle and its state machine
+  ├─ wizard    the interview, as data both front ends render
+  ├─ web       the browser UI, which spawns this same binary
+  ├─ util      platform differences, in one place
+  └─ mcp       stdio server — plan, ledger, gate, scratchpad
+       │
+EXECUTION — any provider, owns judgment
+     Claude Code · Ollama · Grok · OpenAI · Gemini · Hermes  any BYOK command, any MCP server
 ```
 
 The orchestrator is a binary rather than a chat session because a loop has to

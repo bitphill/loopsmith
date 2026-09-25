@@ -27,26 +27,26 @@ produces, how the pieces fit, and what every configuration field is for.
 Three planes. The split exists because the corpus this is built on is unanimous
 on one point: a model must not be the thing that certifies its own completion.
 
-```
-INVOCATION      /loopsmith  or  loopsmith loop new --path <dir>
-                  └─ permission preflight (one grant) → hands-off
-                       │
-CONTROL PLANE   loopsmith (Rust)                  ← owns truth
-                  ├─ core      the four-bundle config model and validation
-                  ├─ graph     DAG, waves, critical path, Amdahl sizing
-                  ├─ memory    sled: episodes, goal state, ledger, checkpoints
-                  ├─ gate      deterministic verdicts — the ONLY writer of
-                  │            goal_satisfied, and able to revoke it
-                  ├─ provider  command-template routing, token/cost accounting
-                  ├─ skills    acquire, trial, rank, propose
-                  ├─ run       the run lifecycle: validate, plan, dispatch, close
-                  ├─ wizard    the interview, as data both front ends render
-                  ├─ web       the browser UI, which spawns this same binary
-                  └─ mcp       stdio server exposing plan, ledger, gate, pad
-                       │
-EXECUTION       Any provider                       ← owns judgment
-                  Claude Code · Ollama · Grok · OpenAI · Gemini · Hermes ·
-                  any BYOK command · any MCP server
+```text
+INVOCATION
+  ├─ loopsmith loop new --path <dir>  or --guided, or --web
+  └─ permission preflight             one grant, then hands-off
+       │
+CONTROL PLANE — loopsmith (Rust), owns truth
+  ├─ core      the four-bundle config model, validation, and the 0.3 migration
+  ├─ graph     DAG, waves, critical path, Amdahl sizing
+  ├─ memory    sled — episodes, goal state, ledger, checkpoints
+  ├─ gate      deterministic verdicts — the ONLY writer of goal_satisfied, and able to revoke it
+  ├─ provider  command-template routing, token and cost accounting
+  ├─ skills    acquire, trial, rank, propose
+  ├─ run       the run lifecycle and its state machine
+  ├─ wizard    the interview, as data both front ends render
+  ├─ web       the browser UI, which spawns this same binary
+  ├─ util      platform differences, in one place
+  └─ mcp       stdio server — plan, ledger, gate, scratchpad
+       │
+EXECUTION — any provider, owns judgment
+     Claude Code · Ollama · Grok · OpenAI · Gemini · Hermes  any BYOK command, any MCP server
 ```
 
 **Why the orchestrator is Rust and not a session.** A loop must survive a
