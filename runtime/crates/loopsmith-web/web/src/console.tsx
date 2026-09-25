@@ -8,7 +8,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, streamJob } from "./api";
 import { Icon } from "./ui";
-import type { JobLine, JobSummary } from "./types";
+import { RunView } from "./run-view";
+import type { JobLine, JobSummary, PlanView, RunEvent } from "./types";
 
 export type ActionId =
   | "create" | "validate" | "plan" | "dry_run" | "run"
@@ -17,23 +18,40 @@ export type ActionId =
 /* --- the console --------------------------------------------------------- */
 
 export function RunConsole({
-  jobId, onClose, onFinished,
+  jobId, plan, onClose, onFinished,
 }: {
   jobId: string;
+  /** The schedule the engine derived, for the wave graph. */
+  plan: PlanView | null;
   onClose: () => void;
   onFinished: (s: JobSummary) => void;
 }) {
   const [lines, setLines] = useState<JobLine[]>([]);
+  /**
+   * The lines that were ledger entries, understood by the server.
+   *
+   * Kept beside the lines rather than derived from them: the parse belongs to
+   * Rust, and re-deriving it here would be the copy of the log format this
+   * design exists to avoid.
+   */
+  const [events, setEvents] = useState<RunEvent[]>([]);
   const [summary, setSummary] = useState<JobSummary | null>(null);
   const [follow, setFollow] = useState(true);
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setLines([]);
+    setEvents([]);
     setSummary(null);
     const stop = streamJob(jobId, {
       // Keyed by seq so a reconnect cannot duplicate a line already shown.
-      line: (l) => setLines((all) => (all.some((x) => x.seq === l.seq) ? all : [...all, l])),
+      line: (l, event) => {
+        setLines((all) => {
+          if (all.some((x) => x.seq === l.seq)) return all;
+          if (event) setEvents((es) => [...es, event]);
+          return [...all, l];
+        });
+      },
       state: (s) => {
         setSummary(s);
         if (s.state !== "running") onFinished(s);
@@ -75,6 +93,8 @@ export function RunConsole({
           </button>
         </div>
       </header>
+
+      <RunView events={events} plan={plan} live={state === "running"} />
 
       {state === "running" && (
         <p className="hint border-b px-2.5 py-1.5">

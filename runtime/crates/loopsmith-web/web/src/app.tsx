@@ -43,6 +43,15 @@ import type {
   Format, PathFacts, JobSummary, ProviderSpec, Meta,
 } from "./types";
 
+/**
+ * The example the third door runs.
+ *
+ * Four nodes over three waves with two builders side by side, which is the
+ * shape that makes the wave graph worth looking at — a loop that is one node
+ * at a time demonstrates nothing that a sentence would not.
+ */
+const DEMO_EXAMPLE = "refactor-loop";
+
 const BLANK: LoopConfig = {
   name: "",
   version: "0.1.0",
@@ -233,6 +242,14 @@ export default function App() {
     () => (localStorage.getItem("loopsmith-mode") as "expert" | "guided") || "expert");
   /** The tour is only ever opened deliberately — from onboarding, or the header. */
   const [tourOpen, setTourOpen] = useState(false);
+  /**
+   * The throwaway loop the third door built, while it is being watched.
+   *
+   * Held because the demonstration is two commands — build it, then walk it —
+   * and the second has to know where the first put it. Cleared when the walk
+   * finishes, so an ordinary run afterwards is an ordinary run.
+   */
+  const demo = useRef<string | null>(null);
 
   const { shake, shakeKey, shakeProps } = useShake();
 
@@ -406,6 +423,55 @@ export default function App() {
     setToast({ tone: "good", text: `Loaded ${config.name}. Nothing is on disk yet — walk the steps and press Create loop.` });
   };
 
+  /**
+   * The third door: build a working loop somewhere disposable and walk it.
+   *
+   * Two liberties are taken and both are said out loud. The loop is built in
+   * the system's temp directory with `--force`, so pressing the button twice
+   * works. And the example's "I have done this by hand once" boxes are
+   * ticked, because the validator refuses a config where they are not — which
+   * is the right rule for a loop somebody means to run and the wrong one for
+   * a demonstration of what running looks like.
+   *
+   * It is a dry run: the scheduling, the gate and the ledger are real, and no
+   * provider is called.
+   */
+  const startDemo = async () => {
+    try {
+      const where = meta?.demo_dir ?? (await api.meta()).demo_dir;
+      const { config } = await api.example(DEMO_EXAMPLE);
+      const ready: LoopConfig = {
+        ...config,
+        intent: {
+          ...config.intent,
+          prerequisites: (config.intent?.prerequisites ?? []).map((p) => ({ ...p, done: true })),
+        },
+      };
+      const dir = loopDir(where, ready.name);
+
+      // Past the gate and into the editor, so the form behind the console is
+      // the loop being watched rather than an empty one.
+      localStorage.setItem("loopsmith-smith", "experienced");
+      setSmith("experienced");
+      setMode("expert");
+      setParent(where);
+      setCfg(ready);
+      setFormat("yaml");
+      setCreated(false);
+      demo.current = dir;
+      setRailOpen(true);
+      goStep("work");
+      setToast({
+        tone: "good",
+        text: `Building ${ready.name} in ${dir} and walking it through. No model is called and nothing is spent. Its "done it by hand once" boxes are ticked for the demonstration — a loop you mean to run has to earn those.`,
+      });
+      await run("create", { dir, draft: ready, force: true });
+    } catch (e) {
+      demo.current = null;
+      setToast({ tone: "bad", text: (e as Error).message });
+    }
+  };
+
   const pickSmith = (s: Smith) => {
     localStorage.setItem("loopsmith-smith", s);
     setSmith(s);
@@ -488,22 +554,31 @@ export default function App() {
     } catch (e) { setToast({ tone: "bad", text: (e as Error).message }); }
   };
 
-  const run = async (action: ActionId) => {
-    const dir = path.trim();
+  /**
+   * Press a button.
+   *
+   * `at` and `draft` exist for the demonstration door, which acts on a loop
+   * the state has not caught up with yet: `setParent` and `setCfg` are
+   * queued, and a `run` that read them from the closure would build the
+   * previous draft in the previous directory.
+   */
+  const run = async (action: ActionId, at?: { dir: string; draft?: LoopConfig; force?: boolean }) => {
+    const dir = (at?.dir ?? path).trim();
+    const draft = at?.draft ?? cfg;
     const configFile = `${dir}/loop.${format === "markdown" ? "md" : "yaml"}`;
     const body: Record<string, unknown> = { cwd: dir || ".", action };
 
     if (action === "create") {
       Object.assign(body, {
-        path: dir, name: cfg.name, purpose: cfg.description ?? "",
-        config_file: "", force: false, git: initGit,
-        draft: { config: cfg, format },
+        path: dir, name: draft.name, purpose: draft.description ?? "",
+        config_file: "", force: at?.force ?? false, git: initGit,
+        draft: { config: draft, format },
       });
     } else if (action === "permissions_write") {
       Object.assign(body, { config: configFile, settings: `${dir}/.claude/settings.local.json` });
     } else {
       body.config = configFile;
-      if (!created && (action === "validate" || action === "plan")) body.draft = { config: cfg, format };
+      if (!created && (action === "validate" || action === "plan")) body.draft = { config: draft, format };
     }
 
     try {
@@ -518,6 +593,26 @@ export default function App() {
 
   const onFinished = useCallback((s: JobSummary) => {
     setLastJob(s);
+    // The demonstration is two commands. The second one is the point.
+    //
+    // A ref rather than state: this callback is what the console's socket
+    // effect depends on, and a new identity for it tears the socket down and
+    // replays the run from the top, mid-run.
+    if (demo.current && s.kind === "create" && s.state === "succeeded") {
+      void run("dry_run", { dir: demo.current });
+      return;
+    }
+    if (demo.current && s.kind === "dry-run") {
+      demo.current = null;
+      // The demonstration ends with a non-zero exit, on purpose, and without
+      // a word that reads as a broken button. A loop that stops because
+      // nothing is changing is the gate working.
+      setToast({
+        tone: "good",
+        text: "That is a whole run: it planned the graph into waves, ran them, asked the gate after each pass, and stopped itself when three iterations changed nothing. It called no model, so the checks had nothing to pass — a real run is the same path with work in it.",
+      });
+      return;
+    }
     if (s.kind === "create" && s.state === "succeeded") {
       setCreated(true);
       api.library().then(setLibrary).catch(() => {});
@@ -562,7 +657,11 @@ export default function App() {
 
   const sectionProps = { cfg, patch, help: sectionHelp, defaults };
 
-  const island: IslandState = job
+  // A job that is still open in the console is not necessarily still going:
+  // `lastJob` is set the moment it ends, and the island saying `running`
+  // after that is the header contradicting the panel beside it.
+  const live = job !== null && !(lastJob?.id === job && lastJob.state !== "running");
+  const island: IslandState = live
     ? { tone: "busy", label: "running", detail: lastJob?.kind, onClick: () => setRailOpen(true) }
     : lastJob
       ? {
@@ -711,7 +810,10 @@ export default function App() {
               <div className="hidden min-h-0 lg:block">
                 {job ? (
                   <div className="h-full border-l bg-surface">
-                    <RunConsole jobId={job} onClose={() => setJob(null)} onFinished={onFinished} />
+                    <RunConsole
+                      jobId={job} plan={review?.plan ?? null}
+                      onClose={() => setJob(null)} onFinished={onFinished}
+                    />
                   </div>
                 ) : (
                   <ReviewRail review={review} onJump={jump} />
@@ -763,7 +865,7 @@ export default function App() {
 
         {/* The way in: pick a door, then (for a new smith) the explanation and
             a working loop to start from. Each is shown once and remembered. */}
-        {smith === null && <SmithGate onPick={pickSmith} />}
+        {smith === null && <SmithGate onPick={pickSmith} onDemo={() => void startDemo()} />}
 
         {(tourOpen || onboarding === "tour") && (
           <Tour

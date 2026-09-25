@@ -84,7 +84,13 @@ pub struct JobSummary {
 struct Job {
     summary: JobSummary,
     lines: Vec<JobLine>,
-    tx: broadcast::Sender<JobLine>,
+    /// Present while the job runs, and dropped by [`Jobs::finish`].
+    ///
+    /// Dropping it is what tells a console that is already watching that the
+    /// run is over: its receiver returns `Closed`, and nothing else would.
+    /// Held forever, a finished run sits in the browser saying `running` until
+    /// the page is reloaded.
+    tx: Option<broadcast::Sender<JobLine>>,
     /// Present while the job runs. Taking it is how cancellation happens.
     child: Option<Arc<Mutex<Option<tokio::process::Child>>>>,
 }
@@ -145,7 +151,7 @@ impl Jobs {
             Job {
                 summary,
                 lines: Vec::new(),
-                tx: tx.clone(),
+                tx: Some(tx.clone()),
                 child: Some(holder.clone()),
             },
         );
@@ -271,7 +277,9 @@ impl Jobs {
         }
         // Err means nobody is listening. That is the common case for a job
         // nobody has opened yet, and is not a failure.
-        let _ = job.tx.send(line);
+        if let Some(tx) = &job.tx {
+            let _ = tx.send(line);
+        }
     }
 
     fn finish(&self, id: &str, state: JobState, code: Option<i32>) {
@@ -284,6 +292,10 @@ impl Jobs {
             job.summary.exit_code = code;
             job.summary.finished_ms = Some(crate::detect::now_ms());
             job.child = None;
+            // The last line was pushed before this call, so everything has
+            // been sent. Dropping the sender now closes every open console's
+            // receiver, which is how they learn the run ended.
+            job.tx = None;
         }
     }
 
@@ -313,8 +325,17 @@ impl Jobs {
             .unwrap_or_default()
     }
 
+    /// Follow a job's output as it arrives.
+    ///
+    /// `None` for a job that does not exist *and* for one that has already
+    /// finished — there is nothing more to follow either way, and the retained
+    /// lines are what a late reader wants. [`Jobs::summary`] is what tells the
+    /// two apart.
     pub fn subscribe(&self, id: &str) -> Option<broadcast::Receiver<JobLine>> {
-        lock(&self.inner).get(id).map(|j| j.tx.subscribe())
+        lock(&self.inner)
+            .get(id)
+            .and_then(|j| j.tx.as_ref())
+            .map(|tx| tx.subscribe())
     }
 
     /// Kill a running job.
@@ -729,6 +750,40 @@ mod tests {
         // The echoed command line is this module speaking, not the subprocess,
         // and it must be distinguishable from real output.
         assert!(lines.iter().any(|l| l.stream == "meta" && l.text.starts_with("$ loopsmith")));
+    }
+
+    #[tokio::test]
+    async fn a_console_already_watching_learns_that_the_run_ended() {
+        // The console has no other way to find out. It is sent the summary
+        // when it connects and then follows the channel; if the channel never
+        // closes, a run that finishes while somebody is watching sits there
+        // saying `running` until the page is reloaded — and anything chained
+        // onto "this finished" never happens.
+        let dir = loopsmith_util::testing::temp_dir("web-exec-close");
+        let jobs = Jobs::new();
+        let id = jobs.spawn("probe", vec!["--list".into()], dir).unwrap();
+        let mut rx = jobs.subscribe(&id).expect("a running job can be followed");
+
+        settle(&jobs, &id).await;
+
+        // Drain whatever was buffered, then the close.
+        let ended = loop {
+            match rx.recv().await {
+                Ok(_) => continue,
+                Err(e) => break e,
+            }
+        };
+        assert!(
+            matches!(ended, tokio::sync::broadcast::error::RecvError::Closed),
+            "the channel outlived the job: {ended:?}"
+        );
+        assert!(
+            jobs.subscribe(&id).is_none(),
+            "a finished job has nothing left to follow"
+        );
+        // …but it is still a job, and its lines are still readable.
+        assert!(jobs.summary(&id).is_some());
+        assert!(!jobs.lines(&id).is_empty());
     }
 
     #[tokio::test]

@@ -8,6 +8,7 @@
 import type {
   Detection, Review, ExampleCard, LibraryEntry, Help, SecretStatus, SecretStore,
   JobSummary, JobLine, LoopConfig, Format, PathFacts, HandshakeResult, Meta,
+  RunEvent,
 } from "./types";
 import type { Answers, Assembled, Spec } from "./guided/wire";
 
@@ -127,7 +128,7 @@ export const api = {
 export function streamJob(
   id: string,
   on: {
-    line: (l: JobLine) => void;
+    line: (l: JobLine, event: RunEvent | null) => void;
     state: (s: JobSummary) => void;
     lagged?: (skipped: number, message: string) => void;
   },
@@ -136,7 +137,7 @@ export function streamJob(
   const ws = new WebSocket(`${proto}//${location.host}/api/jobs/${id}/stream`);
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data as string);
-    if (msg.type === "line") on.line(msg.line);
+    if (msg.type === "line") on.line(msg.line, msg.event ?? null);
     else if (msg.type === "state") on.state(msg.summary);
     else if (msg.type === "lagged") on.lagged?.(msg.skipped, msg.message);
   };

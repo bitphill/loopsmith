@@ -550,6 +550,24 @@ export interface SecretStatus {
 export type JobState = "running" | "succeeded" | "failed" | "cancelled";
 export interface JobLine { seq: number; stream: "out" | "err" | "meta"; text: string }
 
+/**
+ * One thing that happened during a run, read off its own log by the server.
+ *
+ * `loopsmith_web::progress` does the reading, so the browser never parses the
+ * log format — the format is Rust's and a regex here would be a copy of it
+ * that nothing checks. The console still shows every line verbatim; this is
+ * the same line, understood.
+ */
+export interface RunEvent {
+  iteration: number;
+  /** The ledger's own name for it: `NodeDispatched`, `GateEvaluated`, … */
+  kind: string;
+  node: string | null;
+  detail: string;
+  /** Where the run moved to, on a `StateChanged` and nowhere else. */
+  state: string | null;
+}
+
 export interface JobSummary {
   id: string;
   kind: string;
@@ -567,4 +585,6 @@ export interface Meta {
   cwd: string;
   keychain: string | null;
   profile: string | null;
+  /** Where the demonstration door builds its throwaway loop. */
+  demo_dir: string;
 }

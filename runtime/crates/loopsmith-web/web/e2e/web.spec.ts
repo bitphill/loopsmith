@@ -34,6 +34,32 @@ test("the way in offers both doors, and remembers which was taken", async ({ pag
   await expect(page.getByRole("dialog", { name: "Choose how to start" })).toBeHidden();
 });
 
+test("the third door builds a loop somewhere disposable and walks it through", async ({ page }) => {
+  // The door most people actually want: not "how do I write one" but "what
+  // does one do". It is two commands chained — build it, then dry-run it —
+  // and the chain only works because a console that is already watching is
+  // told when its job ends.
+  await page.goto("/");
+  await page
+    .getByRole("dialog", { name: "Choose how to start" })
+    .getByRole("button", { name: /Show me one running/ })
+    .click();
+
+  const progress = page.getByRole("region", { name: "Run progress" });
+
+  // The waves come from the plan; the trail comes from the run's own
+  // transitions. Both are the things a scrolling log is worst at showing.
+  await expect(progress).toBeVisible({ timeout: 30_000 });
+  await expect(progress.getByText("created")).toBeVisible({ timeout: 30_000 });
+  await expect(progress.getByTitle(/refactor-a/)).toBeVisible();
+  // The trail reaching `closed` is the whole chain proving itself: the create
+  // finished, something noticed, and the dry run it started finished too.
+  await expect(progress.getByText("closed")).toBeVisible({ timeout: 30_000 });
+
+  // Nothing was spent: a dry run never reaches a provider.
+  await expect(page.getByText(/--dry-run/).first()).toBeVisible();
+});
+
 test("an experienced smith is not detained by the tour, but can still open it", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("loopsmith-smith", "experienced"));
   await page.goto("/");

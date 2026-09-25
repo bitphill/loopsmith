@@ -28,6 +28,7 @@ pub mod exec;
 pub mod guard;
 pub mod help;
 pub mod picker;
+pub mod progress;
 pub mod secrets;
 pub mod wizard;
 pub mod ws;

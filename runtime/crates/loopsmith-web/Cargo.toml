@@ -28,3 +28,9 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 loopsmith-util = { workspace = true, features = ["testing"] }
+# Test-only, and deliberately not a real dependency: `progress` reads the run
+# log that `loopsmith-run` writes, and the only honest way to check the parse
+# is to feed it lines the writer produced. The server itself never links the
+# engine — it spawns the binary.
+loopsmith-run = { workspace = true }
+loopsmith-memory = { workspace = true }

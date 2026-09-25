@@ -9,15 +9,36 @@
 //! The transport is `axum::extract::ws`, which is RFC6455 over the server this
 //! process already runs. The browser side is a plain `new WebSocket(...)`.
 
-use crate::exec::{JobState, Jobs};
+use crate::exec::{JobLine, JobState, Jobs};
 use axum::extract::ws::{Message, WebSocket};
 use serde_json::json;
+
+/// One line, plus whatever the run log said in it.
+///
+/// Every line still arrives verbatim — the console is the record and nothing
+/// is filtered out of it. `event` is the same line read by
+/// [`crate::progress`], present only where the line was a ledger entry, and
+/// it is what the run view is drawn from. Parsing here rather than in the
+/// browser keeps the one copy of the format on the side that owns it.
+fn line_message(line: &JobLine) -> String {
+    json!({
+        "type": "line",
+        "line": line,
+        "event": crate::progress::parse(&line.text),
+    })
+    .to_string()
+}
 
 pub async fn pump(mut socket: WebSocket, jobs: Jobs, id: String) {
     // Subscribe before replaying. The other order drops any line printed
     // between the replay and the subscription, which is the classic way to
     // lose exactly the line that mattered.
-    let Some(mut rx) = jobs.subscribe(&id) else {
+    //
+    // Nothing to subscribe to is not an error: a job that has already finished
+    // has no sender, and its retained lines are the whole story. Only a job
+    // that was never here is.
+    let rx = jobs.subscribe(&id);
+    if jobs.summary(&id).is_none() {
         let _ = socket
             .send(Message::Text(
                 json!({ "type": "error", "message": "no such job" })
@@ -26,13 +47,11 @@ pub async fn pump(mut socket: WebSocket, jobs: Jobs, id: String) {
             ))
             .await;
         return;
-    };
+    }
 
     for line in jobs.lines(&id) {
         if socket
-            .send(Message::Text(
-                json!({ "type": "line", "line": line }).to_string().into(),
-            ))
+            .send(Message::Text(line_message(&line).into()))
             .await
             .is_err()
         {
@@ -55,13 +74,35 @@ pub async fn pump(mut socket: WebSocket, jobs: Jobs, id: String) {
         }
     }
 
+    // Still going, so follow it. The loop ends when the job's sender is
+    // dropped, which `Jobs::finish` does after the last line — and the state
+    // message below is then the one that tells the console it is over.
+    if let Some(mut rx) = rx {
+        follow(&mut socket, &mut rx).await;
+    }
+
+    if let Some(summary) = jobs.summary(&id) {
+        let _ = socket
+            .send(Message::Text(
+                json!({ "type": "state", "summary": summary })
+                    .to_string()
+                    .into(),
+            ))
+            .await;
+    }
+    let _ = socket.send(Message::Close(None)).await;
+}
+
+/// Send every line as it arrives, until the job's sender is dropped.
+async fn follow(
+    socket: &mut WebSocket,
+    rx: &mut tokio::sync::broadcast::Receiver<crate::exec::JobLine>,
+) {
     loop {
         match rx.recv().await {
             Ok(line) => {
                 if socket
-                    .send(Message::Text(
-                        json!({ "type": "line", "line": line }).to_string().into(),
-                    ))
+                    .send(Message::Text(line_message(&line).into()))
                     .await
                     .is_err()
                 {
@@ -88,15 +129,4 @@ pub async fn pump(mut socket: WebSocket, jobs: Jobs, id: String) {
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         }
     }
-
-    if let Some(summary) = jobs.summary(&id) {
-        let _ = socket
-            .send(Message::Text(
-                json!({ "type": "state", "summary": summary })
-                    .to_string()
-                    .into(),
-            ))
-            .await;
-    }
-    let _ = socket.send(Message::Close(None)).await;
 }

@@ -69,18 +69,7 @@ impl RunLog {
 
     /// One line per ledger entry, aligned so `grep` and eyeballs both work.
     pub fn write(&self, entry: &LedgerEntry) {
-        let line = format!(
-            "{}  it {:>3}  {:<18} {}{}",
-            format_utc(entry.created_ms),
-            entry.iteration,
-            format!("{:?}", entry.kind),
-            entry
-                .node_id
-                .as_ref()
-                .map(|n| format!("[{n}] "))
-                .unwrap_or_default(),
-            entry.detail.replace('\n', " "),
-        );
+        let line = line(entry);
         if self.verbose {
             eprintln!("{line}");
         }
@@ -91,6 +80,39 @@ impl RunLog {
             }
         }
     }
+}
+
+/// One ledger entry as one line of the run log.
+///
+/// Fixed-width columns so `grep` and eyeballs both work — and so that a reader
+/// that is not a person can work too. With `--verbose` this same line goes to
+/// stderr, which is where `loopsmith web` picks it up: the browser's run view
+/// is built from these lines and nothing else, because there is no second
+/// source that could disagree with the ledger.
+///
+/// That makes the shape a contract. `loopsmith_web::progress` is the other
+/// end of it, and `the_run_log_is_a_format_the_web_can_read` is the test that
+/// holds the two together — it lives in `loopsmith-cli`, which is the only
+/// crate that can see both.
+///
+/// ```text
+/// 2026-09-25T13:57:31Z  it   1  NodeDispatched     [survey] dry run: would dispatch `survey`
+/// ```
+pub fn line(entry: &LedgerEntry) -> String {
+    format!(
+        "{}  it {:>3}  {:<18} {}{}",
+        format_utc(entry.created_ms),
+        entry.iteration,
+        format!("{:?}", entry.kind),
+        entry
+            .node_id
+            .as_ref()
+            .map(|n| format!("[{n}] "))
+            .unwrap_or_default(),
+        // A newline would split one entry across two lines, and the reader on
+        // the other end counts lines.
+        entry.detail.replace('\n', " "),
+    )
 }
 
 /// Run ids come from a timestamp today, but a hand-passed `--run-id` reaches

@@ -699,6 +699,8 @@ dependencies = [
  "axum",
  "loopsmith-core",
  "loopsmith-graph",
+ "loopsmith-memory",
+ "loopsmith-run",
  "loopsmith-util",
  "loopsmith-wizard",
  "serde",

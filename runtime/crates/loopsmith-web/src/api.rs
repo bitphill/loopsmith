@@ -115,6 +115,11 @@ async fn meta(State(s): State<AppState>) -> Json<Value> {
         "keychain": secrets::keychain_kind(),
         "folder_dialog": picker::available(),
         "profile": secrets::profile_path().map(|p| p.display().to_string()),
+        // Where the "show me one running" door builds its throwaway loop.
+        // Named here rather than assembled in the browser, because a path the
+        // page composes is a path the page could compose badly — and this one
+        // gets `--force`.
+        "demo_dir": std::env::temp_dir().join("loopsmith-demo").display().to_string(),
     }))
 }
 
@@ -394,6 +399,25 @@ struct DraftBody {
     format: assemble::Format,
 }
 
+/// The nearest ancestor of `path` that exists, `path` itself included.
+///
+/// `loop new` writes the directory it is given, so the subprocess has to start
+/// from somewhere that already exists. Walking up rather than trying only the
+/// parent is what lets a loop be created more than one level below anything
+/// real: `~/loops/thing` before `~/loops` has been made is the ordinary case,
+/// and the demonstration door asks for a loop inside a temp directory that
+/// does not exist yet either.
+///
+/// A path with no existing ancestor comes back unchanged, and
+/// `Jobs::spawn` refuses it with a sentence about the directory rather than
+/// this function inventing one.
+fn nearest_existing(path: &std::path::Path) -> PathBuf {
+    path.ancestors()
+        .find(|p| p.is_dir())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
 async fn start_job(
     State(s): State<AppState>,
     Json(mut b): Json<StartJobBody>,
@@ -410,17 +434,7 @@ async fn start_job(
         }
     }
 
-    let cwd = expand_home(&b.cwd);
-    // `new` writes the directory it is given, so it must be able to run from
-    // somewhere that already exists — the parent, if the target does not yet.
-    let cwd = if cwd.is_dir() {
-        cwd
-    } else {
-        cwd.parent()
-            .filter(|p| p.is_dir())
-            .map(|p| p.to_path_buf())
-            .unwrap_or(cwd)
-    };
+    let cwd = nearest_existing(&expand_home(&b.cwd));
 
     let (kind, argv) = exec::argv_for(&b.action)?;
     let id = s.jobs.spawn(&kind, argv, cwd)?;
@@ -501,6 +515,17 @@ pub fn expand_home(input: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_job_starts_from_the_nearest_directory_that_exists() {
+        let root = loopsmith_util::testing::temp_dir("web-cwd");
+        // Two levels below anything real, which is what the demonstration
+        // door asks for and what the old rule — try the parent, give up —
+        // refused.
+        let deep = root.join("loops").join("demo");
+        assert_eq!(nearest_existing(&deep), root);
+        assert_eq!(nearest_existing(&root), root);
+    }
 
     #[test]
     fn a_leading_tilde_is_expanded_and_a_bare_tilde_is_the_home_itself() {
