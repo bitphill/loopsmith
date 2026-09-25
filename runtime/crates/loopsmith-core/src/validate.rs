@@ -381,14 +381,14 @@ fn check_validations(cfg: &LoopConfig, names: &BTreeSet<&str>, r: &mut Validatio
     for g in &cfg.intent.goals {
         if covered.get(g.name.as_str()).copied().unwrap_or(0) == 0 {
             r.issues.push(Issue::err(
-                format!("validations[target={}]", g.name),
+                format!("safety.checks[target={}]", g.name),
                 "goal has no blocking validation; it could never be honestly satisfied",
             ));
         }
     }
     if covered.get(OVERALL).copied().unwrap_or(0) == 0 {
         r.issues.push(Issue::warn(
-            format!("validations[target={OVERALL}]"),
+            format!("safety.checks[target={OVERALL}]"),
             "no overall validation; the loop can only finish per-goal",
         ));
     }
@@ -460,7 +460,7 @@ fn check_stop_gates(cfg: &LoopConfig, r: &mut ValidationReport) {
     }
     if g.max_tokens.is_none() && g.max_cost_usd.is_none() && g.max_wall_clock_seconds.is_none() {
         r.issues.push(Issue::warn(
-            "stop_gates",
+            "safety.gates.stop",
             "no budget ceiling of any kind; an unsolvable task will bill until someone notices",
         ));
     }
@@ -791,14 +791,14 @@ fn check_providers(cfg: &LoopConfig, r: &mut ValidationReport) {
     for (tier, ids) in &cfg.execution.providers.cascade {
         if !matches!(tier.as_str(), "cheap" | "standard" | "strong") {
             r.issues.push(Issue::err(
-                format!("providers.cascade.{tier}"),
+                format!("execution.providers.cascade.{tier}"),
                 "tier must be one of cheap, standard, strong",
             ));
         }
         for id in ids {
             if cfg.provider(id).is_none() {
                 r.issues.push(Issue::err(
-                    format!("providers.cascade.{tier}"),
+                    format!("execution.providers.cascade.{tier}"),
                     format!("unknown provider `{id}`"),
                 ));
             }
@@ -814,7 +814,7 @@ fn check_providers(cfg: &LoopConfig, r: &mut ValidationReport) {
             .collect();
         if distinct.len() < 2 {
             r.issues.push(Issue::warn(
-                "providers",
+                "execution.providers",
                 "judge independence is enforced but only one provider exists; judges will fall back to detector-only verdicts",
             ));
         }
@@ -845,6 +845,95 @@ pre_execution:
             "test",
         )
         .expect("parses")
+    }
+
+    /// Every issue names a path the 1.0 config actually has.
+    ///
+    /// An issue's `field` is not decoration: the web UI routes it to the step
+    /// that owns it and scrolls to the card that edits it, and `help.rs` keys
+    /// its notes by the same string. A leftover 0.3 spelling — `stop_gates`
+    /// rather than `safety.gates.stop` — still reads fine in the terminal and
+    /// silently breaks both, which is why this walks the whole surface rather
+    /// than trusting the rename.
+    #[test]
+    fn every_issue_names_a_path_the_config_has() {
+        const ROOTS: [&str; 9] = [
+            "name", "version", "description", "environment", "intent", "execution", "safety",
+            "evolution", "features",
+        ];
+
+        // Trip as many checks as one config can: a goal nothing blocks, a
+        // dangling cascade entry, one provider with independence on, a graph
+        // whose parallel builders share a tree, a stage nothing declares, and
+        // no budget ceiling anywhere.
+        let bad: LoopConfig = crate::parse_str(
+            r#"
+name: t
+intent:
+  goals:
+    - name: g1
+      description: a sufficiently long goal description
+    - name: g2
+      description: another sufficiently long goal description
+safety:
+  checks:
+    - target: g1
+      name: v1
+      mode: objective
+      statement: tests pass
+      detector: { type: regex_match, artifact: nobody-writes-this.txt, pattern: ok }
+      blocking: false
+  gates:
+    entry:
+      - id: dup
+        statement: s
+        detector: { type: file_exists, path: x }
+      - id: dup
+        statement: s
+        detector: { type: file_exists, path: x }
+execution:
+  providers:
+    providers:
+      - id: only
+        kind: custom
+        command: "true"
+    cascade:
+      cheap: [nobody]
+  phases:
+    dependency: ["a -> b"]
+  graph:
+    nodes:
+      - id: n1
+        role: builder
+        instruction: do the thing
+        stage: nowhere
+      - id: n2
+        role: builder
+        instruction: do the other thing
+"#,
+            "test",
+        )
+        .expect("parses");
+
+        let report = validate(&bad);
+        assert!(
+            report.issues.len() >= 6,
+            "this config was meant to trip most of the validator: {:?}",
+            report.issues
+        );
+        for issue in &report.issues {
+            let root = issue
+                .field
+                .split(['.', '['])
+                .next()
+                .unwrap_or(issue.field.as_str());
+            assert!(
+                ROOTS.contains(&root),
+                "`{}` is not a 1.0 config path ({})",
+                issue.field,
+                issue.message
+            );
+        }
     }
 
     fn errors_on(cfg: &LoopConfig, field: &str) -> usize {

@@ -56,6 +56,14 @@ export const api = {
 
   help: () => call<Help>("/api/help"),
 
+  /**
+   * The config the model produces when nothing is said.
+   *
+   * Fetched rather than hard-coded: a form that tells you what a blank field
+   * will do has to be reading the same defaults the engine will.
+   */
+  defaults: () => call<LoopConfig>("/api/defaults"),
+
   examples: () => call<ExampleCard[]>("/api/examples"),
   example: (id: string) =>
     call<{ id: string; yaml: string; config: LoopConfig }>(`/api/examples/${id}`),

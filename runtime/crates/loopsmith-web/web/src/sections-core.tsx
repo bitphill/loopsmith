@@ -16,7 +16,19 @@ import type {
 } from "./types";
 
 export type Patch = (patch: Partial<LoopConfig>) => void;
-export type SectionProps = { cfg: LoopConfig; patch: Patch; help: Map<string, SectionHelp> };
+export type SectionProps = {
+  cfg: LoopConfig;
+  patch: Patch;
+  help: Map<string, SectionHelp>;
+  /**
+   * What the model does with everything left unsaid, straight from the server.
+   *
+   * A section that shows a default has to show the real one. Null until the
+   * first fetch lands, which is a few milliseconds on loopback and is why no
+   * section may treat it as required.
+   */
+  defaults: LoopConfig | null;
+};
 
 const MODES: readonly { value: Mode; label: string }[] = [
   { value: "objective", label: "Objective — a machine decides" },
@@ -38,7 +50,13 @@ const OPS: readonly { value: CompareOp; label: string }[] = [
   { value: "eq", label: "exactly (=)" },
 ];
 
-/** Section shell that pulls its own copy out of the server's help catalogue. */
+/**
+ * Section shell that pulls its own copy out of the server's help catalogue.
+ *
+ * It does not say which bundle it is in. The step draws its cards grouped
+ * under that heading already, and repeating the word on every card was the
+ * shape the badge had before there was a grouping to repeat.
+ */
 export function Section({
   k, help, children, actions, count, defaultOpen,
 }: {
@@ -53,7 +71,6 @@ export function Section({
   return (
     <Card
       title={h?.title ?? k}
-      badge={h?.bundle}
       anchor={k}
       summary={h?.summary}
       detail={h?.detail}
@@ -172,7 +189,15 @@ export function Goals({ cfg, patch, help }: SectionProps) {
 
 /* --- D ------------------------------------------------------------------- */
 
-function DetectorEditor({ value, onChange }: { value: Detector; onChange: (d: Detector) => void }) {
+/**
+ * How something is decided, as an editable thing.
+ *
+ * Shared with the gate rules in `sections-guard.tsx`, because a stop gate, an
+ * entry gate and a validation all ask the same question — what would prove
+ * this? — and answering it differently in three places is how a form starts
+ * disagreeing with the model.
+ */
+export function DetectorEditor({ value, onChange }: { value: Detector; onChange: (d: Detector) => void }) {
   // Switching kind replaces the object wholesale rather than merging: the
   // config model denies unknown fields, so a leftover `path` on a script
   // detector is a parse error rather than a harmless extra.

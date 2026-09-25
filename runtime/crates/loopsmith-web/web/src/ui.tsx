@@ -308,11 +308,9 @@ export function ListInput({
 /* --- layout -------------------------------------------------------------- */
 
 export function Card({
-  title, badge, anchor, summary, detail, failure, required, children, actions, defaultOpen = true, count,
+  title, anchor, summary, detail, failure, required, children, actions, defaultOpen = true, count,
 }: {
   title: string;
-  /** A short word above the title: which bundle of the config this is. */
-  badge?: string;
   /** The section's own dotted path, which is what the rail scrolls to. */
   anchor?: string;
   summary?: string;
@@ -344,7 +342,6 @@ export function Card({
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            {badge && <span className="chip chip-ember font-mono">{badge}</span>}
             <h2 className="text-[15px] font-bold tracking-tight">{title}</h2>
             {required && <span className="chip chip-ember">required</span>}
             {typeof count === "number" && count > 0 && (

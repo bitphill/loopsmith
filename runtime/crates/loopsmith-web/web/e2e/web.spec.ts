@@ -152,6 +152,39 @@ test.describe("with the tour dismissed", () => {
     }
   });
 
+  test("the sections that decide what must not happen are editable, and parse", async ({ page }) => {
+    // These five were typed from 1.0's first commit and had no editor: the
+    // form kept them through a round trip and offered no way to write one.
+    // What this pins is the cross-language half — the browser writes tagged
+    // unions (`{ action: "retry" }`, `{ rule: "repeated_validation" }`) that
+    // only the Rust model can judge, and the review rail is where it says so.
+    const expand = async (name: string) => {
+      const card = page.locator("section.card").filter({ has: page.getByRole("heading", { name, exact: true }) });
+      const toggle = card.getByRole("button", { name: new RegExp(`^Expand ${name}$`) });
+      if (await toggle.count()) await toggle.click();
+      return card;
+    };
+
+    await page.getByRole("tab", { name: "Work" }).click();
+    const recovery = await expand("Recovery");
+    // The defaults come from `/api/defaults`, which is the engine's own model.
+    // A browser keeping its own copy would drift the first time a
+    // `#[serde(default)]` changed, and nothing would say so.
+    await expect(recovery.getByLabel("Invalid output")).toHaveValue(/revise/);
+    await expect(recovery.getByLabel("Safety violation")).toHaveValue(/stop/);
+    await recovery.getByLabel("Transient error").selectOption("fallback");
+
+    await page.getByRole("tab", { name: "Ship" }).click();
+    const evolution = await expand("Self-evolution");
+    await evolution.getByRole("switch", { name: "Let this loop propose changes to itself" }).click();
+    await evolution.getByRole("switch", { name: /^Change the graph/ }).click();
+
+    // The rail re-reads the whole draft through the real loader on a debounce,
+    // so a shape the model refuses shows up here rather than at create time.
+    const rail = page.locator("aside").last();
+    await expect(rail.getByText("This config cannot be read.")).toBeHidden();
+  });
+
   test("a loaded loop fills the whole form, not just its name", async ({ page }) => {
     // The form edits the 1.0 config the server actually serves. When it was
     // still reading the 0.3 keys, every section but the name came up empty

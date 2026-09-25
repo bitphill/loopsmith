@@ -170,42 +170,110 @@ export interface SkillPolicy {
   min_trials?: number;
 }
 
+/** What it takes for a remembered record to become reusable. */
+export type Promotion =
+  | { rule: "never" }
+  | { rule: "automatic" }
+  | { rule: "repeated_validation"; times?: number }
+  | { rule: "human_approval" };
+
+export interface NamespacePolicy {
+  enabled?: boolean;
+  retention_days?: number | null;
+  promotion?: Promotion;
+  min_confidence?: number;
+  require_provenance?: boolean;
+}
+
 /**
- * What each iteration remembers.
+ * The four kinds of thing a loop remembers, each with its own rules.
  *
- * `namespaces` is a policy table the form does not edit — the promotion rule
- * for episodic memory is not a first-config decision — but it is described
- * here so it survives a round trip through the editor rather than being an
- * untyped hole in the middle of the config.
+ * Fixed keys rather than a map: the engine knows these four and nothing else
+ * reads a fifth, so a free-form table would let the form write a namespace
+ * that is silently never consulted.
  */
+export interface Namespaces {
+  episodic?: NamespacePolicy;
+  semantic?: NamespacePolicy;
+  procedural?: NamespacePolicy;
+  failure?: NamespacePolicy;
+}
+
+/** What each iteration remembers, and for how long. */
 export interface Memory {
   carry_summaries?: number;
   summary_provider?: string | null;
   max_summary_chars?: number;
   max_retrieved?: number;
-  namespaces?: Record<string, unknown>;
+  namespaces?: Namespaces;
 }
+
+/** One of the run's own measurements, by name. */
+export type Metric =
+  | "iterations"
+  | "tokens_used"
+  | "cost_usd"
+  | "wall_clock_seconds"
+  | "failed_dispatches"
+  | "retries"
+  | "stale_iterations"
+  | "validation_pass_rate";
 
 /** One number of the run's own, watched. */
 export interface Alert {
   id: string;
-  metric: string;
+  metric: Metric;
   above?: number | null;
   below?: number | null;
   message?: string;
 }
 
+/** What a gate does when its detector says no. */
+export type GateOutcome = "stop" | "escalate" | "pause" | "rollback" | "warn";
+
+/**
+ * One checkpoint, decided by a detector.
+ *
+ * The same shape serves all three kinds of gate; what differs is *when* it is
+ * checked, which is the list it is in rather than anything in the rule.
+ */
+export interface GateRule {
+  id: string;
+  statement: string;
+  detector: Detector;
+  on_fail?: GateOutcome;
+}
+
 export interface Gates {
   stop?: StopGates;
-  entry?: unknown[];
-  approval?: unknown[];
-  rollback?: unknown[];
+  entry?: GateRule[];
+  approval?: GateRule[];
+  rollback?: GateRule[];
 }
+
+/** The numbers a self-evolution proposal has to beat. */
+export interface Baseline {
+  completion_rate?: number | null;
+  validation_pass_rate?: number | null;
+  cost_usd?: number | null;
+  latency_seconds?: number | null;
+  iterations_to_success?: number | null;
+  measured_at?: string | null;
+}
+
+export type ProposalKind =
+  | "new_skill"
+  | "skill_update"
+  | "prompt_change"
+  | "graph_change"
+  | "provider_routing"
+  | "validation_change"
+  | "success_criteria";
 
 export interface Evolution {
   enabled?: boolean;
-  baseline?: unknown | null;
-  allowed_kinds?: string[];
+  baseline?: Baseline | null;
+  allowed_kinds?: ProposalKind[];
   max_regression?: number;
   require_sandbox?: boolean;
   require_approval?: boolean;
@@ -239,13 +307,41 @@ export interface Execution {
   triggers?: { triggers?: Trigger[]; max_depth?: number; dedup_window_seconds?: number };
 }
 
+export type Backoff = "fixed" | "linear" | "exponential";
+
+/**
+ * What the run does about one class of failure.
+ *
+ * Tagged by `action`, matching the Rust enum: the parameters belong to the
+ * action that has them, so a `stop` cannot carry a retry count that nothing
+ * would ever read.
+ */
+export type RecoveryAction =
+  | { action: "retry"; max_attempts?: number; base_delay_seconds?: number; backoff?: Backoff }
+  | { action: "revise"; max_attempts?: number }
+  | { action: "fallback" }
+  | { action: "escalate" }
+  | { action: "pause" }
+  | { action: "restore_checkpoint" }
+  | { action: "stop" };
+
+/** The failure-class to action map. Seven named classes, no others. */
+export interface Recovery {
+  transient_error?: RecoveryAction;
+  invalid_output?: RecoveryAction;
+  tool_unavailable?: RecoveryAction;
+  repeated_failure?: RecoveryAction;
+  safety_violation?: RecoveryAction;
+  resource_exhaustion?: RecoveryAction;
+  corrupted_state?: RecoveryAction;
+}
+
 export interface Safety {
   checks?: Validation[];
   gates?: Gates;
   limits?: Constraints;
   alerts?: Alert[];
-  /** Policy tables the form does not edit, kept so an edit does not drop them. */
-  recovery?: Record<string, unknown>;
+  recovery?: Recovery;
   protected?: { components?: string[]; extra_paths?: string[] };
 }
 

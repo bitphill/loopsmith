@@ -50,7 +50,15 @@ pub struct FieldHelp {
     pub example: &'static str,
 }
 
-/// Every section, in the config's own order.
+/// Every section, in the config's own order: what the loop is for, how the
+/// work gets done, what must not happen, and how it may change itself.
+///
+/// That order is the four bundles, and it is deliberately *not* the order the
+/// form walks. The form is a workflow — where it lives, what powers it, what
+/// you want, what proves it, how the work is arranged, when it runs — and the
+/// two orders answer different questions. This one is the order the YAML, the
+/// schema, and `HOW-TO-USE.md` share, which is what makes the command
+/// palette's section list navigable by someone reading the file.
 pub const SECTIONS: &[SectionHelp] = &[
     SectionHelp {
         bundle: "intent",
@@ -94,21 +102,6 @@ pub const SECTIONS: &[SectionHelp] = &[
         required: true,
     },
     SectionHelp {
-        bundle: "safety",
-        key: "safety.checks",
-        title: "Validations",
-        summary: "How each goal is checked. This is the part that makes a loop trustworthy.",
-        detail: "A validation names a goal and says how a machine decides whether it is met. \
-                 Four of the five detectors are deterministic — a script's exit code, a file \
-                 existing, a pattern matching, a number crossing a threshold — and one, the \
-                 judge, is a model's verdict. loopsmith is built on the rule that a model must \
-                 not certify its own completion, so `goal_satisfied` is written by this gate \
-                 and by nothing else. A judge can inform the gate; it cannot open it.",
-        failure: "Goals with no validation cannot ever be marked satisfied, and the config is \
-                  refused rather than run. That refusal is the feature.",
-        required: true,
-    },
-    SectionHelp {
         bundle: "intent",
         key: "intent.success",
         title: "Success scenarios",
@@ -120,73 +113,6 @@ pub const SECTIONS: &[SectionHelp] = &[
                  genuinely useful and objective when it is not.",
         failure: "Without a success scenario the loop runs to its iteration limit even after \
                   it has already done the job.",
-        required: false,
-    },
-    SectionHelp {
-        bundle: "safety",
-        key: "safety.gates.stop",
-        title: "Stop gates",
-        summary: "Every way this loop is allowed to end. Set these before the first run.",
-        detail: "Layered exits, all checked every iteration, any one of which halts the run. \
-                 The iteration cap is the blunt one. The cost and wall-clock caps are the ones \
-                 that matter overnight. The no-progress cap is the subtle one: it halts a loop \
-                 that is still busy but no longer changing anything, which is the failure mode \
-                 that quietly burns a budget while looking like work.",
-        failure: "A loop with only an iteration cap and an expensive provider is an unbounded \
-                  bill waiting for a slow night.",
-        required: false,
-    },
-    SectionHelp {
-        bundle: "execution",
-        key: "execution.triggers",
-        title: "Schedules",
-        summary: "What makes this loop start. Leave it empty to run it only by hand.",
-        detail: "A cron expression, a plain interval, a file changing, another goal being met, \
-                 or nothing at all. `Watch` keeps loopsmith resident and fires these while it \
-                 runs; `Install schedule` hands the job to launchd or cron so it survives a \
-                 reboot. Cron expressions are read in UTC, which is the usual reason a job \
-                 fires at what looks like the wrong hour.",
-        failure: "An interval shorter than a run takes stacks runs on top of each other until \
-                  something gives.",
-        required: false,
-    },
-    SectionHelp {
-        bundle: "safety",
-        key: "safety.limits",
-        title: "Constraints",
-        summary: "What the loop may not do, and what it must stop and ask about.",
-        detail: "Rules in plain language, paths and commands that are off limits, and per-node \
-                 token and time ceilings. `human_checkpoint` is the important one: actions \
-                 listed there stop and wait for a person no matter what permissions have been \
-                 granted. Anything irreversible — sending mail, spending money, publishing, \
-                 deleting — belongs there.",
-        failure: "A hands-off loop with no checkpoints is not hands-off, it is unsupervised.",
-        required: false,
-    },
-    SectionHelp {
-        bundle: "execution",
-        key: "execution.phases",
-        title: "Execution guidelines",
-        summary: "Named phases, each with a standing instruction and a place in the order.",
-        detail: "Optional. Use it when the work has real stages — gather, then draft, then \
-                 review — and a node should not start before its stage is active. Order is \
-                 written as a chain: `gather -> draft -> review`. A node with no stage is \
-                 always eligible, which is the right default for most loops.",
-        failure: "Phases invented for tidiness rather than for real ordering just delay work \
-                  that could have run.",
-        required: false,
-    },
-    SectionHelp {
-        bundle: "execution",
-        key: "execution.default_skills",
-        title: "Sub-agents",
-        summary: "Specialist agents installed before the loop starts.",
-        detail: "Skills the loop should have available from the first iteration. Installation \
-                 is idempotent, so listing one that is already present costs nothing. Anything \
-                 acquired at run time lands in a quarantine directory and stays there until a \
-                 person promotes it — the loop is not allowed to grant itself new abilities \
-                 unsupervised.",
-        failure: "Nothing breaks without this; nodes simply work without the specialist.",
         required: false,
     },
     SectionHelp {
@@ -220,6 +146,32 @@ pub const SECTIONS: &[SectionHelp] = &[
     },
     SectionHelp {
         bundle: "execution",
+        key: "execution.phases",
+        title: "Execution guidelines",
+        summary: "Named phases, each with a standing instruction and a place in the order.",
+        detail: "Optional. Use it when the work has real stages — gather, then draft, then \
+                 review — and a node should not start before its stage is active. Order is \
+                 written as a chain: `gather -> draft -> review`. A node with no stage is \
+                 always eligible, which is the right default for most loops.",
+        failure: "Phases invented for tidiness rather than for real ordering just delay work \
+                  that could have run.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "execution",
+        key: "execution.default_skills",
+        title: "Sub-agents",
+        summary: "Specialist agents installed before the loop starts.",
+        detail: "Skills the loop should have available from the first iteration. Installation \
+                 is idempotent, so listing one that is already present costs nothing. Anything \
+                 acquired at run time lands in a quarantine directory and stays there until a \
+                 person promotes it — the loop is not allowed to grant itself new abilities \
+                 unsupervised.",
+        failure: "Nothing breaks without this; nodes simply work without the specialist.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "execution",
         key: "execution.memory",
         title: "Carried context",
         summary: "How much of the previous iterations each prompt drags along.",
@@ -228,6 +180,156 @@ pub const SECTIONS: &[SectionHelp] = &[
                  model a longer memory and a bigger bill, and past a point it starts \
                  rehearsing old attempts instead of trying new ones.",
         failure: "A summary with no ceiling grows until it crowds out the actual instruction.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "execution",
+        key: "execution.triggers",
+        title: "Schedules",
+        summary: "What makes this loop start. Leave it empty to run it only by hand.",
+        detail: "A cron expression, a plain interval, a file changing, another goal being met, \
+                 or nothing at all. `Watch` keeps loopsmith resident and fires these while it \
+                 runs; `Install schedule` hands the job to launchd or cron so it survives a \
+                 reboot. Cron expressions are read in UTC, which is the usual reason a job \
+                 fires at what looks like the wrong hour.",
+        failure: "An interval shorter than a run takes stacks runs on top of each other until \
+                  something gives.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.checks",
+        title: "Validations",
+        summary: "How each goal is checked. This is the part that makes a loop trustworthy.",
+        detail: "A validation names a goal and says how a machine decides whether it is met. \
+                 Four of the five detectors are deterministic — a script's exit code, a file \
+                 existing, a pattern matching, a number crossing a threshold — and one, the \
+                 judge, is a model's verdict. loopsmith is built on the rule that a model must \
+                 not certify its own completion, so `goal_satisfied` is written by this gate \
+                 and by nothing else. A judge can inform the gate; it cannot open it.",
+        failure: "Goals with no validation cannot ever be marked satisfied, and the config is \
+                  refused rather than run. That refusal is the feature.",
+        required: true,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.gates.stop",
+        title: "Stop gates",
+        summary: "Every way this loop is allowed to end. Set these before the first run.",
+        detail: "Layered exits, all checked every iteration, any one of which halts the run. \
+                 The iteration cap is the blunt one. The cost and wall-clock caps are the ones \
+                 that matter overnight. The no-progress cap is the subtle one: it halts a loop \
+                 that is still busy but no longer changing anything, which is the failure mode \
+                 that quietly burns a budget while looking like work.",
+        failure: "A loop with only an iteration cap and an expensive provider is an unbounded \
+                  bill waiting for a slow night.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.gates.entry",
+        title: "Entry gates",
+        summary: "What must already be true before the first node is dispatched.",
+        detail: "Checked once, before any work starts and before a single provider is called. \
+                 The clean branch, the key that answers, the disk with room on it \u{2014} the \
+                 conditions that make the whole run pointless if they are false. A failing \
+                 entry gate stops the run while it is still validating, which is the cheapest \
+                 place a run can stop.",
+        failure: "Without one, a run with a broken prerequisite discovers it three nodes and \
+                  two providers in.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.gates.approval",
+        title: "Approval gates",
+        summary: "What has to be signed off before the loop is allowed to start working.",
+        detail: "Checked after planning and before the first dispatch, so the plan is on the \
+                 table when the decision is made. These are for the work whose cost of being \
+                 wrong is external \u{2014} money moving, mail leaving, something published. \
+                 The run waits rather than guessing, and says so.",
+        failure: "An approval gate whose detector can satisfy itself is not an approval, it is \
+                  a delay.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.gates.rollback",
+        title: "Rollback gates",
+        summary: "What, if it becomes true mid-run, means the last iteration should be undone.",
+        detail: "Checked every iteration like a stop gate, but with a different answer: a \
+                 rollback discards the work of the iteration that tripped it and records why. \
+                 Spend is not refunded \u{2014} nothing can refund that \u{2014} so these are \
+                 about not building on top of a bad iteration rather than about saving money.",
+        failure: "Catching a corrupted artefact only at the end means every iteration after it \
+                  was built on it.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.limits",
+        title: "Constraints",
+        summary: "What the loop may not do, and what it must stop and ask about.",
+        detail: "Rules in plain language, paths and commands that are off limits, and per-node \
+                 token and time ceilings. `human_checkpoint` is the important one: actions \
+                 listed there stop and wait for a person no matter what permissions have been \
+                 granted. Anything irreversible — sending mail, spending money, publishing, \
+                 deleting — belongs there.",
+        failure: "A hands-off loop with no checkpoints is not hands-off, it is unsupervised.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.recovery",
+        title: "Recovery",
+        summary: "What the loop does about each kind of failure, decided before it happens.",
+        detail: "Seven named classes \u{2014} a timeout, an unreadable answer, a missing tool, \
+                 the same node failing again, a safety violation, a budget exhausted, a \
+                 corrupted checkpoint \u{2014} each mapped to one action: retry, revise, fall \
+                 back, escalate, pause, restore, or stop. The defaults are deliberately \
+                 unequal: a transient error is retried, a safety violation never is.",
+        failure: "One policy for every failure either retries a safety violation or gives up on \
+                  a flaky network.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.alerts",
+        title: "Alerts",
+        summary: "Numbers worth being told about while the run is still going.",
+        detail: "A threshold on one of the run's own measurements \u{2014} cost, iterations, \
+                 retries, the proportion of checks passing. An alert stops nothing; that is \
+                 what stop gates are for. It is the thing that says a run is going wrong an \
+                 hour before the ceiling would have said it.",
+        failure: "Without one, the first news of a run going sideways is the bill.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "safety",
+        key: "safety.protected",
+        title: "Protected components",
+        summary: "What self-evolution may never touch, whatever it proposes.",
+        detail: "The gate, the stop gates, the judge-independence rule \u{2014} the parts whose \
+                 whole job is to say no. A loop allowed to edit its own limits does not have \
+                 limits. Listed paths are refused the same way, so a proposal that would \
+                 rewrite a check is rejected before it is evaluated rather than after.",
+        failure: "Self-evolution with nothing protected eventually proposes removing whatever \
+                  is inconvenient, and the inconvenient thing is usually the check.",
+        required: false,
+    },
+    SectionHelp {
+        bundle: "evolution",
+        key: "evolution",
+        title: "Self-evolution",
+        summary: "Whether the loop may propose changes to itself, and what they are measured \
+                  against.",
+        detail: "Off by default. With it on, the loop may propose changes of the kinds listed \
+                 here and no others, each measured against the baseline numbers recorded here. \
+                 A proposal that regresses any of them by more than the allowance is refused by \
+                 the gate rather than by a reviewer's patience. Proposals stay proposals: \
+                 loopsmith will not apply one on its own.",
+        failure: "An evolution with no baseline has nothing to be better than, so every \
+                  proposal looks like an improvement.",
         required: false,
     },
 ];
@@ -432,8 +534,11 @@ mod tests {
                 "{} is in no bundle",
                 s.key
             );
+            // `evolution` is the one bundle small enough to be a single
+            // section, so its key is the bundle itself rather than a path
+            // inside it.
             assert!(
-                s.key.starts_with(&format!("{}.", s.bundle)),
+                s.key == s.bundle || s.key.starts_with(&format!("{}.", s.bundle)),
                 "{} is not inside {}",
                 s.key,
                 s.bundle

@@ -26,8 +26,11 @@ import {
 import { LeftRail, ReviewRail } from "./rails";
 import { RunConsole, type ActionId } from "./console";
 import { Location, Secrets, Preflight } from "./setup";
-import { Information, PreExecution, Goals, Validations, Success, StopGatesSection } from "./sections-core";
+import { Information, PreExecution, Goals, Validations, Success, StopGatesSection, type SectionProps } from "./sections-core";
 import { Schedules, ConstraintsSection, Guidelines, Skills, Graph, Providers, Context } from "./sections-run";
+import {
+  EntryGates, ApprovalGates, RollbackGates, RecoverySection, Alerts, Protected, EvolutionSection,
+} from "./sections-guard";
 import { Tour } from "./tour";
 import { SmithGate, type Smith } from "./smith-gate";
 import { ExamplesPicker } from "./examples-picker";
@@ -80,9 +83,10 @@ const STEP_KEYS: Record<string, string[]> = {
   proof: ["safety.checks", "intent.success", "safety.gates"],
   work: [
     "execution.graph", "execution.phases", "execution.default_skills",
-    "safety.limits", "execution.memory", "execution.skills", "safety.alerts",
+    "safety.limits", "safety.recovery", "safety.alerts", "execution.memory",
+    "execution.skills",
   ],
-  ship: ["execution.triggers", "evolution", "features"],
+  ship: ["execution.triggers", "evolution", "safety.protected", "features"],
 };
 
 /** The step that owns a config path, by the longest prefix that matches it. */
@@ -173,6 +177,8 @@ export default function App() {
   const [detection, setDetection] = useState<Detection | null>(null);
   const [scanning, setScanning] = useState(false);
   const [help, setHelp] = useState<Help>({ sections: [], fields: [] });
+  /** The model's own defaults, so a section can show what a blank field does. */
+  const [defaults, setDefaults] = useState<LoopConfig | null>(null);
   const [examples, setExamples] = useState<ExampleCard[]>([]);
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -253,6 +259,7 @@ export default function App() {
 
   useEffect(() => {
     api.help().then(setHelp).catch(() => {});
+    api.defaults().then(setDefaults).catch(() => {});
     api.examples().then(setExamples).catch(() => {});
     api.library().then(setLibrary).catch(() => {});
     api.meta().then(setMeta).catch(() => {});
@@ -553,7 +560,7 @@ export default function App() {
     () => (at<ProviderSpec[]>(cfg, "execution.providers.providers") ?? []).flatMap((p) => p.requires_env ?? []),
     [cfg]);
 
-  const sectionProps = { cfg, patch, help: sectionHelp };
+  const sectionProps = { cfg, patch, help: sectionHelp, defaults };
 
   const island: IslandState = job
     ? { tone: "busy", label: "running", detail: lastJob?.kind, onClick: () => setRailOpen(true) }
@@ -835,9 +842,63 @@ function Header({
 
 /* -------------------------------------------------------------- step views */
 
+/**
+ * One card on a step, with the bundle it belongs to.
+ *
+ * A step is a stage of the work — where it lives, what powers it, what you
+ * want — and the bundles are how the config itself is organised. Most steps
+ * span two of them, so the card carries its bundle and [`Bundled`] draws the
+ * line. `null` is for the cards that are not config at all: the folder
+ * picker, the secrets table, the preflight report.
+ */
+type Card = { bundle: string | null; node: React.ReactNode };
+
+/** What each bundle is for, in the six words that fit above a group of cards. */
+const BUNDLE_BLURB: Record<string, string> = {
+  intent: "what this loop is for",
+  execution: "how the work gets done",
+  safety: "what must not happen, and when to stop",
+  evolution: "how the loop may change itself",
+};
+
+/**
+ * Draw a step's cards, grouped under the bundle each one edits.
+ *
+ * This is the whole of "the layout follows the four bundles": a step is still
+ * a stage of the work, but inside it the cards are gathered under the part of
+ * the config they write, with one line saying what that part is for. The same
+ * word used to sit on every card as a badge, which said where a card lived
+ * without ever saying what the place was.
+ */
+function Bundled({ cards }: { cards: Card[] }) {
+  const groups: { bundle: string | null; nodes: React.ReactNode[] }[] = [];
+  for (const c of cards) {
+    const last = groups[groups.length - 1];
+    if (last && last.bundle === c.bundle) last.nodes.push(c.node);
+    else groups.push({ bundle: c.bundle, nodes: [c.node] });
+  }
+
+  let index = 0;
+  return (
+    <div className="space-y-4">
+      {groups.map((g, gi) => (
+        <div key={gi} className="space-y-4">
+          {g.bundle && (
+            <div className="flex flex-wrap items-baseline gap-2 pt-1">
+              <span className="chip chip-ember font-mono">{g.bundle}</span>
+              <span className="hint">{BUNDLE_BLURB[g.bundle]}</span>
+            </div>
+          )}
+          {g.nodes.map((n) => <Reveal key={index} index={index++}>{n}</Reveal>)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function StepView(props: {
   step: string;
-  sectionProps: { cfg: LoopConfig; patch: (p: Partial<LoopConfig>) => void; help: Map<string, SectionHelp> };
+  sectionProps: SectionProps;
   detection: Detection | null;
   parent: string; setParent: (v: string) => void; loopPath: string;
   initGit: boolean; setInitGit: (v: boolean) => void;
@@ -848,48 +909,71 @@ function StepView(props: {
   scanning: boolean; onRescan: (deep: boolean) => void;
 }) {
   const { step, sectionProps: sp } = props;
-  const wrap = (nodes: React.ReactNode[]) => nodes.map((n, i) => <Reveal key={i} index={i}>{n}</Reveal>);
 
   switch (step) {
     case "place":
-      return <div className="space-y-4">{wrap([
-        <Location
-          parent={props.parent} onParent={props.setParent} loopPath={props.loopPath}
-          initGit={props.initGit} onInitGit={props.setInitGit}
-          cfg={sp.cfg} patch={sp.patch}
-          format={props.format} onFormat={props.setFormat} facts={props.facts}
-          permissions={props.review?.permissions ?? []}
-        />,
-      ])}</div>;
+      return <Bundled cards={[
+        { bundle: null, node: (
+          <Location
+            parent={props.parent} onParent={props.setParent} loopPath={props.loopPath}
+            initGit={props.initGit} onInitGit={props.setInitGit}
+            cfg={sp.cfg} patch={sp.patch}
+            format={props.format} onFormat={props.setFormat} facts={props.facts}
+            permissions={props.review?.permissions ?? []}
+          />
+        ) },
+      ]} />;
 
     case "power":
-      return <div className="space-y-4">{wrap([
-        <Providers {...sp} detection={props.detection} onTest={props.onTest}
-          testing={props.testing} results={props.testResults} />,
-        <Secrets detection={props.detection} needed={props.neededKeys} />,
-      ])}</div>;
+      return <Bundled cards={[
+        { bundle: "execution", node: (
+          <Providers {...sp} detection={props.detection} onTest={props.onTest}
+            testing={props.testing} results={props.testResults} />
+        ) },
+        { bundle: null, node: <Secrets detection={props.detection} needed={props.neededKeys} /> },
+      ]} />;
 
     case "intent":
-      return <div className="space-y-4">{wrap([
-        <Goals {...sp} />, <Information {...sp} />, <PreExecution {...sp} />,
-      ])}</div>;
+      return <Bundled cards={[
+        { bundle: "intent", node: <Goals {...sp} /> },
+        { bundle: "intent", node: <Information {...sp} /> },
+        { bundle: "intent", node: <PreExecution {...sp} /> },
+      ]} />;
 
+    // Proof is the step that is deliberately two bundles: what counts as done
+    // (`intent.success`) and what is allowed to decide it (`safety`). Keeping
+    // them on one step is what stops someone writing a success scenario with
+    // nothing checking it.
     case "proof":
-      return <div className="space-y-4">{wrap([
-        <Validations {...sp} />, <Success {...sp} />, <StopGatesSection {...sp} />,
-      ])}</div>;
+      return <Bundled cards={[
+        { bundle: "safety", node: <Validations {...sp} /> },
+        { bundle: "intent", node: <Success {...sp} /> },
+        { bundle: "safety", node: <StopGatesSection {...sp} /> },
+        { bundle: "safety", node: <EntryGates {...sp} /> },
+        { bundle: "safety", node: <ApprovalGates {...sp} /> },
+        { bundle: "safety", node: <RollbackGates {...sp} /> },
+      ]} />;
 
     case "work":
-      return <div className="space-y-4">{wrap([
-        <Graph {...sp} />, <ConstraintsSection {...sp} />, <Guidelines {...sp} />,
-        <Skills {...sp} detection={props.detection} />, <Context {...sp} />,
-      ])}</div>;
+      return <Bundled cards={[
+        { bundle: "execution", node: <Graph {...sp} /> },
+        { bundle: "execution", node: <Guidelines {...sp} /> },
+        { bundle: "execution", node: <Skills {...sp} detection={props.detection} /> },
+        { bundle: "execution", node: <Context {...sp} /> },
+        { bundle: "safety", node: <ConstraintsSection {...sp} /> },
+        { bundle: "safety", node: <RecoverySection {...sp} /> },
+        { bundle: "safety", node: <Alerts {...sp} /> },
+      ]} />;
 
     default:
-      return <div className="space-y-4">{wrap([
-        <Schedules {...sp} />,
-        <Preflight detection={props.detection} scanning={props.scanning} onRescan={props.onRescan} />,
-      ])}</div>;
+      return <Bundled cards={[
+        { bundle: "execution", node: <Schedules {...sp} /> },
+        { bundle: "evolution", node: <EvolutionSection {...sp} /> },
+        { bundle: "safety", node: <Protected {...sp} /> },
+        { bundle: null, node: (
+          <Preflight detection={props.detection} scanning={props.scanning} onRescan={props.onRescan} />
+        ) },
+      ]} />;
   }
 }
 

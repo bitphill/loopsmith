@@ -13,6 +13,7 @@
 //! is the difference between a control panel and a remote shell.
 
 use crate::{assemble, detect, examples, exec, help, picker, secrets, wizard};
+use loopsmith_core::LoopConfig;
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -38,6 +39,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/pick-folder", post(pick_folder))
         // Teaching material.
         .route("/api/help", get(help_handler))
+        .route("/api/defaults", get(defaults))
         // The example library and the loops already made.
         .route("/api/examples", get(list_examples))
         .route("/api/examples/{id}", get(load_example))
@@ -208,6 +210,23 @@ async fn pick_folder(Json(b): Json<PickBody>) -> Json<Value> {
 
 async fn help_handler() -> Json<Value> {
     Json(json!({ "sections": help::SECTIONS, "fields": help::FIELDS }))
+}
+
+/// The config the model produces when nothing is said.
+///
+/// The form has to show what a field will do when it is left alone —
+/// "transient errors are retried three times" is only useful if it is true —
+/// and the only honest source for that is the model's own defaults. Serving
+/// them stops the browser keeping a second copy that drifts the first time
+/// someone changes a `#[serde(default)]` in `loopsmith-core`.
+///
+/// A name is the one thing with no default, so one is supplied here and
+/// ignored by every reader.
+async fn defaults() -> ApiResult<LoopConfig> {
+    let cfg = blocking(|| loopsmith_core::parse_str("name: defaults\n", "<defaults>"))
+        .await?
+        .map_err(|e| e.to_string())?;
+    Ok(Json(cfg))
 }
 
 async fn list_examples() -> ApiResult<Vec<examples::ExampleCard>> {

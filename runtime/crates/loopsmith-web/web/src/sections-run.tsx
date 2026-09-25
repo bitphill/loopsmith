@@ -11,9 +11,9 @@ import { Section, type SectionProps } from "./sections-core";
 import { Field, Text, Area, Num, Select, Toggle, Repeater, Note, ListInput, Icon } from "./ui";
 import { at, put } from "./types";
 import type {
-  Fires, Goal, GraphSpec, Guideline, DefaultSkill, Memory, NodeSpec, Phases,
-  ProviderRouting, ProviderSpec, Role, SkillPolicy, Tier, Trigger,
-  Concurrency, ConstraintSet, Constraints, Detection,
+  Fires, Goal, GraphSpec, Guideline, DefaultSkill, Memory, NamespacePolicy,
+  Namespaces, NodeSpec, Phases, Promotion, ProviderRouting, ProviderSpec, Role,
+  SkillPolicy, Tier, Trigger, Concurrency, ConstraintSet, Constraints, Detection,
 } from "./types";
 
 /** Every goal named so far, for the selects that point at one. */
@@ -608,8 +608,12 @@ export function Providers({
 
 /* --- context ------------------------------------------------------------- */
 
-export function Context({ cfg, patch, help }: SectionProps) {
+export function Context({ cfg, patch, help, defaults }: SectionProps) {
   const c = at<Memory>(cfg, "execution.memory") ?? {};
+  // The four namespaces do not share a default — a recorded failure is
+  // reusable the moment it is written, a conclusion about the world is not —
+  // so what an untouched one shows comes from the server's own model.
+  const unset = (defaults && at<Memory>(defaults, "execution.memory")?.namespaces) ?? {};
   const set = (p: Partial<Memory>) => patch(put(cfg, "execution.memory", { ...c, ...p }));
   const providerIds = providerNames(cfg);
   return (
@@ -628,6 +632,109 @@ export function Context({ cfg, patch, help }: SectionProps) {
           )}
         </Field>
       </div>
+
+      <div className="mt-4 space-y-3 border-t pt-4">
+        <div>
+          <p className="label">What it keeps, and for how long</p>
+          <p className="hint mt-0.5">
+            Four kinds of memory with four different risks. A recorded failure is worth reusing the
+            moment it is written; something the loop concluded about the world is not, until the
+            same conclusion has turned up more than once.
+          </p>
+        </div>
+        {NAMESPACES.map((ns) => (
+          <NamespaceEditor
+            key={ns.key}
+            spec={ns}
+            value={c.namespaces?.[ns.key] ?? unset[ns.key] ?? {}}
+            onChange={(next) =>
+              set({ namespaces: { ...(c.namespaces ?? {}), [ns.key]: next } })
+            }
+          />
+        ))}
+      </div>
     </Section>
+  );
+}
+
+/** The four namespaces the engine reads, and what each one holds. */
+const NAMESPACES: readonly { key: keyof Namespaces; label: string; hint: string }[] = [
+  { key: "episodic", label: "Episodic", hint: "What happened in a particular iteration." },
+  { key: "semantic", label: "Semantic", hint: "What the loop has concluded about its subject." },
+  { key: "procedural", label: "Procedural", hint: "A way of doing something that worked." },
+  { key: "failure", label: "Failure", hint: "A way of doing something that did not." },
+];
+
+const PROMOTIONS: readonly { value: Promotion["rule"]; label: string }[] = [
+  { value: "never", label: "Never — this run only" },
+  { value: "automatic", label: "Automatic — reusable as soon as it is written" },
+  { value: "repeated_validation", label: "Corroborated — once it has turned up again" },
+  { value: "human_approval", label: "A person says so" },
+];
+
+/**
+ * One namespace's policy.
+ *
+ * `promotion` is the field that matters and the one nobody would guess the
+ * shape of, so it is a select with its one parameter beside it rather than a
+ * tagged union spelled out in the form.
+ */
+function NamespaceEditor({
+  spec, value, onChange,
+}: {
+  spec: { key: keyof Namespaces; label: string; hint: string };
+  value: NamespacePolicy;
+  onChange: (v: NamespacePolicy) => void;
+}) {
+  const rule = value.promotion?.rule ?? "never";
+  const set = (p: Partial<NamespacePolicy>) => onChange({ ...value, ...p });
+  return (
+    <div className="rounded-[10px] border bg-raised p-3">
+      <Toggle
+        checked={value.enabled ?? true}
+        onChange={(enabled) => set({ enabled })}
+        label={spec.label}
+        hint={spec.hint}
+      />
+      {(value.enabled ?? true) && (
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <Field label="Reusable when" hint="What it takes to move from observed to trusted.">
+            {(id) => (
+              <Select
+                id={id}
+                value={rule}
+                onChange={(r) =>
+                  set({
+                    promotion:
+                      r === "repeated_validation"
+                        ? { rule: r, times: 3 }
+                        : ({ rule: r } as Promotion),
+                  })
+                }
+                options={PROMOTIONS}
+              />
+            )}
+          </Field>
+          {rule === "repeated_validation" && (
+            <Field label="How many times" hint="Independent corroborations before it is trusted.">
+              {(id) => (
+                <Num
+                  id={id}
+                  min={1}
+                  value={value.promotion && "times" in value.promotion ? value.promotion.times ?? 3 : 3}
+                  onChange={(v) => set({ promotion: { rule: "repeated_validation", times: v ?? 3 } })}
+                />
+              )}
+            </Field>
+          )}
+          <Field label="Forget after" hint="Days. Empty means keep it.">
+            {(id) => (
+              <Num id={id} min={1} suffix="days" value={value.retention_days ?? null}
+                onChange={(retention_days) => set({ retention_days })} />
+            )}
+          </Field>
+        </div>
+      )}
+    </div>
   );
 }
