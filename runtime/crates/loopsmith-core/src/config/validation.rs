@@ -1,4 +1,4 @@
-//! Section D — how each goal is checked.
+//! `safety.checks` — how each goal is verified.
 
 use super::yes;
 use schemars::JsonSchema;
@@ -15,7 +15,7 @@ pub enum Mode {
 /// How a validation is actually decided. Ordered by the independence ladder
 /// from the cheat sheet: `Judge` is rung 3, everything else is rung 4.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Detector {
     /// Run a command; exit code 0 passes. The strongest detector available.
     Script {

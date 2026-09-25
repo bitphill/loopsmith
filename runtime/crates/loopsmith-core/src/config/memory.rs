@@ -20,7 +20,7 @@ use super::yes;
 
 /// What it takes for a record to move from observed to reusable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "rule", rename_all = "snake_case")]
+#[serde(tag = "rule", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Promotion {
     /// Never reused beyond the run that wrote it.
     Never,

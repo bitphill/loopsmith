@@ -45,7 +45,7 @@ pub enum Tier {
 /// refusing to start there would make container isolation unusable in practice
 /// rather than merely unavailable.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "mode", rename_all = "snake_case")]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Isolation {
     /// Runs directly in the loop directory. Correct for a single writer or a
     /// read-only node.
@@ -150,7 +150,7 @@ fn one() -> f64 {
 /// reference calls out: several nodes attacking the same question, where the
 /// run does not need all the answers to proceed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "strategy", rename_all = "snake_case")]
+#[serde(tag = "strategy", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Join {
     /// Every node in the wave must finish.
     #[default]
@@ -192,7 +192,7 @@ pub struct GraphSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "mode", rename_all = "snake_case")]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Concurrency {
     /// One node at a time.
     Sequential,

@@ -44,7 +44,7 @@ impl Backoff {
 
 /// What the run does when a given failure class occurs.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RecoveryAction {
     /// Re-dispatch the same work unchanged. For failures that are about the
     /// world, not the output.

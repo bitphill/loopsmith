@@ -153,6 +153,7 @@
     "Concurrency": {
       "oneOf": [
         {
+          "additionalProperties": false,
           "description": "One node at a time.",
           "properties": {
             "mode": {
@@ -168,6 +169,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Fixed width.",
           "properties": {
             "max_parallel": {
@@ -189,6 +191,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Derived from the graph: widest wave, capped, and trimmed to the point where marginal Amdahl speedup still beats marginal cost.",
           "properties": {
             "cap": {
@@ -367,6 +370,7 @@
       "description": "How a validation is actually decided. Ordered by the independence ladder from the cheat sheet: `Judge` is rung 3, everything else is rung 4.",
       "oneOf": [
         {
+          "additionalProperties": false,
           "description": "Run a command; exit code 0 passes. The strongest detector available.",
           "properties": {
             "args": {
@@ -401,6 +405,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "A path must exist (optionally non-empty).",
           "properties": {
             "non_empty": {
@@ -424,6 +429,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "A regex must match the named artifact.",
           "properties": {
             "artifact": {
@@ -447,6 +453,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "A numeric metric compared against a threshold.",
           "properties": {
             "metric": {
@@ -475,6 +482,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "A model verdict. Requires a judge whose provider differs from the builder's, otherwise the gate refuses it as non-independent.",
           "properties": {
             "min_score": {
@@ -1063,6 +1071,7 @@
       "description": "How much of the machine a node is kept away from.\n\nThe ladder is real but not linear in cost: `Worktree` is nearly free and is what makes parallel writers safe, while `Container` buys filesystem and network separation at the price of a Docker daemon and an image pull.\n\n`Container` degrades rather than fails. If Docker is not present the node runs under `Worktree` and the run records a warning — a config written on a machine with Docker must still work on one without, because the same loop directory gets checked out on developer laptops, CI runners and servers, and refusing to start there would make container isolation unusable in practice rather than merely unavailable.",
       "oneOf": [
         {
+          "additionalProperties": false,
           "description": "Runs directly in the loop directory. Correct for a single writer or a read-only node.",
           "properties": {
             "mode": {
@@ -1078,6 +1087,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Runs in its own git worktree, published back on success. Required for parallel writers.",
           "properties": {
             "mode": {
@@ -1093,6 +1103,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Runs in a container over its own worktree.",
           "properties": {
             "image": {
@@ -1126,6 +1137,7 @@
       "description": "What it takes for a wave to count as finished.\n\nThe default waits for every node, which is the only correct answer when later waves read every output. The other two exist for the fan-out shape the reference calls out: several nodes attacking the same question, where the run does not need all the answers to proceed.",
       "oneOf": [
         {
+          "additionalProperties": false,
           "description": "Every node in the wave must finish.",
           "properties": {
             "strategy": {
@@ -1141,6 +1153,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Proceed once this many nodes have finished successfully. Nodes still running are left to finish; their output is used if it arrives in time.",
           "properties": {
             "count": {
@@ -1162,6 +1175,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Proceed as soon as any one node succeeds.",
           "properties": {
             "strategy": {
@@ -1541,6 +1555,7 @@
       "description": "What it takes for a record to move from observed to reusable.",
       "oneOf": [
         {
+          "additionalProperties": false,
           "description": "Never reused beyond the run that wrote it.",
           "properties": {
             "rule": {
@@ -1556,6 +1571,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Reusable as soon as it is written. Only appropriate where writing is itself the evidence — a recorded failure mode, for instance.",
           "properties": {
             "rule": {
@@ -1571,6 +1587,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Reusable once the same record has been independently corroborated this many times.",
           "properties": {
             "rule": {
@@ -1592,6 +1609,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Reusable only after a human says so.",
           "properties": {
             "rule": {
@@ -1962,6 +1980,7 @@
       "description": "What the run does when a given failure class occurs.",
       "oneOf": [
         {
+          "additionalProperties": false,
           "description": "Re-dispatch the same work unchanged. For failures that are about the world, not the output.",
           "properties": {
             "action": {
@@ -1999,6 +2018,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Re-dispatch, telling the node what was wrong with its last output. For failures that are about the output.",
           "properties": {
             "action": {
@@ -2021,6 +2041,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Move to the next provider in the tier's cascade.",
           "properties": {
             "action": {
@@ -2036,6 +2057,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Halt this node and record an escalation for a human to answer.",
           "properties": {
             "action": {
@@ -2051,6 +2073,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Halt the whole run but keep the state resumable.",
           "properties": {
             "action": {
@@ -2066,6 +2089,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Roll the store back to the last good checkpoint and resume from there.",
           "properties": {
             "action": {
@@ -2081,6 +2105,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Stop the run immediately. No further dispatch, no perturbation.",
           "properties": {
             "action": {
@@ -2489,6 +2514,7 @@
     "Trigger": {
       "oneOf": [
         {
+          "additionalProperties": false,
           "description": "Five-field cron expression.",
           "properties": {
             "expr": {
@@ -2508,6 +2534,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Fire every N seconds. Timezone-independent, which makes it the right choice for cadence that does not need to land at a wall-clock time.",
           "properties": {
             "seconds": {
@@ -2529,6 +2556,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Fire when a path changes.",
           "properties": {
             "path": {
@@ -2548,6 +2576,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Fire when a named upstream goal becomes satisfied.",
           "properties": {
             "goal": {
@@ -2567,6 +2596,7 @@
           "type": "object"
         },
         {
+          "additionalProperties": false,
           "description": "Fire on demand only.",
           "properties": {
             "type": {
