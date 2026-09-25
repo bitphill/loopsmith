@@ -309,6 +309,12 @@ jobs:
       - name: The rendered diagrams match their source
         run: ./tools/render-diagrams.sh --check
 
+      # npm, PyPI and crates.io all get the same body with their own header.
+      # Three near-copies maintained by hand is what they were, and each one
+      # had drifted somewhere different.
+      - name: The package READMEs match their source
+        run: ./tools/sync-package-readmes.sh --check
+
       # The worst sentences, whether or not the ceiling held. On a failure this
       # is the fix list; on a pass it is what the next edit should avoid.
       - name: The longest sentences in it

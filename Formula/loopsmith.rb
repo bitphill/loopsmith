@@ -74,15 +74,15 @@ class Loopsmith < Formula
     assert_match "platform", doctor
     assert_match "userland", doctor
 
-    # A scaffolded loop must refuse to validate until its `pre_execution` steps
-    # are marked done. That refusal is the product, so a build where it stops
-    # happening is a broken build.
-    system bin/"loopsmith", "new", "--path", testpath/"demo", "--purpose", "brew test"
+    # A scaffolded loop must refuse to validate until its
+    # `intent.prerequisites` steps are marked done. That refusal is the
+    # product, so a build where it stops happening is a broken build.
+    system bin/"loopsmith", "loop", "new", "--path", testpath/"demo", "--purpose", "brew test"
     assert_path_exists testpath/"demo/loop.yaml"
     assert_path_exists testpath/"demo/run.sh"
     assert_path_exists testpath/"demo/run.cmd"
 
     output = shell_output("#{bin}/loopsmith loop validate #{testpath}/demo/loop.yaml 2>&1", 1)
-    assert_match "pre_execution", output
+    assert_match "intent.prerequisites", output
   end
 end
