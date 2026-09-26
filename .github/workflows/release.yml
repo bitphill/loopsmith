@@ -187,10 +187,37 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -u
+          version="$(awk '/^\[workspace\.package\]/{f=1} f && /^version = /{gsub(/[",]/,"",$3); print $3; exit}' Cargo.toml)"
+          [ -n "$version" ] || { echo "::error::could not read the workspace version"; exit 1; }
+          echo "publishing $version"
+
+          # `cargo publish` packages and runs a full verification build *before*
+          # it uploads and finds out the version is already there, so the
+          # already-uploaded path below is free in upload terms and costs a
+          # complete compile every time. That matters because the Trusted
+          # Publishing token expires thirty minutes after the job starts: a
+          # re-run that has to skip eleven crates would spend the whole window
+          # rebuilding them and could lose the token before reaching the twelfth.
+          # Asking the index first turns each skip into one HTTP request.
+          #
+          # Only 200 counts as present. A 404, a rate limit, or a dropped
+          # connection all fall through to publishing, because the upload is the
+          # authority and this is an optimisation, not a gate.
+          on_index() {
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: loopsmith release workflow (github.com/bitphill/loopsmith)' \
+              "https://crates.io/api/v1/crates/$1/$version" || echo 000)
+            [ "$code" = 200 ]
+          }
+
           for crate in loopsmith-util loopsmith-core loopsmith-memory \
                        loopsmith-graph loopsmith-provider loopsmith-gate \
                        loopsmith-skills loopsmith-mcp loopsmith-run \
                        loopsmith-wizard loopsmith-web loopsmith; do
+            if on_index "$crate"; then
+              echo "$crate $version is already on the index — not rebuilding it"
+              continue
+            fi
             for attempt in 1 2 3; do
               echo "::group::$crate (attempt $attempt)"
               out=$(cargo publish -p "$crate" 2>&1) && status=0 || status=$?
