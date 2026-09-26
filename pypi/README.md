@@ -102,6 +102,8 @@ resume` picks up from the last checkpoint.
   — every config section, one at a time, with what goes wrong if you skip it
 - [**LOOP-TEMPLATE.md**](https://github.com/bitphill/loopsmith/blob/main/LOOP-TEMPLATE.md)
   — a blank loop with a note on every field
+- [**Concepts**](https://github.com/bitphill/loopsmith/wiki/Concepts)
+  — every word the config and the error messages use, defined once
 - [**Architecture**](https://github.com/bitphill/loopsmith/wiki/Architecture)
   · [**Commands**](https://github.com/bitphill/loopsmith/wiki/Commands)
   · [**Migration 0.3 → 1.0**](https://github.com/bitphill/loopsmith/wiki/Migration-0-3-To-1-0)

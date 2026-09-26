@@ -362,6 +362,15 @@ jobs:
       - name: Flesch-Kincaid grade 6 or below
         run: ./tools/check-readability.sh
 
+      # The three package pages are one body, and they are the first thing
+      # anyone sees on npm, PyPI and crates.io. A looser ceiling than the
+      # plain-English guide, on purpose: this page may say `requires_env` and
+      # name a tier, where that one may not. Ten is about two grades above where
+      # the body sits today, so ordinary editing does not trip it and a slide
+      # into release-note prose does.
+      - name: The package pages stay readable too
+        run: ./tools/check-readability.sh packaging/README.body.md 10
+
       # `assets/architecture.mmd` is the source; the PNG and the text form are
       # rendered from it. The text is compared byte for byte, because the same
       # input gives the same bytes on every machine. The PNG is compared by the

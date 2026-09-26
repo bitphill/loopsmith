@@ -26,6 +26,6 @@ loopsmith doctor
 > verdicts), [`loopsmith-graph`](https://crates.io/crates/loopsmith-graph) (DAG
 > scheduling and Amdahl sizing),
 > [`loopsmith-run`](https://crates.io/crates/loopsmith-run) (the run lifecycle),
-> and six more.
+> and seven more.
 
 ---
