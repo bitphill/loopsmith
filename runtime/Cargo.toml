@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
@@ -31,17 +31,17 @@ categories = ["command-line-utilities", "development-tools"]
 # path-only dependency is rejected at publish time with "all dependencies must
 # have a version specified".
 [workspace.dependencies]
-loopsmith-util = { path = "crates/loopsmith-util", version = "0.3.1" }
-loopsmith-core = { path = "crates/loopsmith-core", version = "0.3.1" }
-loopsmith-memory = { path = "crates/loopsmith-memory", version = "0.3.1" }
-loopsmith-graph = { path = "crates/loopsmith-graph", version = "0.3.1" }
-loopsmith-gate = { path = "crates/loopsmith-gate", version = "0.3.1" }
-loopsmith-provider = { path = "crates/loopsmith-provider", version = "0.3.1" }
-loopsmith-skills = { path = "crates/loopsmith-skills", version = "0.3.1" }
-loopsmith-mcp = { path = "crates/loopsmith-mcp", version = "0.3.1" }
-loopsmith-run = { path = "crates/loopsmith-run", version = "0.3.1" }
-loopsmith-wizard = { path = "crates/loopsmith-wizard", version = "0.3.1" }
-loopsmith-web = { path = "crates/loopsmith-web", version = "0.3.1" }
+loopsmith-util = { path = "crates/loopsmith-util", version = "1.0.0" }
+loopsmith-core = { path = "crates/loopsmith-core", version = "1.0.0" }
+loopsmith-memory = { path = "crates/loopsmith-memory", version = "1.0.0" }
+loopsmith-graph = { path = "crates/loopsmith-graph", version = "1.0.0" }
+loopsmith-gate = { path = "crates/loopsmith-gate", version = "1.0.0" }
+loopsmith-provider = { path = "crates/loopsmith-provider", version = "1.0.0" }
+loopsmith-skills = { path = "crates/loopsmith-skills", version = "1.0.0" }
+loopsmith-mcp = { path = "crates/loopsmith-mcp", version = "1.0.0" }
+loopsmith-run = { path = "crates/loopsmith-run", version = "1.0.0" }
+loopsmith-wizard = { path = "crates/loopsmith-wizard", version = "1.0.0" }
+loopsmith-web = { path = "crates/loopsmith-web", version = "1.0.0" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

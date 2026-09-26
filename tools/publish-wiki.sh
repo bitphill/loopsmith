@@ -177,8 +177,12 @@ for f in mds:
     stem = f[:-3]
     page = stem2page[stem]
     text = open(os.path.join(where[f], f)).read()
-    # `](foo-bar.md)` addresses a file. A wiki addresses a page.
-    text = re.sub(r'\]\(([a-z0-9._-]+)\.md\)',
+    # `](foo-bar.md)` addresses a file. A wiki addresses a page. The character
+    # class has to include capitals: the generated pages are lower-case, but the
+    # hand-written ones in `wiki/` are named the way they are titled, and a link
+    # this misses is not an error anywhere — it is a dead link on a published
+    # page, which is the kind of mistake that survives.
+    text = re.sub(r'\]\(([A-Za-z0-9._-]+)\.md\)',
                   lambda m: '](%s)' % stem2page.get(m.group(1), m.group(1)), text)
     if stem == 'overview':
         # The generator's own banner heading duplicates the project title below it.

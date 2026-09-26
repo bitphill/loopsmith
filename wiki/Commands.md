@@ -5,7 +5,7 @@ same list this page does, generated from the same source — when the two
 disagree, the binary is right.
 
 Every 0.3 spelling still works and prints one line saying where it went. See
-[Migration 0.3 → 1.0](Migration-0-3-To-1-0).
+[Migration 0.3 → 1.0](Migration-0-3-To-1-0.md).
 
 ## `loop` — make and maintain configs
 

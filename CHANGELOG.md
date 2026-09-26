@@ -4,6 +4,150 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-09-26
+
+The config is grouped, the commands are grouped, and the engine that runs both
+is split into crates that can be tested apart. A 0.3 config still loads and a
+0.3 command still works, so the upgrade is a `cargo install` — but both now
+print where the thing they named has moved to, and `loopsmith loop migrate`
+rewrites a file in place.
+
+Read [Migration 0.3 → 1.0](wiki/Migration-0-3-To-1-0.md) before upgrading a
+loop you cannot afford to re-run.
+
+### Changed
+
+- **Breaking: the config has four bundles instead of twenty-two top-level
+  keys.** `intent` is what the loop is for, `execution` is how it runs, `safety`
+  is what must not happen, and `evolution` is what it is allowed to change about
+  itself. `name`, `version`, `description`, `environment` and `features` stay at
+  the top, because they describe the file rather than the loop.
+
+  Every old key has exactly one new home, and there is exactly one description
+  of where — the table in `config/legacy.rs`. The loader applies it, so a 0.3
+  file parses and reports each key it moved; `loopsmith loop migrate` applies the
+  same table to rewrite the file, and `--write` is required before it touches
+  anything. A migrator that disagreed with the parser would produce a file
+  meaning something other than what it replaced, which is why there is one table
+  and not two pieces of code.
+
+  The sections also lost their letters. A validation was "section D" in 0.3 and
+  is `safety.checks` in 1.0, in every error message, every document and every
+  card in the browser.
+
+- **Breaking: the commands are grouped under four nouns.** `loop` makes and
+  checks config files, `run` concerns an actual run of one, and `memory` and
+  `skills` cover what outlives a run. `doctor`, `providers`, `web` and `mcp`
+  stay where they are, because each is one thing.
+
+  Every 0.3 verb still works. The rewrite happens in one table before the
+  argument parser sees anything, prints a notice naming the new spelling, and
+  only ever looks at the first argument — so a config file named `validate` is
+  in no danger. At 2.0 that file is deleted whole rather than unpicked from the
+  grammar.
+
+- **The workspace is twelve crates.** `loopsmith-core` holds the model and the
+  validator, `-run` the engine, `-graph` the wave planner, `-memory` the store,
+  `-provider` the model cascade, `-gate` the regression gate, `-skills` the
+  marketplace, `-wizard` the guided walk-through, `-web` the browser, `-mcp` the
+  server, `-util` the shared parts, and `-cli` the binary that wires them
+  together. What used to be one crate's private modules can now be tested
+  without building the CLI.
+
+- **An unknown key inside a config is refused rather than dropped.** Every
+  struct and every internally tagged enum in the model rejects a field it does
+  not know, including variants that carry no fields of their own. A misspelled
+  `idempotency_kye` used to parse and leave a trigger with no deduplication and
+  no warning.
+
+- **The minimum supported Rust version is 1.85**, up from a documented 1.75 that
+  had already stopped being true — the dependency graph needed 1.85 and nothing
+  checked. CI checks it now.
+
+### Added
+
+- **A run has a lifecycle.** Every run moves through named states, writes a
+  ledger entry at each, and can be resumed from its last checkpoint. An
+  unreadable checkpoint is answered by the `corrupted_state` recovery policy
+  rather than by a panic.
+
+- **Typed recovery per failure class.** `transient_error`, `invalid_output`,
+  `tool_unavailable`, `repeated_failure`, `safety_violation`,
+  `resource_exhaustion` and `corrupted_state` each name an action — retry with backoff, revise, fall back
+  to the next provider, escalate, pause, restore a checkpoint, or stop.
+
+- **Join strategies and derived concurrency.** A wave finishes when every node
+  does, when a quorum does, or when the first one succeeds. Width is
+  `sequential`, a fixed number, or derived from the graph itself and trimmed to
+  the point where another worker stops paying for itself.
+
+- **Container isolation that degrades instead of failing.** A node can run in a
+  container over its own worktree; where Docker is absent it runs in the
+  worktree and the run records a warning, because the same loop directory gets
+  checked out on laptops, CI runners and servers.
+
+- **Memory namespaces that outlive a run, with promotion as the bar.** A record
+  moves from observed to reusable never, automatically, after this many
+  independent corroborations, or only once a human says so.
+
+- **Metrics, alerts, trigger idempotency and the evolution gates.** A trigger
+  that can be fired by the loop's own output is capped by depth; a proposal the
+  loop makes about itself goes through a gate before it applies.
+
+- **The browser has three doors.** An experienced smith goes straight to the
+  six-step editor, a new one gets the explanation and a working example to start
+  from, and either can switch. The form reaches every section the config has,
+  the questions are a declarative mirror of the terminal's, and a run can be
+  watched rather than read. `--web` binds to `127.0.0.1` and has no
+  public-bind mode.
+
+- **A landing page at the project's own address**, and fifteen worked examples
+  in the 1.0 shape — each generated from one source, with the 0.3 originals kept
+  beside them as a corpus the migration is tested against.
+
+- **One architecture diagram, rendered rather than copied.** `assets/`
+  holds the source; the PNG and the text form are generated from it and checked
+  byte for byte, as are the three package READMEs, the markdown twin of every
+  example, and the grade level of the plain-English README.
+
+### Fixed
+
+Two end-of-phase reviews, run as separate standards and spec passes, found
+these implemented but wrong. Each is fixed with a test at the seam it failed at.
+
+- A retry sleeping out its backoff called its provider even after the iteration
+  had stopped dispatching — after a halt, or after a sibling crossed a budget
+  ceiling. Workers now share a stop flag and a waking retry checks it.
+- A worker that panicked never reported, and the dispatcher waited for it
+  forever.
+- A rollback left the discarded iteration's rulings in the store, where `status`
+  and a `goal_satisfied` trigger would act on them.
+- The watcher counted every `file_change` as the loop's own doing, so a human's
+  sixth file into a watched inbox was refused forever. A firing now extends the
+  chain only if it plausibly came from the last run.
+- Alerts fired again on every resume, and the retry and failure counters reset.
+  Both are in the checkpoint now.
+- A judge whose output stayed unusable through every revision was logged as
+  having succeeded.
+- The first exponential retry waited twice the base delay.
+- A failed checkpoint save was ignored.
+- Resuming never let an escalated node run again, because its spent revisions
+  came back with the checkpoint. Answering is now an explicit act: a plain
+  resume leaves escalations open and their nodes held, and says so, while
+  `loopsmith run resume --answer` clears them and refunds each node's revisions.
+  Refunding on every resume would have handed a stuck node a fresh budget
+  unattended, which is the guarantee the stress suite holds.
+- The expert editor edited a config the server did not serve.
+- The Homebrew formula's test invoked a command spelling that 1.0 had moved,
+  which would have failed on the first 1.0 build. Nothing checked Ruby lists of
+  strings; something does now.
+
+### Removed
+
+- `installers/install.ps1` moved to the repository root beside `install.sh`, so
+  both installers are where somebody cloning the repository will look. Every
+  fact the two share now comes from `installers/manifest.json`.
+
 ## [0.3.1] — 2026-09-10
 
 ### Added
