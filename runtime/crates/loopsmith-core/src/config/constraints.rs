@@ -1,9 +1,10 @@
 //! Section H — constraints applied per node or globally.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Constraints {
     /// Applied to every node unless overridden.
@@ -14,7 +15,7 @@ pub struct Constraints {
     pub per_node: BTreeMap<String, ConstraintSet>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConstraintSet {
     /// Literal rules injected into the node prompt.

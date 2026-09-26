@@ -1,0 +1,513 @@
+import { test, expect } from "@playwright/test";
+
+/**
+ * These cover the seam: does the page mount, does it reach the API, and do the
+ * few interactions that are genuinely browser-side behave. Validation rules,
+ * argv construction, secret quoting, and everything else live in Rust tests.
+ */
+
+test("the shell mounts and reports the binary's own version", async ({ page }) => {
+  // Past the way-in gate, so this is about the shell rather than the overlay.
+  await page.addInitScript(() => localStorage.setItem("loopsmith-smith", "experienced"));
+  await page.goto("/");
+  // The mark is served straight from the binary, so a broken route shows up
+  // here rather than as a silently missing image.
+  const logo = await page.request.get("/logo.png");
+  expect(logo.status()).toBe(200);
+  expect(logo.headers()["content-type"]).toContain("image/png");
+  await expect(page.getByRole("heading", { name: "loopsmith", level: 1 })).toBeVisible();
+  // Served from the binary, so a version here proves the API round trip too.
+  await expect(page.locator("header").getByText(/^\d+\.\d+\.\d+$/)).toBeVisible();
+});
+
+test("the way in offers both doors, and remembers which was taken", async ({ page }) => {
+  await page.goto("/");
+  const gate = page.getByRole("dialog", { name: "Choose how to start" });
+  await expect(gate).toBeVisible();
+  await expect(gate.getByRole("button", { name: /I am an experienced smith/ })).toBeVisible();
+
+  await gate.getByRole("button", { name: /I am a new smith/ }).click();
+  await expect(gate).toBeHidden();
+
+  // The answer does not change between launches, so it is asked once.
+  await page.reload();
+  await expect(page.getByRole("dialog", { name: "Choose how to start" })).toBeHidden();
+});
+
+test("the third door builds a loop somewhere disposable and walks it through", async ({ page }) => {
+  // The door most people actually want: not "how do I write one" but "what
+  // does one do". It is two commands chained — build it, then dry-run it —
+  // and the chain only works because a console that is already watching is
+  // told when its job ends.
+  await page.goto("/");
+  await page
+    .getByRole("dialog", { name: "Choose how to start" })
+    .getByRole("button", { name: /Show me one running/ })
+    .click();
+
+  const progress = page.getByRole("region", { name: "Run progress" });
+
+  // The waves come from the plan; the trail comes from the run's own
+  // transitions. Both are the things a scrolling log is worst at showing.
+  await expect(progress).toBeVisible({ timeout: 30_000 });
+  await expect(progress.getByText("created")).toBeVisible({ timeout: 30_000 });
+  await expect(progress.getByTitle(/refactor-a/)).toBeVisible();
+  // The trail reaching `closed` is the whole chain proving itself: the create
+  // finished, something noticed, and the dry run it started finished too.
+  await expect(progress.getByText("closed")).toBeVisible({ timeout: 30_000 });
+
+  // Nothing was spent: a dry run never reaches a provider.
+  await expect(page.getByText(/--dry-run/).first()).toBeVisible();
+
+  // And it is visible on a phone. The console and the run view live in the
+  // side rail, which is hidden below the large breakpoint — so without the
+  // narrow-screen case the door aimed squarely at first-time visitors shows
+  // them a form and nothing else.
+  await page.setViewportSize({ width: 390, height: 780 });
+  await expect(progress).toBeVisible();
+});
+
+test("an experienced smith is not detained by the tour, but can still open it", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("loopsmith-smith", "experienced"));
+  await page.goto("/");
+  const tour = page.getByRole("dialog", { name: "How loopsmith works" });
+  await expect(tour).toBeHidden();
+
+  await page.getByRole("button", { name: "How this works" }).click();
+  await expect(tour).toBeVisible();
+});
+
+test("a new smith gets the explanation, and it teaches the rule", async ({ page }) => {
+  await page.goto("/");
+  await page
+    .getByRole("dialog", { name: "Choose how to start" })
+    .getByRole("button", { name: /I am a new smith/ })
+    .click();
+
+  const tour = page.getByRole("dialog", { name: "How loopsmith works" });
+  await expect(tour).toBeVisible();
+
+  await tour.getByRole("button", { name: "Next" }).click();
+  // The load-bearing idea. If this panel ever stops saying it, the tour has
+  // lost the only thing it exists to teach.
+  await expect(tour).toContainText("must not certify its own completion");
+
+  await tour.getByRole("button", { name: "Skip" }).click();
+  await expect(tour).toBeHidden();
+
+  // The explanation hands straight over to a working loop to start from.
+  await expect(page.getByRole("dialog", { name: "Load an existing loop" })).toBeVisible();
+});
+
+test("a reload mid-walk-through comes back to the walk-through", async ({ page }) => {
+  await page.goto("/");
+  await page
+    .getByRole("dialog", { name: "Choose how to start" })
+    .getByRole("button", { name: /I am a new smith/ })
+    .click();
+  await page.getByRole("dialog", { name: "How loopsmith works" })
+    .getByRole("button", { name: "Skip" }).click();
+  await page.getByRole("dialog", { name: "Load an existing loop" })
+    .getByRole("button", { name: /Let's hammer/ }).click();
+
+  await expect(page.getByRole("heading", { name: "What is this loop called?" })).toBeVisible();
+
+  // Dropping someone into the form they were being walked through is the one
+  // outcome a reload must not produce.
+  await page.reload();
+  await expect(page.locator("#guided-panel")).toBeVisible();
+});
+
+test("the examples picker starts from nothing unless a loop is chosen", async ({ page }) => {
+  await page.goto("/");
+  await page
+    .getByRole("dialog", { name: "Choose how to start" })
+    .getByRole("button", { name: /I am a new smith/ })
+    .click();
+  await page.getByRole("dialog", { name: "How loopsmith works" })
+    .getByRole("button", { name: "Skip" }).click();
+
+  const picker = page.getByRole("dialog", { name: "Load an existing loop" });
+  // Starting empty is the deliberate opt-out, and it is what is selected.
+  await expect(picker.getByRole("radio", { name: "I will make my own" }))
+    .toHaveAttribute("aria-checked", "true");
+  await expect(picker.getByRole("radio")).not.toHaveCount(1);
+
+  await picker.getByRole("button", { name: /Let's hammer/ }).click();
+  await expect(page.getByRole("heading", { name: "What is this loop called?" })).toBeVisible();
+});
+
+/**
+ * Fields are matched exactly. Each one's info control is deliberately labelled
+ * "What is <field>?" for screen readers, which substring-matches the field's
+ * own name — without `exact`, `getByLabel` resolves to the button.
+ */
+const field = (page: import("@playwright/test").Page, name: string) =>
+  page.getByLabel(name, { exact: true }).first();
+
+test.describe("with the tour dismissed", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("loopsmith-tour", "done");
+      // Past the way-in gate: these cover the expert editor, which is what an
+      // experienced smith is dropped into.
+      localStorage.setItem("loopsmith-smith", "experienced");
+    });
+    await page.goto("/");
+  });
+
+  test("the example library lists loops and loading one fills the form", async ({ page }) => {
+    const rail = page.locator("aside").first();
+    await expect(rail.locator("article")).not.toHaveCount(0);
+
+    const first = rail.locator("article").first();
+    const name = await first.getByRole("heading").innerText();
+    await first.getByRole("button", { name: "Load" }).click();
+
+    // The form is empty on first load, so this needs no confirmation.
+    await expect(page.locator("#open-path")).toHaveCount(0);
+    await expect(field(page, "Loop name")).toHaveValue(name);
+    await expect(page.getByText(/Nothing is on disk yet/)).toBeVisible();
+  });
+
+  test("every section shows its title, not the path it edits", async ({ page }) => {
+    // A card falls back to rendering its own key when the server has no help
+    // keyed by it, which is how a section that missed a rename announces
+    // itself: a heading reading `stop_gates` instead of "Stop gates", and no
+    // explanation under it at all. Cheap to miss by eye, six steps deep.
+    for (const step of ["Place", "Power", "Intent", "Proof", "Work", "Ship"]) {
+      await page.getByRole("tab", { name: step }).click();
+      const headings = await page.locator("main h2").allInnerTexts();
+      expect(headings.length, `${step} has no sections`).toBeGreaterThan(0);
+      for (const h of headings) {
+        expect(h, `${step} shows a raw config key as a heading`).not.toMatch(/^[a-z0-9_.]+$/);
+      }
+    }
+  });
+
+  test("the sections that decide what must not happen are editable, and parse", async ({ page }) => {
+    // These five were typed from 1.0's first commit and had no editor: the
+    // form kept them through a round trip and offered no way to write one.
+    // What this pins is the cross-language half — the browser writes tagged
+    // unions (`{ action: "retry" }`, `{ rule: "repeated_validation" }`) that
+    // only the Rust model can judge, and the review rail is where it says so.
+    const expand = async (name: string) => {
+      const card = page.locator("section.card").filter({ has: page.getByRole("heading", { name, exact: true }) });
+      const toggle = card.getByRole("button", { name: new RegExp(`^Expand ${name}$`) });
+      if (await toggle.count()) await toggle.click();
+      return card;
+    };
+
+    await page.getByRole("tab", { name: "Work" }).click();
+    const recovery = await expand("Recovery");
+    // The defaults come from `/api/defaults`, which is the engine's own model.
+    // A browser keeping its own copy would drift the first time a
+    // `#[serde(default)]` changed, and nothing would say so.
+    await expect(recovery.getByLabel("Invalid output")).toHaveValue(/revise/);
+    await expect(recovery.getByLabel("Safety violation")).toHaveValue(/stop/);
+    await recovery.getByLabel("Transient error").selectOption("fallback");
+
+    await page.getByRole("tab", { name: "Ship" }).click();
+    const evolution = await expand("Self-evolution");
+    await evolution.getByRole("switch", { name: "Let this loop propose changes to itself" }).click();
+    await evolution.getByRole("switch", { name: /^Change the graph/ }).click();
+
+    // The rail re-reads the whole draft through the real loader on a debounce,
+    // so a shape the model refuses shows up here rather than at create time.
+    const rail = page.locator("aside").last();
+    await expect(rail.getByText("This config cannot be read.")).toBeHidden();
+  });
+
+  test("a loaded loop fills the whole form, not just its name", async ({ page }) => {
+    // The form edits the 1.0 config the server actually serves. When it was
+    // still reading the 0.3 keys, every section but the name came up empty
+    // and nothing said so.
+    const rail = page.locator("aside").first();
+    await rail.locator("article").first().getByRole("button", { name: "Load" }).click();
+
+    await page.getByRole("tab", { name: "Intent" }).click();
+    await expect(field(page, "Name").first()).not.toHaveValue("");
+
+    await page.getByRole("tab", { name: "Proof" }).click();
+    await expect(page.getByText(/error/i).first()).toBeVisible();
+    // The stop gates came from the file too, not from the form's defaults.
+    await expect(field(page, "Maximum iterations")).not.toHaveValue("");
+  });
+
+  test("loading over a filled form asks before discarding it", async ({ page }) => {
+    await field(page, "Loop name").fill("my-own-loop");
+
+    const rail = page.locator("aside").first();
+    await rail.locator("article").first().getByRole("button", { name: "Load" }).click();
+
+    const dialog = page.getByRole("dialog", { name: /already filled some of this in/i });
+    await expect(dialog).toBeVisible();
+
+    // "Fill blanks only" must leave what the user typed alone. This is the
+    // whole point of offering two buttons rather than one.
+    await dialog.getByRole("button", { name: "Fill blanks only" }).click();
+    await expect(field(page, "Loop name")).toHaveValue("my-own-loop");
+  });
+
+  test("the review rail refuses a goal that nothing checks", async ({ page }) => {
+    await field(page, "Loop name").fill("unchecked");
+
+    // Goals live on the Intent step now. Walking there is part of what is
+    // being checked: the review rail has to keep watching across steps.
+    await page.getByRole("tab", { name: "Intent" }).click();
+    await page.getByRole("button", { name: "Add a goal" }).click();
+    await field(page, "Name").fill("g1");
+    await field(page, "Description").fill("a goal with a long enough description to be accepted");
+
+    // A goal with no validation is the single most common way a loop fails,
+    // and the config is refused rather than run.
+    const right = page.locator("aside").last();
+    await expect(right.getByText(/error/i).first()).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("each step shows only its own actions", async ({ page }) => {
+    // The whole point of the restructure: nine buttons at once was the wall.
+    await expect(page.getByRole("button", { name: "Run once" })).toHaveCount(0);
+
+    await page.getByRole("tab", { name: "Ship" }).click();
+    await expect(page.getByRole("button", { name: "Run once" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create loop" })).toBeVisible();
+  });
+
+  test("Previous and Next walk the steps and stop at both ends", async ({ page }) => {
+    const prev = page.getByRole("button", { name: "← Previous" });
+    const next = page.getByRole("button", { name: "Next →" });
+
+    // Place is the first step, so there is nowhere back to go.
+    await expect(prev).toBeDisabled();
+    await next.click();
+    await expect(page.getByRole("tab", { name: "Power" })).toHaveAttribute("aria-selected", "true");
+
+    await expect(prev).toBeEnabled();
+    await prev.click();
+    await expect(page.getByRole("tab", { name: "Place" })).toHaveAttribute("aria-selected", "true");
+
+    // And Ship is the last, so Next has nowhere to go either.
+    await page.getByRole("tab", { name: "Ship" }).click();
+    await expect(next).toBeDisabled();
+  });
+
+  test("the command palette reaches a step the current view does not show", async ({ page }) => {
+    await page.keyboard.press("ControlOrMeta+k");
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    await expect(palette).toBeVisible();
+
+    // Subsequence matching, so a rough guess still lands.
+    await palette.getByPlaceholder(/Jump to a section/).fill("stpgt");
+    await palette.getByText("Stop gates").click();
+
+    await expect(palette).toBeHidden();
+    await expect(page.getByRole("tab", { name: "Proof" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("both path fields offer the native folder chooser", async ({ page }) => {
+    // Clicking would open a real OS dialog and hang the run, so this asserts
+    // the control is present and reachable, not that the dialog appears.
+    await expect(page.getByRole("button", { name: "Choose the folder for this loop" })).toBeVisible();
+
+    await page.locator("aside").first().getByRole("button", { name: /Your loops/ }).click();
+    await expect(page.getByRole("button", { name: "Browse for a loop folder" })).toBeVisible();
+  });
+
+  test("the run buttons stay locked until a loop exists on disk", async ({ page }) => {
+    await page.getByRole("tab", { name: "Ship" }).click();
+    await expect(page.getByRole("button", { name: "Run once" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Dry run" })).toBeDisabled();
+    // Checking a draft never needs anything on disk.
+    await expect(page.getByRole("button", { name: "Check config" })).toBeEnabled();
+  });
+
+  test("detection reports what is installed on this machine", async ({ page }) => {
+    await expect(page.locator("header").getByText(/agent CLI/)).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("the theme toggle wins over the operating system in both directions", async ({ page }) => {
+    const root = page.locator("html");
+    await page.getByRole("button", { name: "Dark theme" }).click();
+    await expect(root).toHaveAttribute("data-theme", "dark");
+    await page.getByRole("button", { name: "Light theme" }).click();
+    await expect(root).toHaveAttribute("data-theme", "light");
+    // "auto" removes the stamp so prefers-color-scheme decides again.
+    await page.getByRole("button", { name: /Auto theme/ }).click();
+    await expect(root).not.toHaveAttribute("data-theme", /.*/);
+  });
+
+  test("a run survives the tab closing and streams back on reopen", async ({ page }) => {
+    // The job is a subprocess of the server, not of this page, so it never
+    // stopped — but the page used to forget which one it was watching, which
+    // looked identical to it having stopped.
+    const started = await page.request.post("/api/jobs", {
+      data: { cwd: "/tmp", action: "doctor" },
+    });
+    expect(started.ok()).toBe(true);
+    const { job } = await started.json();
+
+    // A reload is the closest thing to reopening the tab.
+    await page.reload();
+
+    // The console reattaches on its own, and the replay means the output is
+    // there from the beginning rather than from the moment we rejoined.
+    await expect(page.getByText(/Still running|doctor/).first()).toBeVisible({ timeout: 15_000 });
+
+    // And the server agrees the job is its own, independent of any client.
+    const seen = await page.request.get(`/api/jobs/${job}`);
+    expect(seen.ok()).toBe(true);
+    const detail = await seen.json();
+    expect(detail.summary.id).toBe(job);
+    expect(detail.lines.length).toBeGreaterThan(0);
+  });
+
+  test("no console errors on a clean load", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    await page.reload();
+    await page.waitForTimeout(1500);
+    expect(errors).toEqual([]);
+  });
+});
+
+/**
+ * The browser half of `loopsmith --guided`: the same questions, in the same
+ * order, one card at a time. Entered from the palette here so the cases do not
+ * depend on the once-only onboarding path.
+ */
+test.describe("the guided walk-through", () => {
+  const primary = (page: import("@playwright/test").Page) =>
+    page.locator("#guided-panel button.btn-primary");
+
+  /**
+   * Press on until a question arrives.
+   *
+   * The question list lives in Rust now, so counting clicks here would make
+   * this file a second copy of its length — and one that breaks every time a
+   * question is added. Walking until the heading shows says what the case
+   * actually cares about: that the question is reachable, in order, from the
+   * start.
+   */
+  const walkTo = async (page: import("@playwright/test").Page, heading: string | RegExp) => {
+    const target = page.getByRole("heading", { name: heading });
+    for (let i = 0; i < 40; i += 1) {
+      if (await target.isVisible()) return;
+      await primary(page).click();
+    }
+    await expect(target).toBeVisible();
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("loopsmith-tour", "done");
+      localStorage.setItem("loopsmith-smith", "experienced");
+    });
+    await page.goto("/");
+    await page.keyboard.press("ControlOrMeta+k");
+    const palette = page.getByRole("dialog", { name: "Command palette" });
+    await palette.getByPlaceholder(/Jump to a section/).fill("walk me through");
+    await palette.getByText(/Walk me through it/).click();
+    await expect(palette).toBeHidden();
+  });
+
+  test("asks one field at a time, in the terminal wizard's order", async ({ page }) => {
+    await expect(page.getByRole("heading", { name: "What is this loop called?" })).toBeVisible();
+
+    // Exactly one card is ever mounted. A stepper that leaves the steps behind
+    // it in the DOM duplicates every field, every element id, and every button
+    // that was on them — and it is invisible until something clicks the wrong
+    // one.
+    await expect(page.locator("#guided-panel h2")).toHaveCount(1);
+
+    await primary(page).click();
+    await expect(page.getByRole("heading", { name: "What is it for, in a sentence?" })).toBeVisible();
+    await expect(page.locator("#guided-panel h2")).toHaveCount(1);
+
+    // ...and back is a return, not a fresh page.
+    await page.getByRole("button", { name: "Previous step" }).click();
+    await expect(page.getByRole("heading", { name: "What is this loop called?" })).toBeVisible();
+  });
+
+  test("what is typed in the wizard is the same draft the expert editor holds", async ({ page }) => {
+    // Scoped to the card: the left rail's example filter is also a textbox.
+    await page.locator("#guided-panel input").first().fill("guided-loop");
+    await page.getByRole("button", { name: "Expert editor" }).click();
+
+    // Same config, other view. There is deliberately no second draft.
+    await expect(page.getByLabel("Loop name", { exact: true }).first()).toHaveValue("guided-loop");
+  });
+
+  test("a repeating section accumulates entries and says when it is done", async ({ page }) => {
+    await walkTo(page, "What is this loop trying to achieve?");
+
+    await expect(page.getByRole("button", { name: "Add another goal" })).toBeVisible();
+    // The step is not left until it is declared finished, which is what the
+    // terminal's Done menu entry means.
+    await expect(primary(page)).toHaveText(/This part is done/);
+  });
+
+  test("the questions are the server's, not the bundle's", async ({ page }) => {
+    // The whole point of 1.0's wizard: Rust owns the list and the browser
+    // renders it. If the page ever stopped fetching it, this card would have
+    // to have come from somewhere else.
+    const spec = await page.request.get("/api/wizard/spec").then((r) => r.json());
+    const first = spec.sections[0].steps[0];
+    await expect(page.getByRole("heading", { name: first.title })).toBeVisible();
+  });
+
+  test("a check offers the goals named three questions earlier", async ({ page }) => {
+    // The choices come back from the server with the assembled draft, because
+    // working them out means knowing what a goal is — and that is a rule the
+    // browser deliberately does not hold a second copy of.
+    await walkTo(page, "What is this loop trying to achieve?");
+    await page.getByLabel("Goal name", { exact: true }).fill("ship-the-brief");
+
+    await walkTo(page, "How is each goal checked?");
+    await expect(page.getByRole("radio", { name: "ship-the-brief" })).toBeVisible();
+    await expect(page.getByRole("radio", { name: "overall" })).toBeVisible();
+  });
+
+  test("the detector's own fields follow the detector that was chosen", async ({ page }) => {
+    await walkTo(page, "How is each goal checked?");
+
+    // script is the default, and it asks for a command.
+    await expect(page.getByLabel("Command to run", { exact: true })).toBeVisible();
+
+    await page.getByRole("radio", { name: "threshold" }).click();
+    await expect(page.getByLabel("Command to run", { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel("Metric name", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Threshold value", { exact: true })).toBeVisible();
+  });
+
+  test("an advanced section is asked for before it is walked through", async ({ page }) => {
+    // Past the sections every loop needs, to the first opt-in gate.
+    await walkTo(page, "Define an execution graph of work nodes now?");
+
+    // Skipping jumps the whole section, exactly as the terminal's gate does.
+    await page.getByRole("button", { name: "Skip" }).click();
+    await expect(page.getByRole("heading", { name: /static information/ })).toBeVisible();
+
+    await page.getByRole("button", { name: "Previous step" }).click();
+    await page.getByRole("button", { name: "Add it" }).click();
+    await expect(page.getByRole("heading", { name: "What are the units of work?" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add another node" })).toBeVisible();
+  });
+
+  test("Create is refused while the real validator still reports errors", async ({ page }) => {
+    // Walk to the end without answering anything, declining every opt-in
+    // section on the way.
+    const review = page.getByRole("heading", { name: "Everything checked" });
+    for (let i = 0; i < 40 && !(await review.isVisible()); i++) {
+      const skip = page.getByRole("button", { name: "Skip", exact: true });
+      if (await skip.isVisible()) await skip.click();
+      else await primary(page).click();
+    }
+
+    await expect(review).toBeVisible();
+    // The same verdict the rail has been showing all along, and the same code
+    // that decides whether a real run may start.
+    await expect(primary(page)).toHaveText(/Create loop/);
+    await expect(primary(page)).toBeDisabled();
+  });
+});

@@ -88,8 +88,8 @@ pub fn execute(args: NewArgs) -> Result<ExitCode, String> {
     );
 
     println!("\n── check ──────────────────────────────────────────────────");
-    println!("  loopsmith validate {cfg}");
-    println!("  loopsmith plan     {cfg}");
+    println!("  loopsmith loop validate {cfg}");
+    println!("  loopsmith loop plan     {cfg}");
 
     // Both launchers are always written, so name the one this host can actually
     // run. Telling a Windows user to run `run.sh` sends them to a file cmd.exe

@@ -3,8 +3,8 @@
 //! This is what makes a loop live for weeks rather than for one invocation.
 
 use super::{config_dir, config_file_name, open_store, report_outcome};
-use crate::run::RunOptions;
-use crate::schedule;
+use loopsmith_run::RunOptions;
+use loopsmith_run::schedule;
 use loopsmith_memory::Store;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -15,11 +15,13 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
     let root = config_dir(config);
     let store = open_store(config)?;
 
-    if cfg.schedules.is_empty()
+    if cfg.execution.triggers.triggers.is_empty()
         || cfg
-            .schedules
+            .execution
+            .triggers
+            .triggers
             .iter()
-            .all(|t| matches!(t, loopsmith_core::Trigger::Manual))
+            .all(|t| matches!(t.trigger, loopsmith_core::Trigger::Manual {}))
     {
         return Err(
             "this loop has no non-manual trigger, so `watch` would sleep forever. \n                     Add a cron, interval, file_change, or goal_satisfied trigger to `schedules`."
@@ -27,14 +29,14 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
         );
     }
 
-    let interval = schedule::poll_interval(&cfg.schedules);
+    let interval = schedule::poll_interval(&cfg.execution.triggers.triggers);
     println!(
         "watching `{}` — {} trigger(s), polling every {}s. Cron is evaluated in UTC.",
         cfg.name,
-        cfg.schedules.len(),
+        cfg.execution.triggers.triggers.len(),
         interval.as_secs()
     );
-    for t in &cfg.schedules {
+    for t in &cfg.execution.triggers.triggers {
         println!("  {t:?}");
     }
 
@@ -47,7 +49,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
     // meets its bar, so a `file_change` trigger on the root would see it and
     // start another run — which would write it again.
     let mut watcher = schedule::Watcher::ignoring(vec![format!("{}-success", cfg.name)]);
-    watcher.prime(&cfg.schedules, &root);
+    watcher.prime(&cfg.execution.triggers.triggers, &root);
     let mut runs = 0u32;
 
     loop {
@@ -61,13 +63,51 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
             .map(|m| m.into_iter().map(|(k, v)| (k, v.satisfied)).collect())
             .unwrap_or_default();
 
-        let fired = watcher.poll(&cfg.schedules, &root, schedule::now_unix(), &satisfied);
-        if !fired.is_empty() {
-            let why: Vec<String> = fired.iter().map(|f| f.describe()).collect();
-            let run_id = format!("run-{}", loopsmith_memory::now_ms());
-            println!("\n[{}] {} — starting {run_id}", runs + 1, why.join("; "));
+        let now = schedule::now_unix();
+        let policy = &cfg.execution.triggers;
+        let fired = watcher.poll(&policy.triggers, &root, now, &satisfied);
 
-            match crate::run::execute(
+        // Several triggers can fire in one poll; they start one run between
+        // them, at the shallowest depth any of them allows.
+        let mut depth: Option<u32> = None;
+        let mut why: Vec<String> = Vec::new();
+        for f in &fired {
+            match watcher.admit(policy, f, now) {
+                schedule::Decision::Run { depth: d } => {
+                    depth = Some(depth.map_or(d, |x| x.min(d)));
+                    why.push(f.describe());
+                }
+                schedule::Decision::Duplicate { key } => println!(
+                    "  skipped: {} — the same firing (key `{key}`) already ran inside the \
+                     {}s dedup window",
+                    f.describe(),
+                    policy.dedup_window_seconds
+                ),
+                schedule::Decision::DepthCapped { depth: d } => println!(
+                    "  refused: {} — it would be run {} in a chain this loop started itself, \
+                     and `max_depth` is {}",
+                    f.describe(),
+                    d + 1,
+                    policy.max_depth
+                ),
+            }
+        }
+
+        if let Some(depth) = depth {
+            watcher.started(depth, now);
+            let run_id = format!("run-{}", loopsmith_memory::now_ms());
+            println!(
+                "\n[{}] {} — starting {run_id}{}",
+                runs + 1,
+                why.join("; "),
+                if depth > 0 {
+                    format!(" (chain depth {depth} of {})", policy.max_depth)
+                } else {
+                    String::new()
+                }
+            );
+
+            match loopsmith_run::execute(
                 &cfg,
                 &store,
                 &RunOptions {
@@ -80,6 +120,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
                     // per-run log file is where the detail belongs.
                     verbose: false,
                     config_file: config_file_name(config),
+                    answer_escalations: false,
                 },
             ) {
                 Ok(out) => report_outcome(&out),
@@ -88,6 +129,7 @@ pub fn execute(config: &Path, max_runs: Option<u32>, check: bool) -> Result<Exit
                 Err(e) => eprintln!("run failed: {e}"),
             }
 
+            watcher.finished(schedule::now_unix());
             runs += 1;
             if let Some(limit) = max_runs {
                 if runs >= limit {

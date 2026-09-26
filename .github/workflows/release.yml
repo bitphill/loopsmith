@@ -173,7 +173,14 @@ jobs:
       # verification build. It published on the second attempt, unchanged.
       #
       # Already-published is a success, not a failure: a re-run of this workflow
-      # must not fall over on the crates that got through the first time.
+      # must not fall over on the crates that got through the first time. The
+      # string to match is the server's, quoted from
+      # `rust-lang/crates.io:src/controllers/krate/publish.rs` — "crate version
+      # `X` is already uploaded", which cargo passes through verbatim. This guard
+      # used to look for "already exists", which crates.io does not say, so a
+      # re-run took three attempts and two thirty-second sleeps per crate and
+      # then failed the job. Both spellings are matched now; a registry that says
+      # something else entirely would have to be found the same way this was.
       - name: Publish in dependency order
         working-directory: runtime
         env:
@@ -182,7 +189,8 @@ jobs:
           set -u
           for crate in loopsmith-util loopsmith-core loopsmith-memory \
                        loopsmith-graph loopsmith-provider loopsmith-gate \
-                       loopsmith-skills loopsmith-mcp loopsmith; do
+                       loopsmith-skills loopsmith-mcp loopsmith-run \
+                       loopsmith-wizard loopsmith-web loopsmith; do
             for attempt in 1 2 3; do
               echo "::group::$crate (attempt $attempt)"
               out=$(cargo publish -p "$crate" 2>&1) && status=0 || status=$?
@@ -191,7 +199,7 @@ jobs:
               if [ "$status" -eq 0 ]; then
                 echo "published $crate"; break
               fi
-              if echo "$out" | grep -q "already exists"; then
+              if echo "$out" | grep -qE "already (uploaded|exists)"; then
                 echo "$crate is already on the index at this version — continuing"; break
               fi
               if [ "$attempt" -eq 3 ]; then

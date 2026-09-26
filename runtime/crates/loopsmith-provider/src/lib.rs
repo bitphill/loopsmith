@@ -16,7 +16,7 @@
 //!   exist. Values are never read, never substituted into a logged command
 //!   line, and never written to the ledger.
 
-use loopsmith_core::{LoopConfig, ProviderKind, ProviderSpec, Tier};
+use loopsmith_core::{FailureClass, LoopConfig, ProviderKind, ProviderSpec, Tier};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -27,7 +27,14 @@ use std::time::{Duration, Instant};
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
     #[error("no provider available for tier {tier:?}; tried: {tried}")]
-    NoneAvailable { tier: Tier, tried: String },
+    NoneAvailable {
+        tier: Tier,
+        tried: String,
+        /// The class the cascade's failures add up to: transient if any
+        /// candidate failed in a way that might pass on a second try, and
+        /// "tool unavailable" otherwise.
+        class: FailureClass,
+    },
     #[error("provider `{id}` failed to start: {source}")]
     Spawn {
         id: String,
@@ -44,6 +51,54 @@ pub enum ProviderError {
     },
 }
 
+impl ProviderError {
+    /// Which recovery class this failure belongs to.
+    ///
+    /// A timeout is transient by definition. A non-zero exit is transient only
+    /// when its stderr says so — a rate limit, an overloaded upstream, a
+    /// dropped connection. Every other non-zero exit is the tool, as
+    /// configured, being unable to do the job: a wrong flag or a missing login
+    /// fails identically on the second try, and retrying it with backoff only
+    /// spends the wall-clock budget learning that.
+    pub fn failure_class(&self) -> FailureClass {
+        match self {
+            ProviderError::NoneAvailable { class, .. } => *class,
+            ProviderError::Spawn { .. } => FailureClass::ToolUnavailable,
+            ProviderError::Timeout { .. } => FailureClass::TransientError,
+            ProviderError::Failed { stderr, .. } if looks_transient(stderr) => {
+                FailureClass::TransientError
+            }
+            ProviderError::Failed { .. } => FailureClass::ToolUnavailable,
+        }
+    }
+}
+
+/// Whether a provider's stderr describes a condition that may clear by itself.
+fn looks_transient(stderr: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "rate limit",
+        "rate-limit",
+        "ratelimit",
+        "too many requests",
+        "429",
+        "502",
+        "503",
+        "504",
+        "overloaded",
+        "temporarily",
+        "try again",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "econnreset",
+        "etimedout",
+        "network",
+    ];
+    let s = stderr.to_ascii_lowercase();
+    MARKERS.iter().any(|m| s.contains(m))
+}
+
 #[derive(Debug, Clone)]
 pub struct InvokeRequest {
     /// Node the call is for; used only for logging and digests.
@@ -52,6 +107,51 @@ pub struct InvokeRequest {
     pub prompt: String,
     pub tier: Tier,
     pub workdir: PathBuf,
+    /// Run the provider inside a container rather than on the host.
+    pub container: Option<Container>,
+}
+
+/// A container to run a provider in.
+///
+/// The provider's own command runs inside `image`, with the node's working
+/// directory mounted at `/work`. The provider CLI must therefore exist in the
+/// image — the host's copy is not visible in there, which is the point.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Container {
+    pub image: String,
+    /// Give the container a network. Off means `--network none`.
+    pub network: bool,
+    /// The container runtime: `docker`, or anything CLI-compatible with it.
+    pub runtime: PathBuf,
+}
+
+/// The full command line for a provider call in a container.
+///
+/// Environment variables the provider requires are passed through **by name**
+/// (`-e KEY`), so the runtime reads each value from this process's
+/// environment. A value never appears on a command line, where any user on the
+/// machine could read it from the process table.
+pub fn container_argv(spec: &ProviderSpec, req: &InvokeRequest, c: &Container, args: &[String]) -> Vec<String> {
+    let mut argv: Vec<String> = vec!["run".into(), "--rm".into()];
+    if spec.prompt_on_stdin {
+        argv.push("-i".into());
+    }
+    if !c.network {
+        argv.extend(["--network".into(), "none".into()]);
+    }
+    argv.extend([
+        "-v".into(),
+        format!("{}:/work", req.workdir.display()),
+        "-w".into(),
+        "/work".into(),
+    ]);
+    for key in &spec.requires_env {
+        argv.extend(["-e".into(), key.clone()]);
+    }
+    argv.push(c.image.clone());
+    argv.push(spec.command.clone());
+    argv.extend(args.iter().cloned());
+    argv
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,8 +283,19 @@ pub fn invoke(spec: &ProviderSpec, req: &InvokeRequest) -> Result<InvokeResponse
 
     let args: Vec<String> = spec.args.iter().map(|a| render(a, &vars)).collect();
 
-    let mut cmd = Command::new(&spec.command);
-    cmd.args(&args)
+    let mut cmd = match &req.container {
+        None => {
+            let mut c = Command::new(&spec.command);
+            c.args(&args);
+            c
+        }
+        Some(container) => {
+            let mut c = Command::new(&container.runtime);
+            c.args(container_argv(spec, req, container, &args));
+            c
+        }
+    };
+    cmd
         .current_dir(&req.workdir)
         .stdin(if spec.prompt_on_stdin {
             Stdio::piped()
@@ -294,15 +405,26 @@ pub fn dispatch(
     };
 
     let mut skipped = Vec::new();
+    let mut class = FailureClass::ToolUnavailable;
     for spec in &candidates {
-        let av = availability(spec);
+        let mut av = availability(spec);
+        // In a container the provider's binary is the image's business; what
+        // must exist on this machine is the runtime.
+        if let Some(c) = &req.container {
+            av.on_path = which(&c.runtime.to_string_lossy()).is_some();
+        }
         if !av.ok() {
             skipped.push(format!("{} ({})", spec.id, av.why_not()));
             continue;
         }
         match invoke(spec, req) {
             Ok(resp) => return Ok((resp, skipped)),
-            Err(e) => skipped.push(format!("{}: {e}", spec.id)),
+            Err(e) => {
+                if e.failure_class() == FailureClass::TransientError {
+                    class = FailureClass::TransientError;
+                }
+                skipped.push(format!("{}: {e}", spec.id));
+            }
         }
     }
 
@@ -313,6 +435,7 @@ pub fn dispatch(
         } else {
             skipped.join("; ")
         },
+        class,
     })
 }
 
@@ -438,6 +561,7 @@ mod tests {
             prompt: "hello".into(),
             tier: Tier::Standard,
             workdir: std::env::temp_dir(),
+            container: None,
         }
     }
 
@@ -514,6 +638,66 @@ mod tests {
     }
 
     #[test]
+    fn a_container_call_mounts_the_workdir_and_passes_secrets_by_name_only() {
+        let mut s = spec("claude", "claude", &["-p", "{{prompt}}"]);
+        s.requires_env = vec!["ANTHROPIC_API_KEY".into()];
+        let r = req();
+        let c = Container {
+            image: "ghcr.io/example/agent:1".into(),
+            network: false,
+            runtime: "docker".into(),
+        };
+        let argv = container_argv(&s, &r, &c, &["-p".into(), "hi".into()]);
+        let joined = argv.join(" ");
+        assert!(joined.starts_with("run --rm --network none -v "), "{joined}");
+        assert!(joined.contains(":/work -w /work"), "{joined}");
+        assert!(joined.contains("-e ANTHROPIC_API_KEY ghcr.io/example/agent:1 claude -p hi"), "{joined}");
+        assert!(!joined.contains('='), "a secret's value must never reach the command line");
+    }
+
+    #[test]
+    fn a_container_with_network_does_not_disable_it() {
+        let s = spec("p", "echo", &[]);
+        let c = Container {
+            image: "img".into(),
+            network: true,
+            runtime: "docker".into(),
+        };
+        assert!(!container_argv(&s, &req(), &c, &[]).contains(&"none".to_string()));
+    }
+
+    #[test]
+    fn a_rate_limit_is_transient_and_a_bad_flag_is_not() {
+        let failed = |stderr: &str| ProviderError::Failed {
+            id: "p".into(),
+            code: 1,
+            stderr: stderr.into(),
+        };
+        assert_eq!(
+            failed("Error: 429 Too Many Requests").failure_class(),
+            FailureClass::TransientError
+        );
+        assert_eq!(
+            failed("upstream is overloaded, please try again").failure_class(),
+            FailureClass::TransientError
+        );
+        assert_eq!(
+            failed("error: unexpected argument '--quiet'").failure_class(),
+            FailureClass::ToolUnavailable
+        );
+    }
+
+    #[test]
+    fn a_timeout_is_transient_and_a_missing_binary_is_not() {
+        let mut s = spec("sleeper", "sleep", &["30"]);
+        s.timeout_seconds = Some(1);
+        assert_eq!(invoke(&s, &req()).unwrap_err().failure_class(), FailureClass::TransientError);
+
+        let missing = spec("ghost", "loopsmith-no-such-binary-xyzzy", &[]);
+        assert_eq!(invoke(&missing, &req()).unwrap_err().failure_class(), FailureClass::ToolUnavailable);
+    }
+
+    #[test]
     fn a_hanging_provider_is_killed_at_the_timeout() {
         let mut s = spec("sleeper", "sleep", &["30"]);
         s.timeout_seconds = Some(1);
@@ -540,8 +724,8 @@ validations:
             "test",
         )
         .unwrap();
-        cfg.providers.providers = providers;
-        cfg.providers.cascade = cascade
+        cfg.execution.providers.providers = providers;
+        cfg.execution.providers.cascade = cascade
             .iter()
             .map(|(k, v)| (k.to_string(), v.iter().map(|s| s.to_string()).collect()))
             .collect();

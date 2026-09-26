@@ -19,7 +19,7 @@ import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "assets/loopsmith-logo-256.png"
-DST = ROOT / "runtime/crates/loopsmith-cli/templates/loopsmith-mark.png"
+DST = ROOT / "runtime/crates/loopsmith-web/templates/loopsmith-mark.png"
 
 # How far a pixel may drift from the sampled corner colour and still count as
 # background. Loose enough to swallow the mottling in a flat field, tight enough

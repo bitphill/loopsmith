@@ -25,7 +25,7 @@ and use [the browser version](#the-easy-way-do-it-all-in-a-browser) instead.
 
 ## What people use it for
 
-Thirteen ready-made loops you can copy. Click one and read it — it's the fastest
+Fifteen ready-made loops you can copy. Click one and read it — it's the fastest
 way to see what a loop actually looks like.
 
 | Loop | What it's for |
@@ -34,6 +34,8 @@ way to see what a loop actually looks like.
 | [trend-radar](config/examples/trend-radar-loop.md) | Track a topic across X, Instagram, TikTok |
 | [idea-radar](config/examples/idea-radar-loop.md) | Find product ideas in real customer complaints |
 | [account-watch](config/examples/account-watch-loop.md) | Watch accounts for topics about to spike |
+| [container-refactor](config/examples/container-refactor-loop.md) | Tidy up three parts of a codebase at once, safely |
+| [self-tuning](config/examples/self-tuning-loop.md) | A weekly report that suggests how to improve itself |
 | [blogger](config/examples/blogger-loop.md) | Write posts on trending topics, in your style |
 | [traffic](config/examples/traffic-loop.md) | Post where your audience already gathers |
 | [marketing-automation](config/examples/marketing-automation-loop.md) | Turn product docs into scheduled posts |
@@ -146,7 +148,7 @@ it's for. Next to the ones where the honest advice isn't obvious, there's an ⓘ
 that tells you *why the box exists* and what goes wrong if you get it wrong. You
 are not expected to know any of this in advance.
 
-**Thirteen finished loops, one click each.** Down the left is the same list from
+**Fifteen finished loops, one click each.** Down the left is the same list from
 [the table above](#what-people-use-it-for). Click **Load** on the closest one and
 every box fills in with a real working answer. Change the bits that are about
 your job. This is far easier than starting from nothing, and it's the fastest way
@@ -263,7 +265,7 @@ curl -O https://raw.githubusercontent.com/bitphill/loopsmith/main/config/example
 **2. Make it yours, in a brand-new folder:**
 
 ```bash
-loopsmith new --path ~/loops/my-radar --config-file trend-radar-loop.md
+loopsmith loop new --path ~/loops/my-radar --config-file trend-radar-loop.md
 ```
 
 You now have `~/loops/my-radar/loop.md`. **That one file is everything you
@@ -274,7 +276,7 @@ work:
 
 ```bash
 cd ~/loops/my-radar
-loopsmith validate loop.md
+loopsmith loop validate loop.md
 ```
 
 **4. Run it:**
@@ -291,13 +293,13 @@ loopsmith validate loop.md
 <summary>Starting from nothing instead of from an example</summary>
 
 ```bash
-loopsmith new --path ~/loops/my-first-loop --purpose "weekly competitor roundup"
+loopsmith loop new --path ~/loops/my-first-loop --purpose "weekly competitor roundup"
 cd ~/loops/my-first-loop
-loopsmith convert loop.yaml -o loop.md
+loopsmith loop convert loop.yaml -o loop.md
 ```
 
 The `convert` line turns the settings into the Markdown you'll edit. In this
-case ignore `run.sh` and start the loop with `loopsmith run loop.md`.
+case ignore `run.sh` and start the loop with `loopsmith run start loop.md`.
 
 </details>
 
@@ -305,21 +307,21 @@ case ignore `run.sh` and start the loop with `loopsmith run loop.md`.
 
 ## The six things you edit
 
-Open `loop.md`. It has lettered sections. You only touch these six — leave the
+Open `loop.md`. Each part has a heading. You only touch these six — leave the
 rest exactly as it is.
 
 ```mermaid
 flowchart LR
-    B["B · Did it by hand"] --> C["C · What I want"]
-    C --> D["D · How it's checked"]
-    D --> F["F · Money limit"]
-    F --> G["G · How often"]
-    G --> H["H · Ask me first"]
+    A["Prerequisites<br/>did it by hand"] --> B["Goals<br/>what I want"]
+    B --> C["Checks<br/>how it's judged"]
+    C --> D["Stop gates<br/>money limit"]
+    D --> E["Triggers<br/>how often"]
+    E --> F["Limits<br/>ask me first"]
 ```
 
-### B. Pre-execution — prove you've done it once
+### Prerequisites — prove you've done it once
 
-Do the task manually, once. Then change every `false` to `true`:
+Do the task by hand, once. Then change every `false` to `true`:
 
 ```markdown
 ### Run this task manually end to end at least once
@@ -327,7 +329,7 @@ Do the task manually, once. Then change every `false` to `true`:
 - evidence: Notes in my-first-run.md
 ```
 
-### C. Goals — what you actually want
+### Goals — what you actually want
 
 ```markdown
 ### primary
@@ -336,9 +338,9 @@ Do the task manually, once. Then change every `false` to `true`:
 
 Write it the way you'd brief a new hire. Specific beats short.
 
-### D. Validations — how anyone would tell it's good
+### Checks — how anyone would tell it's good
 
-This is the part that makes loopsmith worth using. Two kinds you'll ever need:
+This is the part that makes loopsmith worth using. Two kinds you'll ever need.
 
 **Does the file exist?**
 
@@ -377,52 +379,59 @@ you name — and it is never the same AI that wrote it.
 > `- target: overall`. That's the whole difference between a loop that runs and
 > one that fails on step one.
 
-### F. Stop gates — your safety net
+### Stop gates — your safety net
 
 ```markdown
-- max_cost_usd: 5.0
-- max_iterations: 8
-- max_wall_clock_seconds: 3600
+## Gates
+
+- stop:
+  - max_cost_usd: 5.0
+  - max_iterations: 8
+  - max_wall_clock_seconds: 3600
 ```
 
 Money, attempts, time. Whichever runs out first stops the loop. **Always set
 `max_cost_usd`.**
 
-### G. Schedules — how often it should run
+### Triggers — how often it should run
 
 ```markdown
 ### interval
-- seconds: 86400
+- on:
+  - seconds: 86400
 ```
 
 `3600` = hourly · `86400` = daily · `604800` = weekly.
 
-### H. Constraints — what it must ask you about first
+### Limits — what it must ask you about first
 
 ```markdown
-- human_checkpoint: ["publishing anything","sending a message","deleting data"]
+## Limits
+
+- global:
+  - human_checkpoint: ["publishing anything","sending a message","deleting data"]
 ```
 
 Anything on this list stops and waits for you. Keep publishing and sending on it
 until you trust the output.
 
-Save the file, then run `loopsmith validate loop.md` again. `ok: loop.md is valid`
+Save the file, then run `loopsmith loop validate loop.md` again. `ok: loop.md is valid`
 means you're ready.
 
 ---
 
 ## Put it on a schedule
 
-Set the interval in section **G**, then pick one:
+Set the interval under **Triggers**, then pick one:
 
 ```bash
-loopsmith watch loop.md
+loopsmith run watch loop.md
 ```
 
 Runs on your schedule while that Terminal window stays open. Good for trying it out.
 
 ```bash
-loopsmith schedule loop.md --install
+loopsmith run schedule loop.md --install
 ```
 
 Hands the schedule to your computer. It keeps running after you close Terminal
@@ -431,8 +440,8 @@ and after you restart. This is the hands-off one.
 ```mermaid
 flowchart LR
     A["G. Schedules<br/>seconds: 86400"] --> B{"Which one?"}
-    B -->|just testing| C["loopsmith watch loop.md<br/>needs Terminal open"]
-    B -->|leave it running| D["loopsmith schedule loop.md --install<br/>survives restarts"]
+    B -->|just testing| C["loopsmith run watch loop.md<br/>needs Terminal open"]
+    B -->|leave it running| D["loopsmith run schedule loop.md --install<br/>survives restarts"]
     C --> E["Results land in out/"]
     D --> E
 ```
@@ -443,11 +452,11 @@ flowchart LR
 
 | You want to know | Type this |
 |---|---|
-| Is it done? | `loopsmith status loop.md <run-id>` |
-| What happened? | `loopsmith ledger loop.md <run-id>` |
+| Is it done? | `loopsmith run status loop.md <run-id>` |
+| What happened? | `loopsmith run ledger loop.md <run-id>` |
 | Why did it stop? | open the newest file in `logs/` |
-| What does it want changed? | `loopsmith proposals loop.md <run-id>` |
-| It died halfway | `loopsmith resume loop.md <run-id>` |
+| What does it want changed? | `loopsmith run proposals loop.md <run-id>` |
+| It died halfway | `loopsmith run resume loop.md <run-id>` |
 
 The run id is printed at the end of every run.
 
@@ -480,11 +489,11 @@ Optional. None of it is needed to run a loop.
 - [README.md](README.md) — the short version for developers
 - [HOW-TO-USE.md](HOW-TO-USE.md) — every section explained, one by one
 - [LOOP-TEMPLATE.md](LOOP-TEMPLATE.md) — a blank loop with notes in every slot
-- [README-DETAIL.md](README-DETAIL.md) — how it's built, and why
+- [Architecture](https://github.com/bitphill/loopsmith/wiki/Architecture) — how it's built, and why
 - [Code wiki](https://bitphill.github.io/loopsmith/wiki/#overview) — an auto-generated tour of the code, for the
   developer you hand this to
 - [CHANGELOG.md](CHANGELOG.md) — what changed in each release
-- [loops-engineering-cheat-sheet.md](loops-engineering-cheat-sheet.md) — the thinking behind loops
+- [HOW-TO-USE.md §14](HOW-TO-USE.md#14-where-the-design-came-from) — the thinking behind loops
 - [config/loop.schema.json](config/loop.schema.json) — every setting that exists
 - [skills/loopsmith/SKILL.md](skills/loopsmith/SKILL.md) — the Claude skill for running loops
 - [skills/loopsmith-reference/SKILL.md](skills/loopsmith-reference/SKILL.md) — the Claude skill for designing them

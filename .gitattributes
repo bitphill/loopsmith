@@ -1,0 +1,6 @@
+# The scaffold templates are compiled into the binary with `include_str!`, so
+# their bytes on disk are the bytes a new loop gets. A Windows checkout with
+# `core.autocrlf=true` would otherwise hand every `.sh` launcher CRLF endings,
+# which POSIX sh reads as part of each command. The `.cmd` templates are LF
+# here too; `scaffold::crlf` converts them on the way out.
+runtime/crates/loopsmith-cli/templates/** text eol=lf

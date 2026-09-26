@@ -1,0 +1,8 @@
+# loopsmith run state — regenerable, machine-local, and often large
+state/
+logs/
+out/
+*.log
+
+# Quarantined sub-agents wait for human promotion; they are not source
+generated-skills/

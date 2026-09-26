@@ -17,6 +17,7 @@ description = "Shared embedded memory for loopsmith: episodes, goal state, ledge
 
 [dependencies]
 loopsmith-util = { workspace = true }
+loopsmith-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -1,9 +1,10 @@
-//! Section D — how each goal is checked.
+//! `safety.checks` — how each goal is verified.
 
 use super::yes;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     Subjective,
@@ -13,8 +14,8 @@ pub enum Mode {
 
 /// How a validation is actually decided. Ordered by the independence ladder
 /// from the cheat sheet: `Judge` is rung 3, everything else is rung 4.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Detector {
     /// Run a command; exit code 0 passes. The strongest detector available.
     Script {
@@ -49,7 +50,7 @@ pub enum Detector {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CompareOp {
     Gt,
@@ -71,7 +72,7 @@ impl CompareOp {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Validation {
     /// Goal name, or `overall`.

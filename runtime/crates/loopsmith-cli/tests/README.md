@@ -83,7 +83,7 @@ This was a plan. It is now a record. Every row below has run.
 | `new --config-stdin --markdown` | `a_markdown_config_arrives_whole_on_stdin_too` | — |
 | `convert --to-yaml` (md → yaml) | `a_config_survives_the_trip_out_to_markdown_and_back` | `research-loop` |
 | `convert --to-yaml` on YAML | `to_yaml_on_yaml_re_emits_rather_than_refusing` | — |
-| `skills install` (section J) | `skills_install_reports_on_every_declared_agent` | — |
+| `skills install` | `skills_install_reports_on_every_declared_agent` | — |
 | `watch --check` | `watch_check_reports_the_triggers_and_exits` | `account-watch-loop` |
 | `watch` as a resident process | `watch_runs_the_loop_when_a_trigger_fires_and_stops_at_max_runs` | — |
 | `schedule --install` | `schedule_install_writes_a_launch_agent_where_it_is_told` | `account-watch-loop` |
@@ -92,8 +92,8 @@ This was a plan. It is now a record. Every row below has run.
 | `plan`, `providers`, `permissions`, `gate` | `the_reporting_commands_all_work_against_a_shipped_example` | `refactor-loop` |
 | `status`, `ledger`, `proposals` on an unknown run | `the_run_reports_handle_an_unknown_run_id` | — |
 | `prune` | `prune_is_safe_with_and_without_worktrees` | — |
-| Section J github clone | `a_declared_github_sub_agent_is_cloned_into_quarantine` | opt-in |
-| Section J `init_command` | `a_post_clone_init_command_runs_inside_the_installed_directory` | opt-in |
+| A declared github sub-agent | `a_declared_github_sub_agent_is_cloned_into_quarantine` | opt-in |
+| A declared `init_command` | `a_post_clone_init_command_runs_inside_the_installed_directory` | opt-in |
 | Unsafe clone URL refused | `an_unsafe_repo_url_is_refused_before_git_is_reached` | — |
 | A real provider, once | `the_simplest_example_runs_against_a_real_provider` | opt-in |
 | A real model on the perturbation menu | `the_randomness_agent_keeps_to_the_menu_with_a_real_model` | opt-in |

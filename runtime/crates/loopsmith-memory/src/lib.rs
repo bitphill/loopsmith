@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+pub mod namespaces;
 pub mod sled_store;
+pub use namespaces::{Note, Remembered};
 pub use sled_store::SledStore;
 
 #[derive(Debug, thiserror::Error)]
@@ -138,6 +140,18 @@ pub enum LedgerKind {
     ProposalWritten,
     StopGateTriggered,
     RunFinished,
+    /// The run moved from one lifecycle state to another.
+    StateChanged,
+    /// A failure was classified and answered: a retry, a revision, a halt.
+    Recovered,
+    /// A question was put to a human.
+    Escalated,
+    /// A metric crossed a configured alert threshold.
+    AlertRaised,
+    /// An entry, approval, or rollback gate rule was evaluated.
+    RuleEvaluated,
+    /// Cross-run memory changed: a record was promoted, refused, or expired.
+    Remembered,
 }
 
 /// One observation of "did this skill help?".
@@ -288,6 +302,104 @@ pub struct Checkpoint {
     /// everything is new.
     #[serde(default)]
     pub verdicts_json: Option<String>,
+    /// Where the run is in its lifecycle, by the name the engine's state
+    /// machine gives it (`running`, `paused`, `closed`, …).
+    ///
+    /// Text for the same reason as `verdicts_json`: the machine lives in the
+    /// engine crate, which depends on this one. `None` means the checkpoint
+    /// was written before runs had states, and every such run was closed.
+    #[serde(default)]
+    pub state: Option<String>,
+    /// The state the run closed from — its outcome — once it has closed.
+    #[serde(default)]
+    pub outcome: Option<String>,
+    /// Questions this run has put to a human and nobody has answered yet: a
+    /// node that ran out of revisions, a gate that said a person must decide.
+    /// Carried across a resume so an escalation is not forgotten by pausing.
+    #[serde(default)]
+    pub escalations: Vec<Escalation>,
+    /// Dispatches recovery sent round again, across every resume of the run.
+    #[serde(default)]
+    pub retries: u32,
+    /// Final dispatch failures, across every resume of the run.
+    #[serde(default)]
+    pub failed_dispatches: u32,
+    /// Ids of the alerts that have fired. An alert fires once per run, and a
+    /// resume is the same run.
+    #[serde(default)]
+    pub alerts_raised: Vec<String>,
+}
+
+/// Which kind of thing a cross-run record is. Mirrors
+/// `execution.memory.namespaces`, whose policy decides how each is kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Namespace {
+    /// What happened. Episodes are this namespace's records.
+    Episodic,
+    /// Stable facts about the domain the loop works in.
+    Semantic,
+    /// Ways of doing things that have worked before.
+    Procedural,
+    /// Known failure modes and what got past them.
+    Failure,
+}
+
+impl Namespace {
+    pub const ALL: [Namespace; 4] = [
+        Namespace::Episodic,
+        Namespace::Semantic,
+        Namespace::Procedural,
+        Namespace::Failure,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Namespace::Episodic => "episodic",
+            Namespace::Semantic => "semantic",
+            Namespace::Procedural => "procedural",
+            Namespace::Failure => "failure",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Namespace> {
+        Namespace::ALL.into_iter().find(|n| n.as_str() == s)
+    }
+}
+
+/// Something the loop remembers across runs.
+///
+/// A record is keyed by namespace and key, and writing the same key again is
+/// corroboration, not duplication: the run that wrote it is added to `runs`,
+/// and it is that count — distinct runs, not writes — that promotion reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Record {
+    pub namespace: Namespace,
+    pub key: String,
+    pub content: String,
+    /// Where it came from, in words a human can check: a run, an iteration,
+    /// a node, a source document.
+    #[serde(default)]
+    pub provenance: Option<String>,
+    /// 0 to 1. Retrieval skips a record below its namespace's floor.
+    pub confidence: f64,
+    /// Distinct runs that wrote this record, oldest first.
+    pub runs: Vec<String>,
+    /// Whether it has cleared its namespace's bar and may be reused.
+    pub promoted: bool,
+    pub created_ms: u64,
+    pub updated_ms: u64,
+}
+
+/// A question the run put to a human.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Escalation {
+    /// The node it concerns, when it concerns one. Kept structurally so that
+    /// answering the escalation can give that node its revisions back.
+    #[serde(default)]
+    pub node_id: Option<String>,
+    pub question: String,
+    pub iteration: u32,
 }
 
 impl Checkpoint {
@@ -305,6 +417,12 @@ impl Checkpoint {
             stale_iterations: 0,
             last_signature: String::new(),
             verdicts_json: None,
+            state: None,
+            outcome: None,
+            escalations: Vec::new(),
+            retries: 0,
+            failed_dispatches: 0,
+            alerts_raised: Vec::new(),
         }
     }
 }
@@ -380,6 +498,15 @@ pub trait Store: Send + Sync {
 
     fn runs(&self) -> Result<Vec<String>>;
     fn flush(&self) -> Result<()>;
+
+    /// Write a cross-run record, replacing any with the same namespace and key.
+    fn put_record(&self, r: &Record) -> Result<()>;
+    fn record(&self, ns: Namespace, key: &str) -> Result<Option<Record>>;
+    fn records(&self, ns: Namespace) -> Result<Vec<Record>>;
+    fn remove_record(&self, ns: Namespace, key: &str) -> Result<()>;
+    /// Drop every episode, from any run, created before `before_ms`. Returns
+    /// how many went.
+    fn prune_episodes(&self, before_ms: u64) -> Result<usize>;
 }
 
 /// How a skill has performed across every trial recorded for it.

@@ -200,12 +200,12 @@ fn the_simplest_example_runs_against_a_real_provider() {
         .expect("the example is readable");
     let mut cfg =
         loopsmith_core::parse_str(&text, "opt-in").expect("the example parses");
-    for step in &mut cfg.pre_execution {
+    for step in &mut cfg.intent.prerequisites {
         step.done = true;
     }
-    cfg.stop_gates.max_iterations = 1;
-    cfg.stop_gates.no_progress_iterations = 0;
-    cfg.stop_gates.max_cost_usd = Some(1.0);
+    cfg.safety.gates.stop.max_iterations = 1;
+    cfg.safety.gates.stop.no_progress_iterations = 0;
+    cfg.safety.gates.stop.max_cost_usd = Some(1.0);
 
     let dir = loopsmith_util::testing::temp_dir("real-provider");
     std::fs::write(
@@ -260,13 +260,13 @@ fn the_randomness_agent_keeps_to_the_menu_with_a_real_model() {
     let text = std::fs::read_to_string(harness::examples_dir().join("research-loop.yaml"))
         .expect("the example is readable");
     let mut cfg = loopsmith_core::parse_str(&text, "opt-in").expect("the example parses");
-    for step in &mut cfg.pre_execution {
+    for step in &mut cfg.intent.prerequisites {
         step.done = true;
     }
-    cfg.stop_gates.max_iterations = 3;
-    cfg.stop_gates.no_progress_iterations = 2;
-    cfg.stop_gates.no_progress_iterations_randomness = Some(1);
-    cfg.stop_gates.max_cost_usd = Some(1.0);
+    cfg.safety.gates.stop.max_iterations = 3;
+    cfg.safety.gates.stop.no_progress_iterations = 2;
+    cfg.safety.gates.stop.no_progress_iterations_randomness = Some(1);
+    cfg.safety.gates.stop.max_cost_usd = Some(1.0);
 
     let dir = loopsmith_util::testing::temp_dir("real-perturb");
     std::fs::write(
@@ -321,4 +321,100 @@ fn the_harness_still_builds_a_runnable_fixture() {
         String::from_utf8_lossy(&out.stdout)
     );
     f.cleanup();
+}
+
+// ---------------------------------------------------------------------------
+// Container isolation, against a real daemon
+// ---------------------------------------------------------------------------
+
+/// The container path has never run a container.
+///
+/// `loopsmith_run::container` has unit tests for the decision — which image,
+/// network or not, degrade or not — and `loopsmith_provider::container_argv`
+/// has unit tests for the argv it builds. Neither has ever handed that argv to
+/// a daemon, so three things nobody could see were untested: that the mount
+/// spelling is one a real runtime accepts, that `-w /work` puts the command
+/// where the node's files are, and that `--network none` is applied rather
+/// than merely appended.
+///
+/// The image is `alpine:3` and the command is `cat`, because this is a test
+/// about plumbing rather than about a model. A provider's CLI has to exist
+/// inside the image — the host's copy is not visible in there, which is the
+/// whole point of the isolation.
+#[test]
+fn a_container_node_really_runs_in_a_container() {
+    gated!("LOOPSMITH_STRESS_DOCKER");
+
+    use loopsmith_core::config::providers::{ProviderKind, ProviderSpec};
+    use loopsmith_provider::{container_argv, Container, InvokeRequest};
+    use loopsmith_run::container as rt;
+
+    let runtime = match rt::probe() {
+        Ok(r) => r,
+        Err(why) => {
+            eprintln!("skipping: no container runtime ({why})");
+            return;
+        }
+    };
+    eprintln!("runtime: {} {}", runtime.bin.display(), runtime.version);
+
+    // The node's directory, with a file only something that mounted it can read.
+    let dir = std::env::temp_dir().join(format!("loopsmith-container-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a working directory");
+    std::fs::write(dir.join("marker"), "mounted\n").expect("a marker inside it");
+
+    let spec = ProviderSpec {
+        id: "in-a-box".into(),
+        kind: ProviderKind::Byok,
+        tiers: vec![],
+        command: "cat".into(),
+        args: vec![],
+        model: None,
+        requires_env: vec![],
+        timeout_seconds: None,
+        prompt_on_stdin: false,
+        usage_regex: None,
+        cost_per_1k_tokens: None,
+    };
+    let req = InvokeRequest {
+        node_id: "n".into(),
+        system: String::new(),
+        prompt: String::new(),
+        tier: loopsmith_core::Tier::Cheap,
+        workdir: dir.clone(),
+        container: None,
+    };
+    let container = Container {
+        image: "alpine:3".into(),
+        network: false,
+        runtime: runtime.bin.clone(),
+    };
+
+    let argv = container_argv(&spec, &req, &container, &["marker".to_string()]);
+    assert!(
+        argv.windows(2).any(|w| w == ["--network", "none"]),
+        "a container that asked for no network must be given none: {argv:?}"
+    );
+
+    let out = std::process::Command::new(&runtime.bin)
+        .args(&argv)
+        .output()
+        .unwrap_or_else(|e| panic!("could not run {}: {e}", runtime.bin.display()));
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "the container exited {:?}\nargv: {argv:?}\nstderr: {stderr}",
+        out.status.code()
+    );
+    // `cat marker` with `-w /work` only prints this if the mount landed and
+    // the working directory inside the container is the mounted one.
+    assert_eq!(
+        stdout.trim(),
+        "mounted",
+        "the node's directory was not mounted at /work\nargv: {argv:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
 }
