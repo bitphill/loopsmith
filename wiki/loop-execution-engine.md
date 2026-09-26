@@ -1,25 +1,14 @@
 # Loop Execution Engine
 
-# Loop Execution Engine
+# Loop Execution Engine — `loopsmith-run`
 
-`runtime/crates/loopsmith-cli/src/run/`
+Everything that happens between "start this loop" and "here is why it stopped". The crate owns the run lifecycle, the iteration loop, node dispatch (including isolation and recovery), the stop-gate ladder, iteration compression, and the success export.
 
-The iteration loop is the part of loopsmith that actually spends money. It takes a validated `LoopConfig`, schedules its node graph into waves, dispatches those waves to providers, collects evidence from disk, asks the gate what is satisfied, and then asks a mechanical ladder of stop gates whether it may go round again.
+It does **not** own the verdict. The engine collects evidence and hands it to `loopsmith-gate`; nothing in this crate can mark a goal satisfied. That split is the load-bearing design decision, and most of the structure below exists to keep it true.
 
-`mod.rs` is the state machine and nothing else. Everything it needs is delegated to a neighbour module, and the split is by *authority* rather than by convenience — the thing that decides whether work is finished is never the thing that did the work.
+Crate root: `runtime/crates/loopsmith-run/src/lib.rs`.
 
-| Module | Owns |
-|---|---|
-| `mod.rs` | `execute()`: the iteration state machine, budget accounting, checkpointing |
-| `dispatch.rs` | `run_node()`: isolation, skill resolution, the provider call — store-free by design |
-| `prompts.rs` | What a node is told: system prompt, task prompt, the bar it will be checked against |
-| `phases.rs` | Section I at runtime: which phase is open, which nodes that lets run |
-| `stop.rs` | `should_stop()`: the stop-gate ladder, as a pure function |
-| `summary.rs` | Compressing an iteration to what the next one needs to know |
-| `perturb.rs` | Varying the approach when the loop has stalled |
-| `evolve.rs` | Judge harvesting, skill trials, config proposals |
-| `publish.rs` | Moving isolated work back where the gate can see it |
-| `export.rs` | The success package a converged run leaves behind |
+---
 
 ## Entry point
 
@@ -31,195 +20,223 @@ pub fn execute<S: Store>(
 ) -> Result<RunOutcome, String>
 ```
 
-`RunOptions` carries the run identity and the four switches that change what a run is allowed to do: `dry_run` (plan and report, invoke nothing), `resume` (continue from a stored `Checkpoint`), `acquire_skills` (install missing sub-agents rather than running without them), and `verbose` (mirror the run log to stderr). `config_file` exists only so the scripts written into a success export name the right file.
+`execute` (`lib.rs:122`) is the whole public surface for running a loop. The CLI calls it from two places — `loopsmith run` (`loopsmith-cli/src/cmd/run.rs:37`) and the trigger watcher (`cmd/watch.rs:110`) — with the same options struct; `resume` is the same call with `resume: true`.
 
-`RunOutcome` reports the stop reason, the gate's final verdicts, spend (`tokens_used`, `tokens_estimated`, `cost_usd`), the number of config proposals written, and two optional paths — the plain-text run log, and the success export, which is `Some` only when the gate certified overall success.
+`RunOptions` carries the run id, the loop root (`workdir`), and four behavioural flags. Two are worth knowing about:
 
-Three commands construct `RunOptions` and call in: `cmd/run.rs`, `cmd/resume.rs`, and `cmd/watch.rs`. `cmd/run.rs::exit_code` and `cmd/mod.rs::report_outcome` both branch on `StopReason::is_success()`. `cmd/gate.rs` reuses `collect_evidence` directly to evaluate a workspace without running anything.
+- `dry_run` — plan and report, invoke no provider. Skill installation is skipped too: "invoke no provider" should not mean "install software anyway" (`planning.rs:48`).
+- `answer_escalations` — deliberately separate from `resume`. A scheduler resumes a run on a cadence; if a resume also cleared every open escalation and refunded every stuck node's revision budget, a loop that pauses on a schedule could retry a broken node forever (`lib.rs:83`, `validating.rs:25`).
 
-## Before the first iteration
+`RunOutcome` reports the closing `RunState`, the `StopReason`, the gate's final verdicts, spend, the log and export paths, `RunMetrics`, raised alerts, and the `BaselineVerdict`. An `Err` means a config the engine could not start at all — an unschedulable graph, an unresolvable phase chain — and that run is still written to the ledger as having moved to `Failed`, so the record and the return value agree.
 
-Two things are resolved up front, because discovering them after a provider call means paying for the discovery:
+---
 
-1. `loopsmith_graph::plan(&cfg.graph)` — the wave schedule, the chosen concurrency, and the predicted speedup. An unschedulable node graph fails here.
-2. `Phases::new(cfg)` — the phase graph. It reuses `loopsmith_graph::waves` purely for its cycle and unknown-name checks; a cyclic `execution_guidelines.dependency` refuses to start.
+## The lifecycle
 
-Then a `Recorder` is opened over the store and a `RunLog`. Every event from that point goes to both through one call, which is why `a_run_writes_a_readable_log_beside_the_config` can assert the log's line count equals the ledger's length — the queryable record and the readable one cannot disagree.
-
-If `acquire_skills` is on and this is not a dry run, `install_default_skills` installs section J's declared sub-agents. A failure is recorded as `LedgerKind::NodeFailed` and the run continues: a loop whose optional helper could not be fetched is degraded, not broken.
-
-Resume restores more than the iteration counter. `checkpoint.revisions`, `stale_iterations`, `last_signature`, and (via `restore_verdicts`) the previous rulings all come back, so a resumed run cannot be handed a fresh no-progress counter every time it pauses. Unparseable stored verdicts are dropped rather than guessed at — reporting no deltas on the first iteration is a small loss; reporting invented ones is not.
-
-## One iteration
+`state.rs` owns the run's state and is the only place a transition is legal. `RunState::successors` *is* the state machine — one table, thirteen states.
 
 ```mermaid
-flowchart TD
-    A[read scratchpads + carry_forward] --> B{stalled?}
-    B -- yes --> C[perturb::choose]
-    B -- no --> D
-    C --> D[for each wave: chunk, filter, dispatch in threads]
-    D --> E[join, then write ledger + episodes + publish]
-    E --> F[evolve::harvest_judgments]
-    F --> G[collect_evidence → gate::evaluate_all]
-    G --> H[phases.refresh · summary · revisions · trials]
-    H --> I{should_stop}
-    I -- None --> J[save checkpoint] --> A
-    I -- Some --> K[break with reason + verdicts]
+stateDiagram-v2
+    [*] --> Validating
+    Validating --> Planning
+    Planning --> AwaitingApproval
+    Planning --> Running
+    AwaitingApproval --> Running
+    Running --> Retrying
+    Retrying --> Running
+    Running --> Outcome : succeeded / paused / blocked / escalated / rolled_back / failed
+    Outcome --> Closed
+    Closed --> Validating : resume
 ```
 
-### Context assembled once
+The property worth having: a run cannot be recorded as `Succeeded` from `Planning`, because the only road to `Succeeded` runs through `Running`, which runs through the gate. `state.rs` tests that directly (`success_is_unreachable_without_running`).
 
-Scratchpad notes (written by the MCP scratchpad tool, one per goal) and `summary::carry_forward` are read once per iteration and shared by reference with every node. A worker thread never touches the store mid-dispatch, and every node in the iteration sees the same account of what happened.
+Every state module takes `&mut context::Run` and nothing else, so "what can this state touch" has one answer. `Run::enter` advances the lifecycle, writes the transition to the ledger and the run log together, and persists the checkpoint only when entering a state the engine spends time or money in — `Running`, `Retrying`, `AwaitingApproval`, `Closed`. The states in between are passed through in milliseconds, and every save is an fsync (`context.rs:92`).
 
-### Perturbation
+`Lifecycle::resume` distinguishes three cases from a stored checkpoint: a run that closed normally, a pre-1.0 checkpoint with no state (every such run was closed — the old engine had no other way to stop), and a checkpoint whose last state was `Running` or similar, which means the process died mid-run. The third is reported and the resume still goes through validation, because the config may have been edited while the run was stopped.
 
-When `gates.no_progress_iterations_randomness` is set and `stale_iterations` has reached it, `perturb::choose` picks a variation from a deterministic seed (`perturb::seed_for(run_id, iteration)`), given the current stall: how long it has been stuck, which blocking checks are failing (`failing_checks`), and the last two summaries. The seed is written into the ledger so the run replays.
+---
 
-The chosen `Perturbation` reaches nodes two ways: `p.directive()` is appended to the task prompt, and `p.tier_for(node.tier)` may escalate the node one tier stronger. **Neither reaches a judge.** Telling the thing that checks the work to try a different approach — or running it on a stronger model at the same moment as the work — is how a stalled loop talks itself into a lower bar.
+## The four states, in order
 
-`Perturbation::Explore` is the one case where trying an untried sub-agent happens without being asked for; `Perturbation::Reorder` shuffles nodes within a wave before chunking.
+### `Validating` — may this run start at all?
 
-### Dispatch
+`validating.rs`. The config was already validated by the loader; what is checked here is the *world*. `safety.gates.entry` rules are evaluated against evidence on disk before a single token is spent: a missing brief, a lockfile another run holds, a metric that says the target system is down.
 
-Nodes inside a wave are independent by construction, so the only ordering that matters is between waves. Each wave is chunked by `plan.concurrency.max(1)` and each chunk runs under `std::thread::scope`. A node is dropped from the chunk if:
+This is also where answering escalations happens, before `Progress::from_checkpoint` reads the counters — built before, the revision counts would be stale (`lib.rs:131`).
 
-- `phases.eligible(n)` is false — silently, because a node waiting on its phase is the normal state and one line per node per iteration would bury the events that matter; or
-- it has spent `gates.max_revisions_per_node` revisions — logged, with the reason, so the ledger says why it stopped being dispatched.
+### `Planning` — schedule the graph, resolve the phases
 
-Everything that touches the store happens outside the threads. `ensure_skills` runs before the spawn; the `published_paths` map is *cloned* per chunk rather than borrowed, so every node in one chunk sees the same published set — which is also the honest answer, since they ran at the same time.
+`planning.rs` calls `loopsmith_graph::plan` for the wave decomposition and builds `phases::Phases`. Both resolve before anything is dispatched, because finding an unschedulable graph after the first provider call means paying for the discovery.
 
-`run_node` is pure with respect to the store. It creates isolation, seeds the worktree, merges the constraint set, builds both prompts, and calls `loopsmith_provider::dispatch`. Both the success and error paths return a `NodeOutcome`; a provider failure is a populated `error` field, not a panic or a lost node. `isolation` is carried out structurally rather than as prose because the caller has to publish from it, and cannot do that from a description.
+`phases.rs` is Section I of the config at runtime. A phase is **active** when every phase it depends on is complete, and **complete** when its own nodes have all run *and* every goal they advance is satisfied. Completion is read off the gate's verdicts (`Phases::refresh`), never off a node's report. A phase with no nodes is complete on sight, so adding an unstaffed phase never blocks the one behind it. Nodes with no `stage` are never gated — otherwise adding `execution.phases` would be a breaking change for every config that does not use it.
 
-Writes happen after the join, in a defined order: ledger entry, budget accumulation into the checkpoint, `store.put_episode`, then publication.
+Then `planning::approve`: if `safety.gates.approval` has rules and `features.human_approval` is on, the run enters `AwaitingApproval` and the rules are checked. An approval rule is a detector like any other, which is what lets a human approve without loopsmith growing a UI: the rule names an artifact — `APPROVED`, a signed-off ticket, a green deploy check — and the run proceeds once it is there.
 
-### Isolation and publication
+### `Running` — the iteration loop
 
-An isolated node runs in `state/worktrees/<node>/`. Evidence is collected from the loop root and nowhere else, so isolation is a property of the **wave**, not of the run:
+`running::iterate` is one `loop`, and every iteration is the same sequence:
 
 ```mermaid
 flowchart LR
-    R[loop root] -- seed --> W1[worktree A]
-    R -- seed --> W2[worktree B]
-    W1 -- publish --> R
-    W2 -- publish --> R
-    R --> G[gate collects evidence]
+    P[prepare<br/>scratch · carried · stall?] --> D[waves::dispatch]
+    D --> R[rule<br/>judgments → gate]
+    R --> B[rollback rules]
+    B --> C[compress<br/>summary + metrics]
+    C --> V[spend revisions]
+    V --> S[decide<br/>should_stop]
+    S -->|continue| P
 ```
 
-`publish::publish` copies only what `git status --porcelain -z --untracked-files=all` reports as differing from the commit the worktree branched from. Two rules make it safe to reason about:
+- **`prepare`** (`running.rs:371`) gathers what every node in the iteration is shown: per-goal scratchpad notes (read once, so no worker thread touches the store mid-dispatch), the carried summaries, promoted cross-run memory via `remembering::recall`, and — if `stop.no_progress_iterations_randomness` has been crossed — a `perturb::Perturbation`.
+- **`rule`** (`running.rs:450`) harvests judge output into `Judgment`s, collects evidence at the loop root, calls `loopsmith_gate::evaluate_all`, and refreshes phase completion.
+- **Rollback rules run after every ruling, even one that follows a halt.** A halt decides how the run ends; a rollback decides whether what this iteration achieved is kept. One does not answer the other (`running.rs:219`).
+- **Rulings reach the store only if no rollback rule refused them** (`persist_rulings`). Written earlier, `status` and a `goal_satisfied` trigger would both act on a ruling the run has already discarded.
+- **`spend_revisions`** charges a revision to every node that ran and left its goals unsatisfied, and returns the ones that just spent their last. Nodes with no declared goals are never counted — there is nothing to measure them against.
+- **`decide`** computes `progress_signature(verdicts)`, increments or resets `stale_iterations`, and asks `should_stop`.
 
-- **Only what the node changed is published.** Copying the whole tree would republish the repository over itself.
-- **The first writer of a path wins; the second is reported.** `claimed_paths` is scoped to the iteration, so a node rewriting its own output next iteration is not a collision. The loser is named in the ledger with the path and the node that got there first, and the entry is recorded as `NodeFailed`.
+`Progress` is the accounting that outlives an iteration, and it is restored from the checkpoint rather than started fresh — a resumed run must not be handed a zeroed no-progress counter and a full revision budget every time it pauses. `Snapshot` is what a rollback returns to, and spend is deliberately *not* in it: a rollback discards what an iteration achieved, never what it cost, or a run could refund its own budget by tripping a rollback rule (`running.rs:159`).
 
-Paths under `state/`, `logs/`, and `.git/` are reserved and never cross the boundary. Deletions are not propagated — that is a different decision from propagating a write.
+### `Closing` — the outcome, written down once
 
-`publish::seed` is the mirror image. A worktree branches from `HEAD`, so it would otherwise be blind to everything the run has produced since, including its own upstream's output. `published_paths` is carried across iterations for exactly this; a node is never seeded with a path it published itself, since a builder's in-progress work must not be overwritten by last iteration's copy of it.
+`closing.rs`. `outcome_for` maps a stop reason to an outcome state: success is `Succeeded`; a budget or iteration ceiling is resource exhaustion, answered by `safety.recovery.resource_exhaustion` (`pause` by default — the run did nothing wrong, and a bigger budget is the ordinary next step); no progress is `Blocked`. Either becomes `Escalated` when the run has questions open for a human, because that, not the ceiling, is what it is waiting on.
 
-### Evidence and the gate
+Alerts get a final look at the numbers before the counters are stored, since wall clock and spend can cross a line in a run's last moments. Then the outcome state is entered, the export is written if and only if the gate certified success, `remembering::procedure` records the shape of a successful run, `metrics::measure` fills `RunMetrics`, and `judge_against_baseline` compares this run to `evolution.baseline` — on completion and pass rate alone when the run did not succeed, since "mean cost of a successful run" is not comparable to a failure.
 
-```rust
-pub fn collect_evidence(
-    cfg: &LoopConfig,
-    workdir: &Path,
-    metrics_file: Option<&Path>,
-    judgments: Vec<Judgment>,
-) -> Evidence
-```
+---
 
-Deliberately narrow: **a node's own claim that it finished is not evidence.** Only three things count — `metrics.json` parsed as `BTreeMap<String, f64>`, artifacts read from disk, and judge verdicts parsed by `evolve::harvest_judgments`.
+## Inside an iteration: dispatch
 
-Artifacts are the files the config's own `file_exists` detectors name (`artifact_paths`), registered under both their full path and their file stem. Without that, a `regex_match` detector has nothing to match against and reports "artifact was not collected" forever — a check that looks like rigour while being permanently unsatisfiable.
+`waves.rs` is the dispatcher; `dispatch.rs` is what a worker actually runs.
 
-The gate itself is `loopsmith_gate::evaluate_all`, and it is the **only** writer of goal state. That is enforced structurally: `nothing_that_perturbs_or_summarises_can_reach_goal_state` reads `perturb.rs` and `summary.rs` as text and asserts neither mentions `set_goal_state`, `to_goal_state`, or `GoalState`. Both of those take a model's output as input, so the test asserts they have no path to the one function that could hand a model the verdict.
+**Concurrency.** Up to `graph.concurrency` nodes are in flight at once. The in-flight budget is global rather than per-wave, so a released wave's stragglers keep their slots while the next wave starts, instead of a whole chunk waiting on its slowest member.
 
-Judge verdicts are only worth reading once you know which provider produced the work being judged — that comes from the episode record, not from the judge's own claim. `a_judge_on_the_builders_provider_still_cannot_satisfy_the_gate` pins this: same provider for builder and judge, and the verdict does not count.
+**Join** (`execution.graph.join`, modelled by `Tally`):
 
-### Phases
-
-A phase is **active** when every phase it depends on is complete, and **complete** when all its member nodes have run and every goal they advance is satisfied *according to the gate*. `Phases::refresh(&verdicts, &dispatched)` is called after every ruling and returns the phases that closed on that pass, so the ledger can say so.
-
-Two deliberate escape hatches: a node with no `stage` is never gated (adding section I must not be a breaking change for configs that don't use it), and a phase with no nodes is complete on sight (`mark_vacuous_complete`) so it never blocks the phase behind it. A stage nobody declared fails closed — validation refuses it, and at runtime `is_active` returns false rather than running work the author did not order.
-
-`guideline_for` supplies the phase's standing instruction, which `build_node_prompt` places *before* the goals: it is usually about what not to do yet.
-
-### Summaries
-
-`summary::deterministic` is written by Rust from the gate's verdicts and the episode record. It is always present, costs nothing, and cannot be wrong about what was satisfied. It reports what ran, what changed since last iteration (`Newly satisfied:` / `REVOKED —`), each still-failing blocking check with the gate's own evidence line, phases closed, and spend to date.
-
-`summary::add_narrative` is optional prose from `cfg.context.summary_provider`, dispatched at `Tier::Cheap`. It is allowed to be interesting and never allowed to matter: the summariser is told explicitly that a separate deterministic gate decides completion and its text has no effect on it. A failed or slow summariser must not fail the iteration it describes, so the whole thing is best-effort.
-
-`carry_forward` renders the last `cfg.context.carry_summaries` summaries into the next iteration's prompt. This is the entire cost-control story — prompt size stops growing with the run. Before it existed, every iteration sent a byte-identical prompt, which is why a stalled loop kept re-running the approach that had already failed; `each_iteration_is_summarised_and_the_next_one_reads_it` proves it no longer does by asserting the `prompt_digest` differs between iterations 1 and 2. Setting `carry_summaries: 0` switches it off and the digests become identical again — summaries are still recorded, they just aren't carried.
-
-### Revisions
-
-`max_revisions_per_node` bounds how many times a node may be re-run with its goals still unsatisfied, so one stuck node cannot spend the whole iteration budget. The counter measures **failed** revisions only:
-
-- nodes with no declared goals are never counted — there is nothing to measure them against, so capping them would be arbitrary;
-- a node whose goals the gate satisfied is never capped, however long the run (`a_node_whose_goals_are_satisfied_is_never_capped`).
-
-Nodes that spend their last revision land in `exhausted_nodes`, which `evolve::write_proposals` reads — at that point the graph is questioned rather than the node re-run forever.
-
-## Stop gates
-
-`stop.rs` is a pure function over a snapshot. It touches no store, no provider, and no clock; it is handed numbers and returns a verdict. It runs **after** the gate ruling, so no amount of confident output from a node can extend a run past its ceiling.
-
-```rust
-pub fn should_stop(inp: &StopInputs) -> Option<StopReason>  // None means keep going
-```
-
-Order is not arbitrary. Success is checked first, so a run that meets the bar on its last permitted iteration reports `OverallSuccess` rather than `IterationCap`. After that it is budgets, cheapest signal first:
-
-| Order | `StopReason` | Fires when |
+| Join | Released when | Not met ⇒ |
 |---|---|---|
-| 1 | `OverallSuccess` | `stop_on_overall_success` and `loopsmith_gate::overall_success` |
-| 2 | `NoProgress(n)` | `no_progress_iterations > 0` and `stale_iterations >= it` |
-| 3 | `IterationCap(n)` | `iteration >= max_iterations` |
-| 4 | `WallClock(s)` | `max_wall_clock_seconds` reached |
-| 5 | `TokenBudget(t)` | `max_tokens` reached |
-| 6 | `CostBudget(s)` | `max_cost_usd` reached |
+| `wait_for_all` (default) | every node finished, successfully or not | n/a |
+| `quorum { count }` | `count` nodes succeeded | later waves not dispatched this iteration |
+| `first_success` | one succeeded | same |
 
-`0` means *disabled* for the no-progress gate, not *instant* — pinned by `zero_disables_the_no_progress_gate`.
+A released wave's stragglers are left to finish and their output is still recorded and published if it arrives in time; nodes not yet started are not started. A `quorum`/`first_success` wave whose nodes all finish without meeting the bar is not released, and `break 'waves` stops the iteration there — later waves would be reading answers that are not there.
 
-Progress is measured by `progress_signature`, a sorted fingerprint of `target:satisfied:passed/total` across all verdicts. Unchanged signature increments `stale_iterations`; any change resets it to zero. This is what perturbation reacts to, and perturbation only delays giving up — `a_stalled_run_varies_its_approach_before_it_gives_up` asserts the run still halts with `NoProgress(3)`.
+**Store discipline.** `dispatch::run_node` is store-free by construction: "a thread that can write to the ledger is a thread that can interleave the ledger." Workers return a `NodeOutcome` over an `mpsc` channel and `waves::handle` writes everything down on the dispatcher's thread, in arrival order. A worker panic is caught (`catch_unwind`) and turned into one node's failure — an uncaught panic would mean a report that never arrives and a dispatcher that waits forever.
 
-The loop breaks with `(reason, verdicts)` together. Carrying them out as a pair is what removed the older two-variable dance where each of six break sites had to remember to copy `current` into an outer `verdicts` first.
+**What a node is told** — `prompts.rs`. Two prompts: a system prompt with the loop's static context and the merged `ConstraintSet` (rules, forbidden paths and commands, human checkpoints), and a task prompt assembled in a deliberate order — a refused previous attempt first, then the phase guideline (usually about what *not* to do yet), sub-agents, the goals *and the checks those goals face*, then role-specific material. Stating the bar is not politeness: a node that does not know how it will be checked cannot aim at the check.
 
-## The success export
+Two things are never handed to a `Role::Judge`: a perturbation ("try a different approach" is how a stalled loop talks itself into a lower bar) and promoted cross-run memory (the thing that checks the work is held to the standard it was given, not to what the loop has come to believe). For the same reason, a perturbation escalates a *builder's* tier but never a judge's (`dispatch.rs:179`).
 
-Written only when `stop.is_success()`, which is true only for `StopReason::OverallSuccess`, which only `should_stop` produces, and only from `loopsmith_gate::overall_success`. There is no flag that writes it anyway — an export a confident model could produce would be a certificate that means nothing.
+**Eligibility** (`eligible_nodes`) drops nodes whose phase is shut, nodes at the `max_revisions_per_node` ceiling, and nodes escalated earlier in the run. A node waiting on its phase is skipped silently — one line per node per iteration would bury the events that matter.
 
-`export::export_success` writes `<root>/<sanitized-name>-success/`:
+---
 
-- `SKILL.md` — frontmatter making the package a reusable sub-agent skill, what it proved, how to reuse it, and a "this is a record, not a guarantee" section;
-- `EVIDENCE.md` — final rulings with per-check evidence lines, plus the iteration history, stating up front that no node's own claim appears in it;
-- `loop.yaml` — the config that converged, verbatim, because someone reusing it needs the thing that worked rather than a description of it;
-- `out/` — whatever the nodes produced, copied via `copy_tree`;
-- `run.sh` and `run.cmd` — POSIX `sh` (macOS ships bash 3.2) and CRLF batch launchers. Both find `loopsmith` on `PATH` rather than pinning a path that only existed on the producing machine. `run.cmd` has exactly one `exit /b`, on the last line: an early `exit /b` under `setlocal` reports 0, because the implicit `endlocal` restores the saved errorlevel.
+## Isolation and publication
 
-`sanitize` maps anything outside `[A-Za-z0-9_-]` to `-`, so a loop named `demo/loop` cannot put its export in a subdirectory and `../../etc` cannot escape at all.
+`worktree.rs` + `publish.rs` + `container.rs`, and the three-step dance between them is the part most likely to surprise a new contributor.
 
-## Crate boundaries
+A node whose `isolation` asks for it gets a git worktree at `state/worktrees/<node>/` on branch `loopsmith/<run>/<node>`. Nothing here is fatal: outside a git repo, or on a machine without git, `worktree::create` returns `Isolation::Shared { reason }` and the run continues with an honest report. An existing worktree is reused across iterations — recreating it would throw away the node's in-progress work every pass.
 
+Because a worktree branches from `HEAD`, it is blind to everything the run has produced since. So:
+
+1. **`publish::seed`** copies in paths other nodes have already published, before the node runs — never a path the node published itself, so a builder's in-progress work is not overwritten by last iteration's copy of it.
+2. The node runs in its worktree (and, for `isolation: container`, inside `docker run --rm` with that worktree mounted at `/work` — degrading to a plain worktree, once per run in the ledger, when no runtime, daemon, or image is available).
+3. **`publish::publish`** copies what the node changed back into the loop root at join time, because `evidence::at_root` collects evidence there and nowhere else.
+
+Without step 3, a `file_exists` detector pointing at an isolated builder's output could never pass: the work is real, on disk, and invisible to the only thing allowed to rule on it — a worse failure than the clobbering isolation prevents, because it looks like the builder did nothing.
+
+Three rules make publication safe to reason about:
+
+- **Only what the node changed.** `git status --porcelain -z --untracked-files=all` in the worktree is exactly that set. `-z` because paths contain spaces; `--untracked-files=all` because a new artifact in a new directory is the normal case and git's default collapses it to the directory name. Deletions are not propagated.
+- **First writer wins, second is named.** `claimed_paths` is carried across every node in the iteration; the loser gets a ledger line with the path and the node that got there first. Taking the last write silently would reintroduce the collision after doing the work to avoid it.
+- **`state/`, `logs/`, `.git/` are never published**, whatever a node did to them.
+
+`publish::forbidden_changes` is the one place a `forbidden_paths` constraint is *enforced* rather than merely stated: an isolated node's git status is a record of what it touched. A hit means nothing from that worktree is published — the whole tree is suspect, not just the offending file — and the failure is raised as `FailureClass::SafetyViolation`, which halts the run as `Failed` by default. A node sharing the loop root leaves no such record, so its `forbidden_paths` remain a prompt-level instruction.
+
+A rollback restores the checkpoint and the progress counters but **does not revert published files**; the ledger line names what was written so a human can check before resuming (`running.rs:303`).
+
+---
+
+## Recovery
+
+`recovering.rs` turns a `FailureClass` and an attempt count into a `Response` and nothing more — carrying it out is the dispatcher's job. Keeping the decision pure is what lets every row of the policy table be tested without running a provider.
+
+| `Response` | Meaning |
+|---|---|
+| `Retry { delay_seconds }` | same dispatch again, after backoff |
+| `Revise` | dispatch again now, telling the node what was wrong |
+| `Continue` | accept for this iteration; eligible again next |
+| `Escalate` | stop dispatching this node for the run, record the question |
+| `Halt(state)` | end the run in that state |
+
+`recovering::answer` decides *and* writes the ledger line in one step, so no call site can do one without the other. `may_redispatch: false` — set once dispatch has stopped for the iteration — downgrades a retry or revision to `Continue`: the policy asked for another attempt and there is no longer one to give.
+
+`max_attempts` counts dispatches, not retries; the default of 3 is the first try and two more. `RecoveryAction::Fallback` resolves to `Continue` because the provider cascade *is* the fallback and it has already been walked.
+
+Two classifications are worth calling out. A judge that answered without a single `VERDICT:` block is `InvalidOutput` — it ran, and the gate cannot read a word of it — which the default policy answers with `Revise` rather than a blind retry (`waves.rs:587`). A retry's backoff is slept on the retry's own thread, so it blocks nothing else; on waking it checks `Shared::stopped` and reports itself cancelled rather than spending money after the run stopped dispatching.
+
+Run-level conditions go through `recovering::run_outcome`, which ignores retry and revise: a budget does not refill by being asked twice.
+
+---
+
+## The stop-gate ladder
+
+`stop.rs` is a pure function over a snapshot (`StopInputs`) — no store, no provider, no clock. The gates are the mechanical answer to "may this run continue", and a mechanical answer must not be reachable by anything a node said.
+
+Order is not arbitrary:
+
+1. `stop_on_overall_success` — checked first, so a run that meets the bar on its last permitted iteration reports `OverallSuccess`, not `IterationCap`.
+2. `no_progress_iterations` (`0` means disabled, not instant).
+3. `max_iterations`, then wall clock, tokens, cost — cheapest signal first.
+
+`progress_signature` fingerprints the verdicts (`target:satisfied:passed/total`, sorted). If it does not change between iterations the loop is spinning rather than progressing. `waves::over_budget` additionally checks the token and cost ceilings mid-iteration and stops launching new nodes, so a wide graph cannot overshoot a budget by a whole wave.
+
+---
+
+## Compression, judgment, and the export
+
+**`summary.rs`** splits an iteration's record in two, and the split is load-bearing. `deterministic` is written by Rust from the gate's verdicts and the episode log — always present, costs nothing, cannot be wrong about what was satisfied. It reports deltas (`Newly satisfied`, and a shouted `REVOKED —` when the gate takes `done` back), the evidence line of every failing blocking check, phases closed, and spend. `add_narrative` optionally asks a cheap provider for two-to-four sentences of prose; the summariser is told explicitly that it is not deciding whether anything is finished, and nothing reads a summary to decide goal state anyway. `carry_forward` renders the last `context.carry_summaries` summaries — not the episodes — which is the whole cost-control story: prompt size stops growing with the run.
+
+**`judgment.rs`** parses judge prose into `Judgment`s the gate can act on. The contract (`JUDGE_OUTPUT_CONTRACT`, appended to every judge prompt and kept in the same file as the parser so the two cannot drift) is a line-oriented block format rather than JSON, because asking for strict JSON in the middle of an explanation is how you get truncated objects:
+
+```text
+VERDICT: every-claim-cited PASS
+STANDARD: the citation policy in AGENTS.md
+EVIDENCE: all 14 claims carry a source line; checked lines 12-96
+SCORE: 9
 ```
-loopsmith-cli::run
-   ├─ loopsmith-core      LoopConfig, NodeSpec, Role, Tier, Detector, ConstraintSet, Phase
-   ├─ loopsmith-graph     plan(), waves() — wave schedule + cycle checks
-   ├─ loopsmith-gate      evaluate_all(), overall_success(), Evidence, TargetVerdict, Judgment
-   ├─ loopsmith-memory    Store, Checkpoint, Episode, IterationSummary, LedgerKind
-   ├─ loopsmith-provider  dispatch(), InvokeRequest, digest()
-   ├─ loopsmith-skills    install_default(), find_installed(), acquire()
-   └─ crate::{logging, worktree, judgment}
-```
 
-The gate crate depends on the memory crate and not the reverse, which is why `Checkpoint` stores verdicts as `verdicts_json: Option<String>` and `restore_verdicts` has to parse them back.
+Unparseable output yields nothing, so the gate fails closed. An unrecognised decision word is skipped rather than guessed at. **A `PASS` with no evidence is demoted to a fail** — that is an assertion, not a judgment, and letting it through would reopen the hole the gate exists to close. Provider ids come from the episode record, never from the judge's own claim about which model it was.
 
-## Contributing
+**`export.rs`** writes `<root>/<name>-success/` — `SKILL.md`, `EVIDENCE.md`, the `loop.yaml` that converged, the `out/` tree, and POSIX + `cmd.exe` re-run launchers — packaged as a sub-agent skill so the next person with the same problem starts from something that worked. It is written only when `StopReason::OverallSuccess` fired, which only `should_stop` produces, and only from `loopsmith_gate::overall_success`. There is no flag to write it anyway: an export a confident model could produce would be a certificate that means nothing. The `SKILL.md` says so in as many words — "a record, not a guarantee" — and a test asserts that line is present.
 
-**Adding a stop gate.** Add a `StopReason` variant with a `describe()` arm, add its input to `StopInputs` if it isn't already there, and place the check in `should_stop` by cost — success stays first. `execute()` needs no change; it breaks on whatever `should_stop` returns.
+---
 
-**Adding an evidence source.** Extend `collect_evidence`. If it needs new files, extend `artifact_paths` so the config still declares what the loop produces. Never let a node's own output become evidence.
+## Supporting modules
 
-**Anything that reads model output.** Keep it away from goal state. `nothing_that_perturbs_or_summarises_can_reach_goal_state` will fail if a new file in that class starts referencing `set_goal_state`, `to_goal_state`, or `GoalState` — extend that test's file list rather than working around it.
+| Module | What it does |
+|---|---|
+| `context.rs` | `Run`: config, store, options, recorder, checkpoint, lifecycle. Checkpoint read/write with the `corrupted_state` policy applied (`save_or_halt`). |
+| `logging.rs` | `Recorder` writes the sled ledger and the plain-text `logs/` file through one choke point, so the queryable record and the readable one cannot disagree. `logging::line` is also the seam `loopsmith-web` renders progress through. |
+| `evidence.rs` | What the gate is shown: artifacts named by `file_exists` detectors (registered under both full path and stem, so `regex_match` has something to match), `metrics.json`, parsed judgments. A node's claim is not evidence. |
+| `rules.rs` | Entry, approval, and rollback rules applied uniformly; a `rollback` outcome on an entry rule has nothing to undo, so it fails the run and says so. |
+| `metrics.rs` | The eight numbers every `RunOutcome` reports, and `safety.alerts` thresholds on them — each alert fires at most once per run. |
+| `evolve.rs` | Skill trials, judgment harvesting, and proposal writing. Gathers evidence and writes proposals; adopting one is a human's edit. |
+| `perturb.rs` | What to do when the loop has stopped moving but has budget left. A fixed four-item menu of changes to *how* the loop works, never to what counts as done; seeded from run id + iteration and logged, so a strange turn can be replayed. |
+| `remembering.rs` | Cross-run memory the engine itself writes: failure modes (promoted on write — hitting a wall is its own evidence) and procedures (promoted only once several runs agree). |
+| `container.rs` | Docker/Podman probe and the `Containment` decision, including the degrade path. |
+| `schedule.rs` | Cron/interval/file triggers and the `Watcher` behind `loopsmith run watch`; plist, crontab, and `schtasks` generation for `run schedule --install`. Cron is evaluated in **UTC** on purpose. |
 
-**Anything that runs on a worker thread.** Keep it store-free, like `run_node`. Return what you learned on `NodeOutcome` and let the caller write it down after the join, so the ledger stays ordered.
+---
 
-**Testing.** `mod.rs`'s tests drive real `execute()` runs against a `SledStore` in a temp dir, using `byok` providers backed by `echo` and `printf` — cheap, deterministic, and enough to exercise budgets, resume, revisions, exports, and judge wiring. `sleeper_provider()` is the pattern for timing assertions: it returns a platform-appropriate delay command (`ping -n` on Windows, `sleep` elsewhere) because a spawn that fails instantly measures nothing and trips the wall-clock assertion for reasons unrelated to concurrency.
+## Working on this crate
+
+- **`loopsmith-run` never decides that work is done.** If a change would let the engine write goal state, set `satisfied`, or gate the export on anything but `StopReason::OverallSuccess`, it is the wrong change. `loopsmith-gate` is the only writer.
+- **Keep the stop ladder pure.** `stop.rs` takes numbers and returns a verdict. It used to be eight inline `if` blocks in the middle of `execute()`; adding a gate meant remembering the same two-line dance at every break site.
+- **Workers do not touch the store.** Anything a node's dispatch learns comes back on `NodeOutcome` and is written down after the join, in a defined order. Skill acquisition happens on the dispatcher's thread before any worker starts, for exactly this reason.
+- **Add a state by editing the table.** `RunState::successors` is the machine; `Lifecycle::advance` refuses anything not in it, and `ALL` drives round-trip and outcome-closure tests.
+- Unit tests live beside their module (`phases.rs`, `stop.rs`, `judgment.rs`, `publish.rs`, `worktree.rs`, `export.rs`, `recovering.rs`, `state.rs`, `summary.rs`) and the engine-level tests are in `src/tests.rs`. The git-touching tests build real repositories in temp dirs via `loopsmith_util::testing::temp_dir`, so they are worth running before touching isolation or publication.
+
+---
+
+*Note on the brief: the paths supplied (`loopsmith-cli/src/run/*.rs`, `loopsmith-cli/src/judgment.rs`, `loopsmith-cli/src/worktree.rs`) do not exist and the supplied call-graph data was empty. This module actually lives in its own crate at `runtime/crates/loopsmith-run/src/`, which is what the documentation above describes, read from source.*

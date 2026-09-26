@@ -2,93 +2,128 @@
 
 # Provider Integration (`loopsmith-provider`)
 
-The provider plane turns "call a model" into "run a program." Every provider — Claude Code, Ollama, a Grok CLI, an OpenAI-compatible endpoint driven by `curl`, an MCP server over stdio — is described by the same struct: a command, some argument templates, and a few knobs. There is no per-vendor Rust code, no HTTP client, and no SDK. Adding a provider is a config edit.
+The provider plane turns "ask a model" into "run a program." Every provider in loopsmith — Claude Code, Ollama, a Grok CLI, an OpenAI-compatible HTTP endpoint driven by `curl`, an MCP server over stdio — is a command template: a binary name, an argument list with placeholders, and a few metadata fields. Adding a provider is a config edit, never a Rust change and never a rebuild.
 
-That single decision is what makes BYOK free, and it is the reason this crate is small (one `lib.rs`) relative to its surface area.
+This crate does four things: decide whether a provider is usable, expand its template and run it, account for what the call cost, and classify failures so the run engine knows whether retrying is worth wall-clock time.
 
-## The two invariants
+## The command-template model
 
-Everything else in the crate is mechanism. These two are the contract:
+A provider is a `ProviderSpec` (defined in `loopsmith-core`, `src/config/providers.rs`). The fields this crate actually acts on:
 
-**1. A tier resolves through a cascade, not to a single provider.** Nodes ask for `Tier::Cheap`, `Tier::Standard`, or `Tier::Strong`. `dispatch` walks the ordered list configured for that tier and serves the call from the first provider that is both *available* (binary on `PATH`, required env present) and *succeeds*. Everything skipped is recorded and handed back to the caller so the ledger can say why.
-
-**2. Secrets never enter this process.** `ProviderSpec::requires_env` names environment variables. `availability` checks them with `std::env::var_os(k).is_none()` — it reads presence, never value. Nothing is substituted into an argument, logged, or written to the ledger. The `openai` starter spec passes the literal string `Authorization: Bearer $OPENAI_API_KEY` to `curl` and lets `curl` expand it. There is a test (`a_provider_with_missing_env_is_unavailable_and_names_only_the_key`) that asserts the failure message contains the key *name* and no `=`, precisely because that is the property worth regression-testing.
-
-## Types
-
-| Type | Role |
+| Field | Effect |
 |---|---|
-| `InvokeRequest` | What to ask: `node_id`, `system`, `prompt`, `tier`, `workdir`. `node_id` is for logging and digests only. |
-| `InvokeResponse` | What came back: `provider_id`, `output`, `exit_code`, `duration_ms`, `stderr_tail`, plus accounting (`tokens`, `tokens_estimated`, `cost_usd`). Serializable — it goes into the ledger. |
-| `Availability` | `on_path: bool` + `missing_env: Vec<String>`. `ok()` is the gate, `why_not()` renders the human-readable reason that lands in the skip list. |
-| `ProviderError` | `NoneAvailable` (cascade exhausted, with everything tried), `Spawn`, `Timeout`, `Failed` (non-zero exit + last stderr line). |
+| `command` | the binary; looked up on `PATH` via `which` |
+| `args` | argument list, each element run through `render` |
+| `model` | substituted as `{model}` |
+| `requires_env` | variable **names** that must exist; values are never read |
+| `timeout_seconds` | polled kill deadline in `invoke` |
+| `prompt_on_stdin` | pipe the prompt to stdin instead of passing `{prompt}` |
+| `usage_regex` | pattern whose first capture group is a token count |
+| `cost_per_1k_tokens` | rate applied to whatever token count was obtained |
+| `tiers` | which tiers this provider may serve |
 
-`ProviderSpec`, `ProviderKind`, `Tier`, and `LoopConfig` all live in `loopsmith-core` — this crate consumes the config model, it does not define it.
+`render` substitutes `{prompt}`, `{system}`, `{model}`, `{tier}`, and `{node}` into a template string. Unknown placeholders are left verbatim — a provider whose real CLI takes `{foo}` as a literal keeps working, and a typo in a config placeholder shows up in the command line rather than silently becoming an empty string.
 
-## How a call flows
+## Secrets never enter the process
+
+This is the load-bearing constraint, and it is why `requires_env` holds names rather than values.
+
+`availability` checks presence with `std::env::var_os(k).is_none()` and discards everything but the key name. `Availability::why_not` can therefore only ever say `missing env: OPENAI_API_KEY` — a test asserts the string contains no `=`, because there is no value present to leak. Nothing in this crate substitutes a secret into an argument, a log line, or the ledger.
+
+The OpenAI starter provider shows the intended pattern: the `Authorization: Bearer $OPENAI_API_KEY` header is passed to `curl` *unexpanded*, and `curl` resolves it from its inherited environment. loopsmith never sees the key.
+
+The same rule holds under containers. `container_argv` passes each required variable as `-e KEY` with no value, so the container runtime reads it out of this process's environment rather than putting it on a command line where any user on the machine could read it from the process table.
+
+## Availability and the tier cascade
+
+Nodes never name a provider; they ask for a `Tier` (`Cheap`, `Standard`, `Strong`). `dispatch` resolves that tier to an ordered candidate list via `cfg.cascade_for(req.tier)` and walks it:
 
 ```mermaid
 flowchart TD
-    A[dispatch: tier or pinned id] --> B{candidates}
-    B -->|pinned| C[cfg.provider id]
-    B -->|tier| D[cfg.cascade_for tier]
-    C --> E[availability]
-    D --> E
-    E -->|not ok| F[push skip reason, next]
-    E -->|ok| G[invoke]
-    G -->|Err| F
-    G -->|Ok| H[InvokeResponse + skipped list]
-    F --> E
-    F -->|exhausted| I[ProviderError::NoneAvailable]
+    D[dispatch: tier or pinned id] --> C{next candidate?}
+    C -->|none left| N[NoneAvailable + accumulated class]
+    C -->|spec| A[availability]
+    A -->|not ok| S[push skip reason] --> C
+    A -->|ok| I[invoke]
+    I -->|Ok| R[InvokeResponse + skipped list]
+    I -->|Err| F[note failure_class] --> S
 ```
 
-`dispatch(cfg, req, pinned)` is the entry point almost every caller uses. Passing `Some(id)` for `pinned` collapses the candidate list to that one provider — but it does *not* skip the availability check, so pinning an unavailable provider yields `NoneAvailable` with a one-entry `tried` list rather than a spawn error.
+Two details matter for contributors:
 
-## Inside `invoke`
+- **The skip list is a return value, not a log.** `dispatch` returns `(InvokeResponse, Vec<String>)`, where the vector holds `"id (reason)"` for every provider passed over. The ledger records *why* the winning provider won.
+- **The failure class accumulates.** `class` starts at `ToolUnavailable` and latches to `TransientError` if any candidate failed transiently. So a cascade where the cheap tier was rate-limited and everything else was missing still reports a transient overall failure, which is the class that makes a retry worthwhile.
 
-`invoke` is the only place that touches a process. It does four things in order.
+`pinned: Some(id)` bypasses the cascade entirely, collapsing the candidate list to `cfg.provider(id)`. That is the path a judge-independence or manual-override decision takes.
 
-**Template rendering.** `render` substitutes `{prompt}`, `{system}`, `{model}`, `{tier}`, and `{node}` into each argument. It is a plain string replace over a `BTreeMap`, so unknown placeholders pass through untouched (`{unknown}` stays `{unknown}`) — a deliberate property, tested, so that a provider whose CLI uses brace syntax of its own isn't corrupted. Note that rendering applies to `spec.args` only, never to `spec.command`.
+Under a container, `dispatch` rewrites the availability check: the provider binary lives in the image, so what must exist on this machine is `c.runtime`, not `spec.command`.
 
-**Spawn.** `stdin` is `piped` when `prompt_on_stdin` is set and `null` otherwise; stdout and stderr are always piped. When piping, only `req.prompt` is written — `system` reaches the provider solely through a `{system}` placeholder in the args, so a spec that pipes the prompt and never mentions `{system}` silently drops the system message. That is worth checking when a new spec produces oddly context-free output.
+## Failure classification
 
-**Timeout by polling.** `std::process` has no timeout, so the loop calls `try_wait` every 50 ms and compares `started.elapsed()` against `spec.timeout_seconds`. On expiry: `kill`, `wait`, `ProviderError::Timeout`. An async runtime would be tidier and is a heavy dependency for one feature, hence the poll. One consequence of the ordering: the stdin write happens before the poll loop begins, so a provider that never drains stdin can block on a very large prompt before the timer is ever consulted.
+`ProviderError::failure_class` maps into `loopsmith_core::FailureClass`, and the mapping encodes a policy about the run's wall-clock budget:
 
-**Accounting.** Non-zero exit is always an error, never a silent pass. On success, `parse_usage` runs the spec's `usage_regex` against stdout, then stderr (providers report usage in wildly different places), preferring capture group 1 and falling back to the whole match, and stripping `,` and `_` before parsing. If nothing usable comes back — no regex, a malformed regex, or no match — `estimate_tokens` counts characters in prompt + stdout and divides by four, and `tokens_estimated` is set to `true`. Cost is `tokens / 1000.0 * cost_per_1k_tokens`, and is `None` when no rate is configured rather than a guessed number.
+- `Timeout` → transient, by definition.
+- `Spawn` → `ToolUnavailable`; the binary isn't there.
+- `Failed` → transient **only** if `looks_transient(stderr)` matches one of its markers (`429`, `503`, `rate limit`, `overloaded`, `try again`, `connection reset`, `network`, …). Otherwise `ToolUnavailable`.
 
-The estimate deserves its rationale, which the source states plainly: an approximate ceiling that fires beats an exact one that never does, which is what an unaccounted budget gate amounts to. The `tokens_estimated` flag exists so a budget report can be honest about which kind of number it is showing.
+The asymmetry is deliberate. A wrong flag or a missing login fails identically on the second attempt, so retrying it with backoff only spends budget learning that. Only the stderr strings that describe a condition which may clear by itself earn a retry. `looks_transient` is a substring scan over a lowercased copy — cheap, and deliberately a little generous, since a false "transient" costs one retry while a false "unavailable" costs a node.
 
-## Helpers worth knowing
+## Running a provider: `invoke`
 
-- **`digest(s)`** — FNV-1a 64-bit, formatted as 16 hex chars. Not cryptographic. Its only job is to let the ledger say "same prompt as before" without storing the prompt twice. `run_node` in `src/run/dispatch.rs` calls it.
-- **`which`** — re-exported from `loopsmith-util`. The path is kept here for existing callers; the implementation moved out once it turned out to have been written three times across the workspace, in three states of correctness.
-- **`starter_providers()`** — the day-one cascade emitted by `loopsmith init` (via `starter_config` in `loopsmith-cli/src/scaffold.rs`): `claude` (standard + strong), `ollama` (cheap), `grok` (standard), `openai` (strong, the only one with a real `usage_regex` and cost rate), `gemini` (standard). Unavailable ones are skipped, never fatal — that is the whole point of the cascade. `starter_providers_cover_every_tier` guards the invariant that no tier is left with an empty list.
+`invoke` is the single place a child process is spawned. The sequence:
 
-The `ollama` entry carries a 120-second timeout rather than the 600 its siblings use. `ollama run <model>` pulls the model when it is absent, and from outside the process a 4.7 GB pull is indistinguishable from slow generation — one observed run spent its entire 600-second budget downloading and produced nothing. A cheap tier exists to be abandoned quickly, so the timeout is tuned to fall through to the next provider rather than to accommodate a download. Pull first with `ollama pull llama3`.
+1. Build the substitution map (including `tier_name(req.tier)`) and render every argument.
+2. Build the `Command` — either `spec.command` directly, or `container.runtime` with `container_argv(...)` when `req.container` is set.
+3. `current_dir(&req.workdir)`; stdin piped only when `prompt_on_stdin`, stdout and stderr always piped.
+4. Write the prompt to stdin if configured. A broken pipe here is swallowed on purpose: it means the child exited early, and the exit-code path below reports that far more usefully than an io error would.
+5. **Poll for completion** at 50 ms intervals, killing the child once `timeout_seconds` elapses. `std::process` has no timeout, and an async runtime is a heavy dependency for one feature.
+6. Non-zero exit → `ProviderError::Failed` with only the **last line** of stderr. A non-zero exit is never a silent pass.
+7. On success, account for usage and cost, then build `InvokeResponse`.
 
-## Where it connects
+### Usage and cost accounting
 
-Upstream, this crate reads `LoopConfig` from `loopsmith-core` — specifically `cfg.provider(id)` and `cfg.cascade_for(tier)` in `src/config/mod.rs` — and `which`/`temp_dir` from `loopsmith-util`. It depends on nothing else in the workspace and knows nothing about the gate, the graph, or memory.
+`invoke` tries `parse_usage(spec, &stdout)`, then `parse_usage(spec, &stderr)` — providers report usage in wildly inconsistent places. `parse_usage` compiles `usage_regex`, prefers capture group 1 and falls back to the whole match, and strips `,` and `_` before parsing. Every fallible step returns `None`, so a malformed regex degrades to estimation rather than failing the call.
 
-Downstream, three callers build an `InvokeRequest` and hand it to `dispatch`:
+When nothing usable is reported, `estimate_tokens` applies the four-characters-per-token approximation over prompt plus output and `InvokeResponse.tokens_estimated` is set to `true`. The response carries the distinction so a budget report can state which it is: an approximate ceiling that fires beats an exact one that never does, which is what an unaccounted budget gate amounts to.
 
-- `run_node` (`src/run/dispatch.rs`) — the main path. Also calls `digest` for prompt provenance.
-- `ask_agent` (`src/run/perturb.rs`) — perturbation probes.
-- `add_narrative` (`src/run/summary.rs`) — run summaries.
+`cost_usd` is `Some` only when both a token count and `cost_per_1k_tokens` exist. No rate means no cost, not a guessed one.
 
-A fourth caller, `execute` in `src/cmd/providers.rs`, uses `availability` on its own to render the `loopsmith providers` doctor output without invoking anything.
+## Container execution
 
-The judge-independence rule — a judge must not run on the same provider as the builder whose work it is checking — is enforced by the caller choosing the `pinned` argument, not by this crate. `dispatch` has no notion of who is judging whom. Likewise, `goal_satisfied` is written by `loopsmith-gate` and by nothing else; no provider response reaching this crate can set it.
+`Container { image, network, runtime }` describes where a provider runs. `container_argv` assembles:
 
-## Contributing
+```
+run --rm [-i] [--network none] -v <workdir>:/work -w /work [-e KEY]... <image> <command> <args...>
+```
 
-The test module at the bottom of `lib.rs` is the fastest way to understand the crate, and it is deliberately built out of POSIX utilities rather than mocks: `echo` for a working provider, `false` for one that fails, `cat` for stdin mode, `sleep 30` with a 1-second timeout for the kill path, and `definitely-not-a-real-binary-xyz` for the missing-binary path. Real processes, real exit codes.
+`-i` appears only for stdin-mode providers. `--network none` is the default; `network: true` simply omits the flag. The node's working directory is mounted at `/work` and becomes the container's cwd, so a provider writing relative paths lands its output where the node expects it.
 
-Two conventions to preserve when adding tests:
+The provider CLI must exist *inside the image* — the host's copy is not visible in there, which is the point of the isolation. `loopsmith-run`'s `container` and `resolve` (`loopsmith-run/src/container.rs`) build these values; `loopsmith-core`'s validation warns about combinations that don't make sense, such as a sealed container fronting a hosted model.
 
-- **Avoid double quotes in argument payloads.** `a_usage_regex_extracts_the_real_count` uses `total_tokens=1234` rather than JSON precisely because embedding quotes in an argument makes the test depend on platform escaping, which Windows does differently — it failed there for a reason unrelated to usage.
-- **Assert the fallback, not just the happy path.** `a_malformed_usage_regex_falls_back_to_estimating` exists because `parse_usage` swallows a bad regex with `.ok()?`; the visible consequence is `tokens_estimated == true`, and that is what should be pinned down.
+## Supporting pieces
 
-The crate's `Cargo.toml` ships `/src/**/*` and `README.md` only. Integration tests read `config/examples/` and `config/loop.schema.json` from the repository root, which no crate tarball can contain — shipping them would hand a published crate tests that cannot pass.
+- **`digest`** — FNV-1a 64-bit over a string, hex-formatted. Not cryptographic. Its only job is to let the ledger say "this is the same prompt as before" without storing the prompt twice. `run_node` calls it for prompt provenance.
+- **`which`** — re-exported from `loopsmith-util`. The path is kept here because callers already used it; the implementation moved out once it turned out to have been written three times across the workspace, in three states of correctness.
+- **`starter_providers`** — the cascade `loopsmith init` writes into a fresh config, via `starter_config` (`loopsmith-cli/src/scaffold.rs`). Every entry is just a command, so unavailable ones are skipped rather than fatal, and a test asserts the set covers all three tiers. Note the deliberately short 120 s Ollama timeout: `ollama run <model>` silently pulls a missing model, and a multi-gigabyte download is indistinguishable from slow generation from out here. A cheap tier exists to be abandoned quickly, so it falls through to the next candidate instead of accommodating a download.
 
-Adding a provider *kind* means adding a `ProviderKind` variant in `loopsmith-core`; adding a provider *instance* means editing config and nothing else. If you find yourself writing vendor-specific logic in `invoke`, the design has been violated somewhere upstream.
+## How callers use it
+
+| Caller | Uses |
+|---|---|
+| `loopsmith-run/src/dispatch.rs` → `run_node` | builds `InvokeRequest`, calls `dispatch`, records `digest` |
+| `loopsmith-run/src/perturb.rs` → `ask_agent` | `dispatch` for adversarial perturbation prompts |
+| `loopsmith-run/src/summary.rs` → `add_narrative` | `dispatch` for run narration |
+| `loopsmith-cli/src/cmd/providers.rs` → `execute` | `availability` for the `loopsmith providers` readiness table |
+| `loopsmith-cli/src/scaffold.rs` → `starter_config` | `starter_providers` |
+| `loopsmith-run/src/container.rs` | constructs `Container` |
+
+This crate deliberately knows nothing about goals, gates, or iteration. It takes an `InvokeRequest`, returns an `InvokeResponse` or a classified `ProviderError`, and leaves every decision about what to do next to the run engine.
+
+## Contributing notes
+
+- **Adding a provider is usually not a code change.** `ProviderKind` exists for labelling and wizard catalog purposes; routing behaviour comes entirely from `command`, `args`, `requires_env`, and `tiers`. Reach for a config example before reaching for `lib.rs`.
+- **Never read an environment variable's value.** If a change needs a secret's contents, the design is wrong — the child process expands it.
+- **New placeholders** go in the `vars` map in `invoke`; `render` needs no change. Keep unknown placeholders passing through untouched.
+- **New transient markers** go in `looks_transient::MARKERS`, lowercase. Prefer a marker that appears in real provider stderr over a guess.
+- **Tests run real binaries** (`echo`, `cat`, `false`, `sleep`, `sh`) rather than mocking the process boundary, which is the part most likely to be wrong. Keep new tests in that style, and keep shell quoting out of test arguments — one usage test was rewritten to avoid double quotes precisely because Windows escapes them differently, and the test failed there for a reason unrelated to usage.
+- The crate's `include` list ships only `src/` and the README. Integration tests read `config/examples/` and `config/loop.schema.json` from the repository root, which no crate tarball can contain.

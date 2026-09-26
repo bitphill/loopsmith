@@ -2,142 +2,118 @@
 
 # Project Documentation
 
-The prose layer of loopsmith: six top-level Markdown files plus the example corpus they point at. It is not incidental — several of these files are load-bearing artifacts that the build, the tests, and the CLI itself depend on. `LOOP-TEMPLATE.md` is a file users copy. `config/examples/*` is compiled into the binary. `loops-engineering-cheat-sheet.md` is the provenance record that justifies the architecture and is cited from `README-DETAIL.md`.
+The `loopsmith` documentation set is not a byproduct of the code — it is a layer of the product. Four files at the repository root carry the whole surface a user can reach without reading Rust, and each one is written for a different reader arriving with a different question. This page explains what each file is responsible for, the invariants that hold across all of them, and what you have to update when you change the runtime.
 
-## Why there are six documents and not one
+## The four documents
 
-Each file is a complete description of the same system, pitched at a different reader, and the split is by **entry condition** rather than by topic. A reader who lands in the wrong one bounces; a reader who lands in the right one never needs the other five.
+| File | Reader | Question it answers |
+|---|---|---|
+| `README.md` | a developer evaluating the tool | What is this, how do I install it, what does a config look like? |
+| `README-FOR-DUMMIES.md` | a non-developer with a repeating job | Can I use this without learning YAML, and what do I edit? |
+| `HOW-TO-USE.md` | someone authoring a real loop | What does every field mean, and why does it exist? |
+| `LOOP-TEMPLATE.md` | someone writing `loop.yaml` right now | What goes in this slot? |
 
-| File | Reader | Entry condition | What it uniquely owns |
-|---|---|---|---|
-| `README.md` | Developer evaluating the tool | Found the repo, hasn't run anything | Install matrix, the five-minute path, the front-end tour (`--guided`, `--web`), portability table |
-| `README-FOR-DUMMIES.md` | Non-developer | Has a repeating job, does not write code | Markdown-config workflow (`loop.md`, not `loop.yaml`), the six sections worth editing, the "delete every `type: script` block" instruction |
-| `README-DETAIL.md` | Contributor / architect | Has run a loop, wants to know why it's shaped this way | Command table, crate layout, the verifier-independence ladder, the named tests |
-| `HOW-TO-USE.md` | Author writing a config | Editing `loop.yaml` and needs field semantics | Field-by-field A–J reference, detector portability, the permission preflight, the failure playbook |
-| `LOOP-TEMPLATE.md` | Author starting from blank | Wants a file to fill in | A copyable `SKILL.md` with frontmatter and inline rationale per section |
-| `loops-engineering-cheat-sheet.md` | Anyone questioning a design decision | "Why is the gate Rust?" | Per-source distillation of 20 sources, cross-cutting findings, `[unverified]` provenance markers |
+`README-DETAIL.md` was deleted; its design-rationale content now lives in `HOW-TO-USE.md` §14, on the stated principle that *a design rationale that lives beside the design it explains is one that gets read*. Do not reintroduce a separate rationale file.
+
+The entry points fan out rather than nest:
 
 ```mermaid
 flowchart TD
-    R["README.md<br/><i>developer entry</i>"]
-    D["README-FOR-DUMMIES.md<br/><i>non-developer entry</i>"]
-    H["HOW-TO-USE.md<br/><i>field reference</i>"]
-    T["LOOP-TEMPLATE.md<br/><i>copyable authoring file</i>"]
-    X["README-DETAIL.md<br/><i>architecture + rationale</i>"]
-    C["loops-engineering-cheat-sheet.md<br/><i>provenance, 20 sources</i>"]
-    E["config/examples/<br/><i>13 loops, .yaml + .md</i>"]
-    R --> D
-    R --> X
-    R --> H
-    D --> E
-    H --> T
-    X --> C
-    X --> E
+    R["README.md<br/>developer front door"] --> D["README-FOR-DUMMIES.md<br/>plain-English path"]
+    R --> H["HOW-TO-USE.md<br/>field reference"]
+    D --> H
+    H --> T["LOOP-TEMPLATE.md<br/>authoring surface"]
+    T --> S["config/loop.schema.json<br/>generated from Rust types"]
+    H --> S
 ```
 
-Note the asymmetry: `README-FOR-DUMMIES.md` links *out* to examples and back to `README.md`, but nothing in the developer chain routes into it except one signpost. That is intentional — it is a leaf, and it must stay self-sufficient.
+`config/loop.schema.json` is the terminal node and the only machine-readable one. It is **generated from the Rust types**, not hand-written, so prose in the three documents above it can drift from the runtime while the schema cannot. That asymmetry is the main hazard this module has.
 
-## The documentation-to-code coupling points
+## The thesis every document restates
 
-Four places where editing docs without editing code (or vice versa) produces a broken build or a lying document.
+All four files are organised around one claim, and none of them may soften it:
 
-### `config/examples/` is compiled into the binary
+> A model must not be the thing that certifies its own completion.
 
-The thirteen worked loops are not just documentation. `runtime/crates/loopsmith-cli` pulls them in with `include_str!`, which cannot reach above the package root, so `tools/sync-examples.sh` copies `config/examples/*.yaml` into `runtime/crates/loopsmith-cli/templates/examples/`. **A test fails if the two have drifted.** Editing an example is therefore a `cargo test`-visible change, not a prose change.
+The concrete form: `goal_satisfied` is written by `loopsmith-gate` and by nothing else, and the gate can **revoke** — delete a required artifact and a satisfied goal flips back. `HOW-TO-USE.md` §14.2.2 gives the reasoning as a four-rung independence ladder (separate prompt → separate context → separate model → separate mechanism), and places the gate at rung 4.
 
-Each example ships as a `.yaml` and an equivalent `.md`, and a round-trip test holds the two grammars honest against every shipped example. Adding an example means adding both halves.
+Each document says this at its own reading level. `README.md` states it as a block quote in the opening. `README-FOR-DUMMIES.md` renders it as an ASCII diagram where the AI is only ever on the left of the pass/fail diamond, captioned *"It cannot mark its own homework."* `HOW-TO-USE.md` derives it from the corpus. `LOOP-TEMPLATE.md` enforces it as a checklist item (*judge nodes pinned to a different provider family than their builder*). When you touch one, check that the others still agree.
 
-Every example ships with `pre_execution` unfinished — `validate` refuses them by design. Any doc that shows an example being run must show the refusal first, or it teaches users to skip the one step the tool exists to enforce.
+## Structure of `HOW-TO-USE.md`
 
-The count "thirteen" appears in `README.md`, `README-DETAIL.md`, `README-FOR-DUMMIES.md`, and `HOW-TO-USE.md`. Adding a fourteenth example is a four-file edit plus a table row in three of them.
+This is the largest document and the one most likely to go stale. Fourteen numbered sections, with §5 doing most of the work:
 
-### `config/loop.schema.json` is the field authority
+- **§1** — the three-plane architecture (invocation, control plane, execution) as a `text` block listing the crates: `core`, `graph`, `memory`, `gate`, `provider`, `skills`, `run`, `wizard`, `web`, `util`, `mcp`.
+- **§2–§4** — the two skills (`loopsmith`, `loopsmith-reference`), frontmatter conventions, and what `loopsmith loop new --path` writes.
+- **§4b** — the browser UI. Structurally separate from §4 because `--web` is an alternative front end, not a step in the same flow.
+- **§5** — the configuration reference. One subsection per dotted path, in the order of the model itself: `intent` → `execution` → `safety` → `evolution`, then `features` and `environment`.
+- **§6–§13** — operational concerns: BYOK providers, the permission preflight, sub-agent acquisition, the ledger, the failure playbook, proposals, the promotion path, long runs.
+- **§14** — provenance. Twenty sources, what each contributed, what was rejected and why.
 
-`HOW-TO-USE.md §5` and `LOOP-TEMPLATE.md` both enumerate fields. Neither is generated — both are hand-maintained mirrors of the schema plus the cross-field rules the schema cannot express (every goal having a blocking validation, targets resolving, `execution_guidelines` cycles, `no_progress_iterations_randomness < no_progress_iterations`). Those cross-field rules live only in `loopsmith_core::validate` and in prose; there is no third place that records them.
+### The §5 ordering is load-bearing
 
-### The guided wizard's field list has three mirrors
+`§5` follows the config's own shape: eight top-level keys, four of which are bundles grouping sections *by what they are for*. Every subsection heading is written as `` `dotted.path` · Human name `` — for example `` `intent.prerequisites` · Pre-execution work ``. The second half of that heading is the 0.3-era lettered name, which keeps the document searchable for anyone arriving from an old config. Keep both halves when you add a field.
 
-`README-DETAIL.md` states the rule explicitly: `guided/mod.rs::stages()` is the source of the terminal wizard's order, `guided/sections.rs` holds the labels, defaults, validators and gates, and `web/src/guided/spec.ts` is a declarative mirror the browser walks. The documentation asserts there is deliberately no second field list with its own opinions. **A field added to one is a field the other is expected to grow** — and the docs claiming that parity are the only place the expectation is written down.
+### Each field says *why it exists*
 
-### Skills are documented and shipped
+The convention across §5 and all of `LOOP-TEMPLATE.md` is that a field's documentation leads with the failure it prevents, not with its type. The type is in the schema. Examples of the house voice:
 
-`skills/loopsmith/` (user-invoked, `disable-model-invocation: true`) and `skills/loopsmith-reference/` (model-invoked) are described in `HOW-TO-USE.md §2` and §3. The conventions in §3 — the 1,536-character cap on `description` plus `when_to_use`, keeping the body under 500 lines, putting all "when to use" information in the description because the body isn't loaded until after the load decision — apply to those two shipped skills *and* to any skill the loop generates into `generated-skills/`. §3 is a spec, not commentary.
+- `intent.background` — "every node starts fresh with only its spawn prompt. Whatever is not here has to be rediscovered, badly, by each of them."
+- `safety.gates.stop` — "a loop with no exit runs until it succeeds, breaks, or drains the account."
+- `safety.protected` — "A loop allowed to edit its own limits does not have limits."
 
-## Invariants restated across files
+This is not decoration. The browser UI's ⓘ affordances and the `:help` text in `loopsmith --guided` serve the same explanations, so a field whose documentation is only a type signature produces a wizard prompt a user cannot answer.
 
-Some claims appear in four or five documents. They are the load-bearing facts, and they must move together or the corpus starts contradicting itself.
+## Structure of `LOOP-TEMPLATE.md`
 
-| Invariant | Appears in |
+A copyable `SKILL.md` with YAML frontmatter (`name`, `description`, `argument-hint`, `arguments`, `allowed-tools`, `disable-model-invocation: true`) followed by the full annotated config. Every placeholder is literally `REPLACE ME`, which is what makes it greppable.
+
+Two properties to preserve:
+
+1. **The body stays thin.** The file says so explicitly: "the config is data the runtime validates, and data in a config file can be checked, diffed, and scheduled. Prose in a skill body cannot." Resist the urge to move explanation out of the YAML comments and into paragraphs.
+2. **The closing checklist is the fast path.** Fourteen checkboxes covering the cross-field rules a JSON Schema cannot express — every goal has a blocking check, `no_progress_iterations_randomness` strictly below `no_progress_iterations`, parallel builders given `isolation: { mode: worktree }`, a budget ceiling that can actually fire. These correspond one-to-one with refusals in `loopsmith loop validate`. Adding a cross-field validation rule to the runtime means adding a line here.
+
+## Structure of `README-FOR-DUMMIES.md`
+
+Written to a hard constraint: **no YAML schema knowledge, and no assumption that the reader has a terminal habit**. Terminal is explained down to `⌘ + Space`. It uses three Mermaid `flowchart LR` diagrams, deliberately small — the six things you edit, the schedule decision, and the run cycle — because a wide graph is unreadable on a phone.
+
+Two things in this file are easy to break:
+
+- **It links to `.md` examples, not `.yaml`.** Every row of the uses table points at `config/examples/<name>-loop.md`. The `README.md` equivalent table points at `.yaml`. Both files must exist for all fifteen examples; `loopsmith loop convert` is what keeps the pair in sync.
+- **The `type: script` warning.** The file tells the reader to grep `loop.md` for `type: script` and delete those blocks, because a script detector needs a file the shipped examples do not include. If an example ever ships a working script detector, that instruction becomes wrong and destructive.
+
+## Invariants across the set
+
+These hold in more than one file, so a change in one place is a change in several.
+
+**Fifteen examples, everywhere.** The count appears in `README.md` (twice), `README-FOR-DUMMIES.md` (three times), and `HOW-TO-USE.md` §4b. All fifteen `config/examples/*.yaml` are compiled into the binary with `include_str!`; `tools/sync-examples.sh` copies them into `runtime/crates/loopsmith-web/templates/examples/`, and a test fails if the two have drifted. Adding an example means: the `.yaml`, the `.md`, the sync script run, and every prose count.
+
+**Both spellings of the front ends.** `loopsmith --web` / `loopsmith web`, and `loopsmith --guided` / `loopsmith loop guided`. `HOW-TO-USE.md` §4b states the reasoning — "Both spellings exist and neither is the real one" — and that `--web` combined with a subcommand is refused rather than silently resolved. Document both forms wherever either appears.
+
+**Secrets: name only.** Every file that mentions API keys repeats the same rule: `requires_env` records the key *name*, values are never read, substituted, or logged. `README.md` adds an explicit warning about pasting keys into chats or issues. Do not add an example that inlines a key value, even a fake one.
+
+**`validate` fails on purpose.** All four documents say that `loopsmith loop validate` refuses while any `intent.prerequisites` step is `done: false`, and all four say it is deliberate rather than a bug. `README.md` calls it "the most valuable thing the tool does." Keep the framing — a reader who thinks this is a defect files an issue.
+
+**Three-platform claims are checked.** The `README.md` portability table (launchers, scheduler, home directory, `compat.sh`) makes claims CI verifies on `ubuntu-latest`, `macos-latest`, and `windows-latest`. Nothing in that table is decided at build time: the userland is probed by asking `sed` for a version, and the scheduler is whichever candidate is on `PATH`. If you edit that table, the claim has to remain one CI can fail on.
+
+## What to update when the runtime changes
+
+| Change | Also touch |
 |---|---|
-| A model must not certify its own completion; `goal_satisfied` is written by `loopsmith-gate` and nothing else | all except the template |
-| The gate can **revoke** — delete an artifact and a satisfied goal flips back | `README.md`, `README-DETAIL.md`, `HOW-TO-USE.md`, cheat sheet |
-| `validate` fails on purpose until every `pre_execution` step is `done: true` | `README.md`, `README-DETAIL.md`, `README-FOR-DUMMIES.md`, `HOW-TO-USE.md`, `LOOP-TEMPLATE.md` |
-| A `judge` verdict from the builder's own provider is **refused**, not discounted | `README-DETAIL.md`, `HOW-TO-USE.md`, `LOOP-TEMPLATE.md` |
-| Every goal needs at least one blocking validation or the config is rejected | `README-DETAIL.md`, `HOW-TO-USE.md`, `LOOP-TEMPLATE.md` |
-| Cron is evaluated in **UTC**; prefer `interval` for plain cadence | `README.md`, `README-DETAIL.md`, `HOW-TO-USE.md`, `LOOP-TEMPLATE.md` |
-| `requires_env` names keys; values are never read, substituted, or logged | `README.md`, `README-DETAIL.md`, `HOW-TO-USE.md`, `LOOP-TEMPLATE.md` |
-| Pull an `ollama` model first; the starter provider sits at `timeout_seconds: 120` | `README.md`, `README-DETAIL.md`, `HOW-TO-USE.md`, `LOOP-TEMPLATE.md` |
-| `--path` is mandatory for `new` | `README.md`, `README-DETAIL.md`, `HOW-TO-USE.md`, `LOOP-TEMPLATE.md` |
-| The loop proposes goals/validations/success/skills; it never applies them | `README-DETAIL.md`, `HOW-TO-USE.md`, `LOOP-TEMPLATE.md`, `README-FOR-DUMMIES.md` |
+| New config field | `HOW-TO-USE.md` §5 subsection, `LOOP-TEMPLATE.md` YAML block + its "why it exists" note |
+| New cross-field validation rule | `LOOP-TEMPLATE.md` pre-flight checklist, `HOW-TO-USE.md` §10 failure playbook |
+| New detector type | The detector table in both `HOW-TO-USE.md` §`safety.checks` and `LOOP-TEMPLATE.md` (both are ordered strongest-first, `judge` last) |
+| New stop reason | `HOW-TO-USE.md` §10, `README-FOR-DUMMIES.md` "When something goes wrong" |
+| New `compat.sh` helper | The helper tables in `README.md` §Portability and `HOW-TO-USE.md` §`safety.checks` |
+| New example loop | Both example tables, all four prose counts of "fifteen", `tools/sync-examples.sh` |
+| New CLI subcommand | `README.md` "While it runs" table, `README-FOR-DUMMIES.md` equivalent table, `LOOP-TEMPLATE.md` "Run it" block |
+| New crate | `HOW-TO-USE.md` §1 architecture block, `README.md` library list |
 
-The MCP invariant is a special case: `README-DETAIL.md` notes the server exposes plan, ledger, gate verdict, and scratchpad, and has **no tool for marking a goal satisfied** — and that a test (`there_is_no_tool_for_declaring_a_goal_satisfied`) asserts the absence. That's the pattern to imitate. Where a documented guarantee has a named test, cite the test; the citation is what stops the guarantee from being removed quietly.
+## Voice
 
-## Conventions
+Consistent across the set and worth matching:
 
-**Every Mermaid diagram carries a plain-text fallback.** `README-DETAIL.md` pairs each `mermaid` block with an ASCII box-drawing equivalent, explicitly "for a terminal with no image or mermaid support." `README-FOR-DUMMIES.md` leads with the ASCII picture and offers the Mermaid version second. Diagrams also come in a third form — a PNG in `assets/` (`architecture.png`, `guided-flow.png`, `web-guided-flow.png`) inside a `<div align="center">`. New diagrams are expected to ship at least the Mermaid + ASCII pair.
-
-**Tables over prose for anything enumerable.** Detector types, stop gates, platform differences, failure modes, "does on its own / only proposes" — all tables. The detector table specifically is always ordered **strongest first** (`script` → `file_exists` → `regex_match` → `threshold` → `judge`), in every file where it appears, because the ordering *is* the advice.
-
-**Claims are shown, not asserted.** Where a document states a behaviour it prefers to paste the actual terminal output — the `pre_execution` refusal, `judgment refused: judge and builder both ran on 'claude'`, the `loopsmith providers` availability listing, the `plan` wave output with its Amdahl arithmetic, `skills scores`. These are transcript excerpts and go stale if output formats change.
-
-**Rationale is inline, under a stable heading.** `LOOP-TEMPLATE.md` uses a literal `*Why it exists:*` line under every A–H section. `HOW-TO-USE.md` uses tables titled by consequence ("Why" columns). Neither hides the reasoning in a separate rationale document — the cheat sheet is for *provenance*, not for *why this field exists*.
-
-**Uncertainty is marked.** The cheat sheet flags eighteen of twenty sources as self-published and tags every figure that drives a design decision `[unverified]` or `[unverified, secondhand]`. It names the one authoritative source (the official Claude Code skills documentation). Preserve those markers; they are the reason the design section can be trusted at all.
-
-## `LOOP-TEMPLATE.md` is executable-ish, not just prose
-
-It opens with YAML frontmatter (`name`, `description`, `argument-hint`, `arguments`, `allowed-tools`, `disable-model-invocation`) because it is meant to be copied to `<your-loop>/SKILL.md`. Its `REPLACE ME` markers are the fill-in slots. The body deliberately stays thin — the file itself explains why:
-
-> the config is data the runtime validates, and data in a config file can be checked, diffed, and scheduled. Prose in a skill body cannot.
-
-Consequence for maintainers: content added to `LOOP-TEMPLATE.md` should be a config example plus one line of rationale, never a paragraph of guidance. Guidance belongs in `HOW-TO-USE.md`, which the template points to. The closing "Checklist before first run" is the one place in the corpus that collapses every invariant into a pre-flight list; it is worth updating whenever a new invariant lands.
-
-## `loops-engineering-cheat-sheet.md` and the provenance chain
-
-Structurally different from everything else: it is a distillation of `planning/docs/loops-engineering/` (33 files, 20 unique sources) with a **traceability table** mapping each source's load-bearing idea to the component that implements it. Section 3 (*What loopsmith Takes From This*) is the explicit corpus-idea → component → enforcement mapping.
-
-This is what `README-DETAIL.md`'s *Why the gate is Rust* section defers to. The four-rung ladder — separate prompt, separate context, separate model family, separate mechanism — originates here (§2.2), and `loopsmith-gate` sitting at rung 4 is the sentence the whole architecture hangs on. The cheat sheet also records what was **rejected** and why, which is the part that stops a rejected idea from being re-proposed a year later.
-
-Amdahl's table (§2.4) is duplicated as a doc claim *and* as the test `amdahl_matches_the_published_table`. That is the tightest doc-to-code binding in the repo: the published table is the oracle.
-
-## Contributing to the docs
-
-### When you add a config field
-
-1. `config/loop.schema.json` — the field itself.
-2. `HOW-TO-USE.md §5` — semantics, defaults, and any cross-field rule the schema can't express.
-3. `LOOP-TEMPLATE.md` — only if it belongs in a starter config; add the YAML plus one `*Why it exists:*` line.
-4. `guided/sections.rs` and `web/src/guided/spec.ts` — if the wizard should ask for it.
-5. `README-DETAIL.md` §*The A–J model* — only if it's a new section, not a new field.
-
-### When you add a CLI command
-
-`README-DETAIL.md`'s command table is the canonical list. `README.md`'s *While it runs* table and `README-FOR-DUMMIES.md`'s equivalent table carry only the subset a running loop needs. `HOW-TO-USE.md` documents commands where they're relevant to a workflow section, not in a table of their own.
-
-### When you add an example loop
-
-Both `.yaml` and `.md`, run `tools/sync-examples.sh`, then update the count and the annotated row in `README.md`, `README-DETAIL.md` (*The examples*), and `README-FOR-DUMMIES.md` (*What people use it for*). Leave `pre_execution` unfinished. `cargo test` catches a missed sync; nothing catches a missed count.
-
-### When you change a default or a message
-
-Grep for the pasted terminal output. The refusal text, the `providers` listing, the `plan` block, and the spend line all appear verbatim in more than one file.
-
-## Known drift
-
-Worth fixing on the next pass, and worth knowing about before you cite these files:
-
-- **The A–H / A–J mismatch.** The model has ten sections. `HOW-TO-USE.md §1` still labels the core crate "A–H config model and validation", §4 calls the scaffolded file "the A–H config", and `LOOP-TEMPLATE.md`'s main heading is "The A–H model" despite the corpus documenting `I · execution_guidelines` and `J · default_skills` elsewhere. `README.md` and `README-DETAIL.md` say A–J. The template's checklist and the `HOW-TO-USE` architecture block are the stale ones.
-- **Duplicate `## Architecture` heading in `README-DETAIL.md`.** Two sections share the name, so the `#architecture` anchor in the nav header resolves to the first (the ASCII plane diagram) and the second (the three-front-ends / one-`LoopConfig` explanation) is unreachable by link.
-- **`skills` appears in two lists.** `README-DETAIL.md`'s architecture block lists six crates under the control plane and omits `skills`; `HOW-TO-USE.md §1` lists seven and includes it. The repository-layout tree in `README-DETAIL.md` lists all eight published crates.
-- **Hardcoded counts.** The `tests-415 passing` badge appears in two files and the "415 tests, no warnings" line in a third. Nothing verifies them.
-- **`config/marketplaces.json` vs `runtime/crates/loopsmith-cli/templates/marketplaces.json`.** The repository-layout tree names the former; the trust-floor prose in both `README-DETAIL.md` and `HOW-TO-USE.md §8` points at the latter. Only one is the file the binary reads.
+- **A rule is stated with its consequence, in one sentence.** "A loop allowed to edit its own limits does not have limits." "An approval gate whose detector can satisfy itself is not an approval, it is a delay." "A system that can only promote is a burndown chart with extra steps."
+- **Refusals are framed as features.** Wherever the tool declines to proceed, the documentation says why declining is correct.
+- **Unverified claims are marked.** §14 flags eighteen of twenty sources as self-published and tags figures `[unverified]`. Star counts and benchmark numbers are recorded as context, never as the basis for a default.
+- **No em-dash-free hedging and no marketing superlatives.** Numbers are specific ("1,536 characters", "timeout_seconds: 120", "bash 3.2") and each one is there because something broke without it.

@@ -2,71 +2,42 @@
 
 # Evolution & Perturbation
 
-`runtime/crates/loopsmith-cli/src/run/evolve.rs`
-`runtime/crates/loopsmith-cli/src/run/perturb.rs`
+Two sibling modules in `loopsmith-run` that let a loop change how it works without ever changing what counts as done.
 
-These two modules are the loop's self-observation machinery. Both are invoked from `execute` in `src/run/mod.rs`, once per iteration, and both exist to answer the same question from different angles: *the loop is not converging — what now?*
-
-They divide by who is allowed to act on the answer:
-
-| | `evolve.rs` | `perturb.rs` |
+| Module | Question it answers | Effect |
 |---|---|---|
-| Produces | `Proposal` rows in the store | a `Perturbation` applied to the next iteration |
-| Acted on by | a human, later, by editing the config | the loop itself, immediately |
-| Can change | nothing | *how* the loop works |
-| Can never change | anything | *what counts as done* |
+| `crates/loopsmith-run/src/evolve.rs` | "What did this run learn about its own tooling and shape?" | Writes evidence and proposals. Never mutates config. |
+| `crates/loopsmith-run/src/perturb.rs` | "The loop has stopped moving — what should it vary?" | Alters dispatch order, tier, sub-agent, and prompt for one iteration. |
 
-That last row is the load-bearing invariant. Nothing in either module can reach goal state, relax a check, or touch the gate. `evolve.rs` cannot even write the config — it writes prose and a suggested patch and stops. `perturb.rs` can steer the loop, but only within a fixed menu of four tactics, and every prompt it emits states explicitly that the gate is unchanged (there is a test, `every_directive_says_the_gate_is_unchanged`, that holds this).
+Both are driven from `running.rs`, and both are bounded by the same invariant: **the gate owns the definition of done, and neither module can touch it.** Everything here is method, not criteria.
+
+> Note on paths: these modules live in the `loopsmith-run` crate (`runtime/crates/loopsmith-run/src/`), not in `loopsmith-cli`. The CLI only surfaces their output.
 
 ---
 
-## `evolve.rs` — evidence in, proposals out
+## Where they sit in an iteration
 
-### The per-iteration path
-
-`execute` calls three functions in sequence, plus one that runs when exploration is on.
-
-**`next_candidate(cfg, trials) -> Option<String>`** decides whether this iteration should trial an unconfigured sub-agent. It is gated on `cfg.skills.explore` and returns `None` unless `explore_candidates` is non-empty. Candidates already present on some node's `skills` list are filtered out (they are not candidates, they are policy), as are candidates that already have `cfg.skills.min_trials` behind them. Among the rest it picks the **least-tried** one, so evidence spreads across candidates instead of piling onto whichever name sorts first.
-
-**`harvest_judgments(cfg, rec, iteration) -> Vec<Judgment>`** reads back this iteration's episodes from the store and turns judge output into structured verdicts. For each episode whose node has `role == Role::Judge`, it resolves *which builder that judge reviewed* by walking the node's `depends_on` and finding the matching episode in the same iteration, then hands the judge's output, the judge's `provider_id`, and the builder's `provider_id` to `judgment::parse`. The builder provider is what independence is measured against — a judge running on the same provider as the builder it graded is a weaker signal, and `judgment::parse` needs both ids to say so.
-
-Store errors here are swallowed: `rec.store.episodes(...)` failing yields an empty `Vec`, not an error. Judgment harvesting is advisory, and a store hiccup should not take the run down.
-
-**`record_trials(rec, iteration, episodes, node_skills, verdicts)`** is the scoring step. For each `RanNode` that used skills, it collects the `TargetVerdict`s for *that node's own goals* — not the whole loop's — averages their `blocking_pass_rate()`, and takes `satisfied` as the conjunction. Scoring per-node matters: attribute the loop-wide verdict to every skill and every skill in the graph shares one indistinguishable outcome. Nodes whose goals have no verdict yet are skipped entirely rather than recorded as failures.
-
-`RanNode` exists as a named struct for a specific reason documented in the source: it replaced a four-tuple threaded through three functions, which is why `SkillTrial.tokens` was permanently `None` for a while — the caller had the token count and there was nowhere in the tuple to put it. Cost belongs in the trial record because "lifts the pass rate for free" and "lifts the pass rate while tripling the bill" are different propositions, and the ranking cannot tell them apart without it.
-
-### The proposal desk
-
-`write_proposals(cfg, rec, iteration, observed) -> usize` is the entry point, and it is a sum of four independent generators:
-
-```rust
-propose_reshape(cfg, &desk, observed.exhausted_nodes)
-    + propose_criteria_changes(&desk, observed.verdicts)
-    + propose_try_skill(cfg, &desk, observed.verdicts)
-    + skill_proposals(cfg, &desk)
+```mermaid
+flowchart TD
+    prepare["running::prepare"] -->|stall detected| choose["perturb::choose"]
+    prepare -->|next untried skill| cand["evolve::next_candidate"]
+    choose --> disp["waves::dispatch"]
+    cand --> disp
+    disp -->|RanNode + node_skills| rule["running::rule"]
+    rule -->|"evolve::harvest_judgments"| gate["loopsmith_gate::evaluate_all"]
+    gate -->|verdicts| trials["evolve::record_trials"]
+    trials --> props["evolve::write_proposals"]
 ```
 
-Each returns how many proposals it wrote, so callers sum instead of each threading a `&mut` counter.
-
-`Observed<'a>` is the input contract — `exhausted_nodes` (nodes that hit `max_revisions_per_node` with goals still open) and `verdicts` (the gate's current rulings). The first three generators read only the run's own behaviour; only `skill_proposals` needs the accumulated cross-run trial record.
-
-The private `Desk<'a, S: Store>` struct is the write path. It is constructed with `said`, a set of `"{kind:?}:{subject}"` keys built from every proposal already stored for this run. `Desk::write` checks that set first and returns `0` on a repeat — the whole point being that a proposals file with forty identical entries is a proposals file nobody reads. Note that `said` is a snapshot taken at construction, so a single `write_proposals` call cannot dedupe *within itself*; the four generators are distinct enough by `(kind, subject)` that this does not currently collide.
-
-`write` also calls `Proposal::with_default_expiry()` rather than accepting an expiry argument. That is deliberate: expiry is derived from `ProposalKind`, so a new kind cannot be added without deciding how long its evidence stays true. On a store error it returns `0` and skips the ledger entry, keeping the count honest.
-
-### What each generator says
-
-- **`propose_reshape` → `ProposalKind::ReshapeGraph`.** A node that burned its revision budget without satisfying its goals is evidence about the *graph*, not the node: one unit of work was asked to do something it cannot do in one step. Rewriting the graph would be the loop editing its own config, so instead it emits a suggested YAML patch adding a `{node}-prepare` researcher upstream, and a human decides.
-- **`propose_criteria_changes` → `ProposalKind::ChangeCriteria`.** Scans blocking, failing checks for evidence starting with `"detector error"`. A detector that cannot run fails closed forever, so no amount of work by any node will change the answer — that is a criteria problem, not a work problem, and it belongs in front of a human rather than in the next iteration's prompt.
-- **`propose_try_skill` → `ProposalKind::TrySkill`.** Fires only when `skills.explore` is *off*, candidates are listed, and at least one target is unsatisfied. Exploration is off by default because it spends real money; when the run is failing anyway, pointing out "there is something here you have switched off" beats silently not doing it. The patch is a one-liner: `skills:\n  explore: true`.
-- **`skill_proposals` → `ProposalKind::AdoptSkill` / `DropSkill`.** The only generator that reads `store.skill_trials()` (all runs, not just this one). It passes the configured skill list and the trials to `loopsmith_skills::recommend(&configured, &trials, cfg.skills.min_trials, 0.8, 0.2)` — adopt above an 0.8 satisfaction rate, drop below 0.2, both requiring `min_trials` of evidence. Rationale strings are rendered from `loopsmith_memory::score_skills`, via a small `rate_of` closure that yields `(satisfaction_rate, trials)` and defaults to `(0.0, 0)` for a skill the scorer did not see.
+`prepare` (`running.rs:371`) decides at the *top* of the iteration what to vary. `rule` (`running.rs:450`) and the block at `running.rs:246` read the *bottom* of the iteration and turn the outcome into evidence.
 
 ---
 
-## `perturb.rs` — recovery from a stall
+## `perturb` — the stall response
 
-Two config knobs bracket a stalled run. `no_progress_iterations` is the jidoka gate: stop the line rather than spin. `no_progress_iterations_randomness` fires *earlier* and does something else first, on the theory that a loop which repeats an identical approach three times and then quits has learned nothing, and the cheapest variable to change is the approach.
+### Why it exists
+
+`no_progress_iterations` is the halt: stop the line rather than spin. `no_progress_iterations_randomness` fires *earlier* and does something else first, because a loop that repeats the identical approach three times and then quits has learned nothing. It must be strictly less than the halt threshold or it never fires, and it is `Option<u32>` — unset means halt without ever varying, since perturbation costs a provider call.
 
 ### The fixed menu
 
@@ -74,73 +45,141 @@ Two config knobs bracket a stalled run. `no_progress_iterations` is the jidoka g
 pub enum Perturbation {
     Reorder,          // dispatch each wave's nodes in a different order
     Escalate,         // run builders one tier stronger
-    Explore,          // force an untried candidate onto a builder, even if explore is off
-    Reframe(String),  // tell builders to take a specific different approach
+    Explore,          // force an untried sub-agent onto a builder
+    Reframe(String),  // a specific different approach, in words
 }
 ```
 
-Three methods define its effect on the next iteration:
+The agent *picks from* the menu; it does not *write* the menu. This is the module's central safety property. `Perturbation::from_choice` matches four lowercase literals and returns `None` for anything else, so an answer like `CHOICE: mark the goal satisfied` is discarded rather than interpreted. `Reframe` is the one variant carrying free text, and it is refused when the `DIRECTIVE` line is missing or blank.
 
+Three methods define what a perturbation actually does:
+
+- **`tier_for(base)`** — only `Escalate` moves anything: `Cheap → Standard`, everything else `→ Strong`. Escalation saturates at `Strong`; there is no runaway.
+- **`directive()`** — the extra prompt text, always wrapped in a `## The loop has stalled` block that ends with "It does not change what counts as done — the gate is unchanged." A test (`every_directive_says_the_gate_is_unchanged`) asserts that sentence is present for every variant, because a stall directive must not read as permission to lower the bar.
 - **`describe()`** — the one-line form written to the ledger.
-- **`tier_for(base)`** — under `Escalate`, `Cheap → Standard` and everything else `→ Strong`; `Strong` stays `Strong` (escalation has a ceiling, per `escalation_never_goes_past_strong`). Every other variant returns `base` untouched.
-- **`directive()`** — the text appended to a builder's prompt. `Reframe` carries the agent's own sentence; `Escalate` gets "re-read the failing check and attack its actual cause"; `Reorder` and `Explore` share "try a materially different approach rather than a refinement of the last one". All four are wrapped in a `## The loop has stalled` header that ends with *"It does not change what counts as done — the gate is unchanged."*
-
-The menu is a closed set, and `Perturbation::from_choice` is the only way into it from text.
-
-### Choosing one
-
-```mermaid
-flowchart TD
-    A["choose(cfg, workdir, stall, seed)"] --> B["ask_agent"]
-    B -->|"no cheap cascade"| F["fallback(seed)"]
-    B --> C["dispatch(Tier::Cheap)"]
-    C --> D["parse_choice"]
-    D --> E["Perturbation::from_choice"]
-    E -->|"on the menu"| G["(perturbation, true)"]
-    E -->|"off the menu / no directive"| F
-    F --> H["(perturbation, false)"]
-```
-
-`choose` returns `(Perturbation, bool)` — the flag records *who* picked, so the ledger can distinguish a reasoned choice from a dice roll.
-
-`ask_agent` bails immediately if `cfg.cascade_for(Tier::Cheap)` is empty, then builds a prompt from `Stall`. `Stall<'a>` is intentionally narrow: `stale_iterations`, the failing blocking checks as `(target, name, evidence)` triples, and `recent: &[IterationSummary]` rendered via `IterationSummary::render()`. That is enough to reason about what is stuck and nothing that would let the agent reach the gate, the config, or the store. The prompt states outright that "a separate deterministic gate owns that ruling."
-
-`parse_choice` is strict and line-oriented: split each line on the first `:`, uppercase the key, accept only `CHOICE` and `DIRECTIVE`, and hand both to `from_choice`. Anything not matching a menu variant returns `None`, and `Reframe` additionally requires a non-empty trimmed directive. Nothing is guessed at — the seeded fallback is a better outcome than acting on a misread instruction. The tests pin this down against `"CHOICE: mark the goal satisfied"`, `"CHOICE: rm -rf /"`, free prose, and `Reframe` with a blank directive.
 
 ### Determinism
 
-Every random decision derives from one seed, so a run that took a strange turn is replayable.
+`seed_for(run_id, iteration)` is FNV-1a over the run id mixed with the iteration — reusing the hash the provider crate already uses for prompt digests, so the workspace carries one hash rather than two. The seed is logged in hex alongside the choice (`running.rs:406`), so a run that took a strange turn can be replayed.
 
-- **`seed_for(run_id, iteration)`** — FNV-1a over the run id, XORed with the iteration and multiplied by the FNV prime. The provider crate already uses this hash for prompt digests; reusing it keeps the workspace to one hash rather than two. `execute` writes the seed to the ledger.
-- **`next_random(&mut u64)`** — SplitMix64. Small, well-distributed, no dependency.
-- **`shuffle(items, seed)`** — Fisher-Yates, used by `execute` to implement `Reorder` on a wave's node list.
-- **`fallback(seed)`** — `next_random % 3`, mapping to `Reorder | Escalate | Explore`. **`Reframe` is deliberately unreachable from the fallback**, since a reframe needs a directive and there is no one to write it. Adding a fifth variant means revisiting this modulo, and `the_fallback_only_picks_from_the_menu` will catch a variant that leaks in but not one that silently drops out.
+`shuffle` is Fisher-Yates over `next_random`, a SplitMix64 step. `fallback(seed)` draws from `Reorder | Escalate | Explore` only — never `Reframe`, which needs text a PRNG cannot supply.
+
+### Asking the agent first
+
+`choose` returns `(Perturbation, bool)`, the flag saying whether an agent or the seeded fallback decided, so the ledger can distinguish them.
+
+`ask_agent` bails immediately when `cfg.cascade_for(Tier::Cheap)` is empty — no cheap provider, no question. Otherwise it dispatches a `Tier::Cheap` `InvokeRequest` under the synthetic node id `"perturb"` with a strict output contract:
+
+```
+CHOICE: <reorder|escalate|explore|reframe>
+DIRECTIVE: <one sentence, required only when CHOICE is reframe>
+```
+
+`parse_choice` is line-oriented and unforgiving: split on the first `:`, uppercase the key, keep only `CHOICE` and `DIRECTIVE`, and hand the result to `from_choice`. Anything off-menu yields `None` and the caller falls back to the seed.
+
+### What the agent is allowed to see
+
+```rust
+pub struct Stall<'a> {
+    pub stale_iterations: u32,
+    pub failing: &'a [(String, String, String)],  // (target, check name, evidence)
+    pub recent: &'a [IterationSummary],
+}
+```
+
+Deliberately narrow: failing blocking checks and the last two iteration summaries (`running.rs:394` takes the tail). No gate handle, no config, no store. The prompt states outright that a separate deterministic gate owns whether anything is finished.
+
+### How a perturbation reaches the work
+
+| Variant | Applied in | Mechanism |
+|---|---|---|
+| `Reorder` | `waves.rs:285` | `perturb::shuffle(&mut ids, inputs.seed)` before `eligible_nodes` |
+| `Escalate` | `dispatch.rs:179` | `p.tier_for(node.tier)` — **skipped for `Role::Judge`** |
+| `Explore` | `running.rs:427` | Fills `explore_now` from `explore_candidates.first()` even when `explore` is off |
+| `Reframe` / all | `prompts.rs:100` | `p.directive()` appended — **skipped for `Role::Judge`** |
+
+The two judge exclusions are the same argument twice. Escalating the checker alongside the worker changes the bar at the moment the work changes; telling the checker to "try a different approach" is how a stalled loop talks itself into a lower bar. Judges keep their configured tier and their fixed toolset (`resolve_skills`, `waves.rs:665`, attaches exploration candidates to `Role::Builder` only).
+
+`Explore` is also the one case where a sub-agent trial happens without opting in — normally `skills.explore` gates it, but a stall makes the spend worth it unprompted. When `explore_candidates` is empty the loop records that it wanted to explore and could not, rather than failing silently.
 
 ---
 
-## Integration points
+## `evolve` — evidence and proposals
 
-Everything in both modules is called from `execute` in `src/run/mod.rs`; neither module calls the other, and neither is used anywhere else.
+Nothing in this module changes the config, and nothing in it can reach goal state. The loop may discover that a sub-agent helps; adopting it is a human's edit.
 
-Outward dependencies:
+### Exploration scheduling
 
-- **`loopsmith-core`** — `LoopConfig`, `Role`, `Tier`; read-only. `cfg.cascade_for(Tier::Cheap)` gates the perturbation agent.
-- **`loopsmith-memory`** — the `Store` trait (via `logging::Recorder`), plus `Episode`, `Proposal`, `ProposalKind`, `SkillTrial`, `LedgerKind`, `now_ms`, `score_skills`.
-- **`loopsmith-gate`** — `Judgment` and `TargetVerdict` (`blocking_pass_rate()`, `satisfied`, `checks`); consumed only, never constructed.
-- **`loopsmith-skills`** — `recommend`, the adopt/drop policy.
-- **`loopsmith-provider`** — `dispatch` and `InvokeRequest`, used once, by `ask_agent`, at `Tier::Cheap` under `node_id: "perturb"`.
-- **`crate::judgment`** — `parse`, called per judge episode.
+`next_candidate(cfg, trials)` returns the candidate to trial this iteration, or `None`. It requires `skills.explore` to be on with a non-empty `explore_candidates`, filters out anything already configured on a graph node, drops candidates that already have `min_trials` behind them, and then picks the **least-tried** remaining one — so evidence accumulates evenly instead of piling onto whichever name sorts first.
 
-Config surface these modules read: `skills.explore`, `skills.explore_candidates`, `skills.min_trials`, `graph.nodes[].skills` / `.goals` / `.role` / `.depends_on`, `stop_gates.max_revisions_per_node`, and the provider cascades.
+### Recording what a skill was worth
+
+```rust
+pub struct RanNode {
+    pub node_id: String,
+    pub goals: Vec<String>,
+    pub tokens: Option<u64>,
+}
+```
+
+`RanNode` exists because this used to be a four-tuple threaded through three functions, which is how `SkillTrial.tokens` came to be permanently `None`. `waves.rs:876` constructs one per dispatch.
+
+`record_trials` joins three things — the nodes that ran, `node_skills` (skill name plus its `source`, from `resolve_skills`), and the gate's `verdicts` — into one `SkillTrial` per (node, skill):
+
+- `pass_rate` is the mean `blocking_pass_rate()` across **only the goals this node advances**, clamped to `0.0..=1.0`. Scoring against the whole loop would give every skill in the graph one shared verdict.
+- `satisfied` requires every relevant verdict satisfied.
+- `tokens` carries what the node cost, because a skill that lifts the pass rate while tripling the bill is not the same proposition as one that does it for free.
+
+Nodes with no skills, or whose goals have no verdicts, are skipped rather than recorded as zeroes.
+
+### Harvesting judge verdicts
+
+`harvest_judgments(cfg, rec, iteration)` reads this iteration's episodes, keeps those whose node has `Role::Judge`, and hands each output to `judgment::parse(&ep.output, &ep.provider_id, &builder_provider)`.
+
+The interesting part is `builder_provider`: it is resolved by walking the judge node's `depends_on` and finding the matching episode's `provider_id`. Independence is measured against the provider that actually produced the work, taken from the episode record — not from the judge's own claim about what it reviewed. A store read failure returns an empty vec, so a judgment can be lost but never invented.
+
+### The proposal desk
+
+`Desk` is the private writer that all four proposal producers share. It carries the set of `{kind:subject}` pairs already written *this run*, seeded from `store.proposals(run_id)` — a proposals file with forty identical entries is a proposals file nobody reads.
+
+`Desk::write` returns `usize` (1 or 0) so callers can sum without each keeping a mutable counter. Its sequence:
+
+1. **Dedupe** on `{kind:?}:{subject}`.
+2. **Ask the gate.** `loopsmith_gate::admit_proposal(cfg, evolution_kind(kind), patch)` refuses a kind outside `evolution.allowed_kinds`, a patch that is not readable YAML, or a patch whose leaf paths touch `safety.protected`. A refusal is logged as `GateEvaluated` and nothing is written. The gate rules on a proposal before it is written, the same as on anything else that could change what the loop is held to.
+3. **Stamp expiry** via `Proposal::with_default_expiry()`, derived from the kind rather than passed in by each caller — so a new kind cannot be added without deciding how long its evidence stays true. (`TrySkill` ages out in seven days; `ChangeCriteria` never expires.)
+4. **Persist** and log `ProposalWritten`.
+
+`evolution_kind` maps the desk's vocabulary (what the loop observed) onto the policy's (what part of the config would change), exhaustively:
+
+| `memory::ProposalKind` | `core::ProposalKind` |
+|---|---|
+| `AdoptSkill`, `TrySkill` | `NewSkill` |
+| `DropSkill` | `SkillUpdate` |
+| `ReshapeGraph` | `GraphChange` |
+| `ChangeCriteria` | `ValidationChange` |
+
+### The four producers
+
+`write_proposals` takes `Observed { exhausted_nodes, verdicts }` and sums four calls. The first three read the run's own behaviour; only the fourth needs the accumulated trial record.
+
+**`propose_reshape`** — for each node that hit `max_revisions_per_node` with goals unsatisfied. A node that spends its whole revision budget is evidence about the *graph*, not the node: one unit of work was asked to do something it cannot do in one step. The proposal ships a suggested YAML patch adding a `{node}-prepare` researcher upstream. Rewriting the graph itself would be the loop editing its own config, which it may never do.
+
+**`propose_criteria_changes`** — for every blocking, failed check whose `evidence` starts with `"detector error"`. A detector that cannot run is not a failing check, it is a broken one; it fails closed forever and no amount of work by any node changes the answer. No patch, because the fix is not mechanical.
+
+**`propose_try_skill`** — fires only when `explore` is **off**, candidates are listed, and something is still unsatisfied. Exploration is off by default because it spends real money; when the run is failing anyway, saying "there is something here you have switched off" is worth more than silently not doing it. Patch: `execution.skills.explore: true`.
+
+**`skill_proposals`** — delegates to `loopsmith_skills::recommend(&configured, &trials, min_trials, 0.8, 0.2)`. Skills below `min_trials` are ignored; at ≥80% satisfaction and not configured → `AdoptSkill`; at ≤20% and configured → `DropSkill`. `score_skills` supplies the rate and trial count quoted in each rationale.
 
 ---
 
-## Contributing notes
+## Contributing
 
-**Adding a `ProposalKind`.** Add a generator alongside the existing four, sum it into `write_proposals`, and route it through `Desk::write` — that is what gives you deduplication and the ledger entry for free. You must also give the kind an expiry in `Proposal::with_default_expiry`; the indirection exists precisely so this cannot be skipped.
+**Adding a perturbation variant.** Extend the enum, then handle it in `from_choice`, `describe`, `tier_for`, and `directive` — and add its name to the menu inside `ask_agent`'s prompt, or the agent can never select it. Decide whether `fallback` should reach it (it must be text-free to qualify). Then wire the actual effect: order in `waves.rs`, tier in `dispatch.rs`, prompt in `prompts.rs`. Ask whether a judge should see it; the default answer is no. `every_directive_says_the_gate_is_unchanged` will fail until the directive carries the guarantee sentence.
 
-**Adding a `Perturbation` variant.** Five places move together: the enum, `describe`, `directive`, `tier_for`, `from_choice`, and the choice menu inside `ask_agent`'s prompt (the prompt text is the agent's only description of the menu — a variant missing from it is a variant that never gets chosen). Then decide whether `fallback`'s `% 3` should include it. Any new `directive()` must keep the "does not change what counts as done" clause or `every_directive_says_the_gate_is_unchanged` fails.
+**Adding a proposal kind.** Add the variant to `loopsmith_memory::ProposalKind`, give it a lifetime in `Proposal::default_lifetime_ms`, map it in `evolution_kind`, and add a producer that goes through `Desk::write` rather than `put_proposal` directly — the desk is where deduplication, the gate check, and expiry live.
 
-**Store failures are non-fatal by design** throughout `evolve.rs` — `episodes`, `proposals`, `skill_trials`, and `put_proposal` all degrade to "no evidence, no proposals" rather than propagating. If you add a path where a lost write should be visible, surface it explicitly; the current silence is a deliberate choice for advisory machinery, not an oversight to copy blindly.
+**Changing the adopt/drop thresholds.** They are literals at the `recommend` call in `skill_proposals` (`evolve.rs:375`), not config. Moving them to config means deciding whether they belong under `safety.protected`.
 
-**The tests live in `perturb.rs` only.** They cover seed stability, shuffle determinism and permutation-preservation, the fallback's menu discipline, `parse_choice` acceptance and rejection, and the tier ceiling. `evolve.rs` has no unit tests in-file; its behaviour is exercised through the run-level suite, which is worth knowing before you refactor a generator.
+**Invariants to preserve.** No path in either module may write a verdict, a goal state, or the config. A perturbation must survive the "could a stalled loop read this as permission to stop trying?" reading. And anything derived from a seed must stay reproducible from `(run_id, iteration)` alone.
+
+**Tests.** `perturb.rs` carries its own `#[cfg(test)]` module covering seed stability, shuffle determinism and totality, fallback confinement to the menu, parse strictness, and tier saturation. Evolution is exercised end-to-end from `loopsmith-run/src/tests.rs` (`skill_trials_are_recorded_and_become_proposals`); the interaction between reordering and phase filtering is covered in `loopsmith-cli/tests/stress.rs:1202`.

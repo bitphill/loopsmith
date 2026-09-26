@@ -2,109 +2,196 @@
 
 # Gating & Success Criteria (`loopsmith-gate`)
 
-The gate is the crate that decides whether work is done. It is deliberately the least clever crate in the workspace: plain Rust, no provider calls of its own, no prompt anywhere in the code path. Everything it can conclude follows mechanically from a config and a bag of evidence.
+The gate is the component that decides whether work is done. It is plain Rust with no model in the loop: every verdict comes from an exit code, a file's existence, a regex match, a numeric comparison, or an explicitly *independent* judgment. Its reason for existing is a single invariant:
 
-Its defining constraint is negative: `GoalState { satisfied: true, .. }` is constructed in exactly one place — `TargetVerdict::to_goal_state` in `src/lib.rs`. Nothing that a model emits can produce that value directly. If you are adding a feature that makes completion easier to declare, you are probably working against the point of the crate.
+> A model must not be the thing that certifies its own completion.
 
-## The two invariants
+`GoalState { satisfied: true, .. }` is constructed in exactly one place in the workspace — `TargetVerdict::to_goal_state` in `runtime/crates/loopsmith-gate/src/lib.rs`. Nothing else in the codebase may build one.
 
-**A model cannot certify its own completion.** Verdicts come from detectors, and detectors are exit codes, filesystem metadata, regex matches, and numeric comparisons. The one detector that consults a model (`Detector::Judge`) refuses a judgment whose `provider_id` equals its `builder_provider_id` — it does not discount it, it fails the check outright with `"judgment refused: judge and builder both ran on ..."`.
+## The five responsibilities
 
-**The gate can revoke.** `evaluate` holds no memory of prior runs. Re-running against fresh evidence recomputes from scratch, so deleting a required artifact flips a satisfied target back to unsatisfied. The test `the_gate_can_take_done_back` pins this: write `report.md`, evaluate (satisfied), delete it, evaluate again (not satisfied). Any caching layer added in front of `evaluate` must preserve this — a gate that only promotes is a burndown chart.
+The crate is one file, and it does five separable jobs. They share `run_detector` and nothing else.
 
-## Types
+| Job | Entry point | Answers |
+|---|---|---|
+| Goal verification | `evaluate`, `evaluate_all` | Is this target satisfied by the evidence? |
+| Success criteria | `success_met`, `overall_success` | Do the declared success scenarios hold? |
+| Gate rules | `check_rules` | May the run enter / proceed / must it roll back? |
+| Proposal admission | `admit_proposal` | May this self-evolution proposal even be recorded? |
+| Regression gate | `compare_to_baseline` | Did this run hold the frozen baseline? |
 
-| Type | Role |
-|---|---|
-| `Evidence` | The complete input surface: `artifacts` (name → text), `metrics` (name → f64), `judgments`, and `workdir`. Builder methods `with_artifact`, `with_metric`, `with_judgment` chain off `Evidence::new(workdir)`. |
-| `Judgment` | One model verdict, carrying provenance: `validation`, `provider_id`, `builder_provider_id`, `passed`, optional `score`, `standard`, `evidence`. Parsed from model output by `parse` in `loopsmith-cli/src/judgment.rs`. |
-| `CheckResult` | One validation's outcome: `name`, `text`, `passed`, `blocking`, `evidence`. Field names mirror the existing eval viewer's grading schema (`text`/`passed`/`evidence`) so reports are readable by tooling that already exists. |
-| `TargetVerdict` | All checks for one target plus `satisfied`, the pass/fail/total counts, and a human-readable `reason`. |
-| `GateError` | `Detector(String)` for "the check could not run" and `Regex { name, source }` for a validation whose pattern does not compile. |
+## Evidence: the whole input surface
 
-Note what is *not* in `Evidence`: the builder's own claim that it finished. That omission is intentional and load-bearing.
+`Evidence` is a deliberately closed list of what the gate may look at. Anything absent from it cannot influence a verdict — most pointedly, the builder's own claim that it finished.
 
-## Evaluation
+```rust
+let ev = Evidence::new(&workdir)
+    .with_metric("coverage", 0.85)
+    .with_artifact("test-output", &stdout)
+    .with_judgment(judgment);
+```
+
+- `artifacts: BTreeMap<String, String>` — named text blobs for `Detector::RegexMatch`.
+- `metrics: BTreeMap<String, f64>` — named numbers for `Detector::Threshold`.
+- `judgments: Vec<Judgment>` — model verdicts, matched to a validation by `Judgment::validation`.
+- `workdir: PathBuf` — the base directory for `Detector::Script` (`current_dir`) and `Detector::FileExists` (joined onto `path`).
+
+The builder-style methods take `self` and return `Self`, so an `Evidence` is assembled in one expression and then read-only.
+
+## How a target is evaluated
+
+`evaluate(cfg, target, ev)` selects the validations in `cfg.safety.checks` whose `target` matches, runs each one's detector, and folds the results into a `TargetVerdict`.
 
 ```mermaid
 flowchart TD
-    E["evaluate(cfg, target, ev)"] --> F["filter cfg.validations by target"]
-    F --> D["run_detector per validation"]
-    D --> C["CheckResult{passed, blocking, evidence}"]
-    C --> Q{"any blocking check?"}
-    Q -->|no| U["unsatisfied — nothing to satisfy"]
-    Q -->|yes| B{"blocking failures?"}
-    B -->|yes| U2["unsatisfied — names the failures"]
-    B -->|no| S["satisfied"]
+    E[evaluate: target] --> S[select cfg.safety.checks<br/>where target matches]
+    S --> D[run_detector per validation]
+    D --> C[CheckResult: passed, blocking, evidence]
+    C --> Q{any blocking check?}
+    Q -->|no| U1[unsatisfied:<br/>nothing to satisfy]
+    Q -->|yes| B{blocking failures?}
+    B -->|none| SAT[satisfied]
+    B -->|some| U2[unsatisfied:<br/>names the failures]
 ```
 
-`evaluate` selects the validations whose `target` matches, runs each detector, and folds the results into a `TargetVerdict`. Three rules govern the outcome:
+Three decisions in that fold are worth knowing before you touch it:
 
-1. **Silence is not success.** A target with zero blocking validations is *never* satisfied — `reason` reads `no blocking validation targets \`X\`; nothing to satisfy`. Forgetting to write a check does not count as passing it.
-2. **Only blocking failures hold the gate shut.** Non-blocking checks still appear in `checks` and still count toward `failed`, but they cannot block satisfaction (`non_blocking_failures_do_not_hold_the_gate`).
-3. **Detector errors fail closed.** An `Err` from `run_detector` becomes `(false, "detector error: {e}")` rather than propagating. The distinction between "the check failed" and "the check could not run" survives in the `evidence` string, not in `satisfied` — a missing tool reads as unfinished work at the boolean level. If you need callers to branch on that difference, the `evidence` prefix is currently the only signal, and lifting it into a typed field is an open improvement.
+**Silence is not success.** A target with no blocking validation aimed at it is *never* satisfied. The reason string says so: `` no blocking validation targets `g1`; nothing to satisfy ``. This makes a typo'd `target:` field fail loudly instead of certifying an empty set.
 
-`evaluate_all` runs `evaluate` once per goal in `cfg.goals` plus once for the `OVERALL` target, returning a `BTreeMap<String, TargetVerdict>` (ordered, so reports and snapshots are stable).
+**Non-blocking checks are advisory only.** They contribute to `passed` / `failed` / `total` and to the report, but never to `satisfied`. A verdict can carry `failed: 1` and still be satisfied.
 
-## Detectors
+**A detector that errors fails its check.** `run_detector` returning `Err` becomes `(false, "detector error: …")`, not a propagated error. "Could not tell" is not "passed" — a gate that waved a run through because its own tooling was missing would be worse than no gate. The `GateError` type still exists because the message matters for the report: `GateError::Detector` for a command that would not launch, `GateError::Regex { name, source }` so a bad pattern is reported under the validation it came from.
 
-`run_detector` is a single match over `loopsmith_core::Detector`. Each arm returns `(passed, evidence)`, where the evidence string is written to be read by a human in a terminal.
+`evaluate_all` maps over `cfg.intent.goals` and adds the `OVERALL` pseudo-target, producing the `BTreeMap<String, TargetVerdict>` that the run engine, exports, and summaries all consume.
 
-- **`Script { command, args, expect_exit }`** — spawns the command in `ev.workdir`, compares the exit code against `expect_exit` (default `0`), and appends the last line of stderr to the evidence when there is one. A code of `-1` stands in for signal-terminated processes. A failure to *spawn* is a `GateError::Detector`; a non-zero exit is an ordinary failed check.
-- **`FileExists { path, non_empty }`** — `workdir`-relative `fs::metadata`. Three distinguishable outcomes: absent, present-but-empty (when `non_empty`), present with a byte count.
-- **`RegexMatch { artifact, pattern }`** — compiles the pattern (a bad pattern is `GateError::Regex`, carrying the validation name), then matches against `ev.artifacts[artifact]`. An uncollected artifact fails with `artifact \`X\` was not collected` rather than passing vacuously.
-- **`Threshold { metric, op, value }`** — applies `CompareOp::apply` to `ev.metrics[metric]`. An unreported metric fails; `a_missing_metric_fails_rather_than_passes_by_default` guards that. `op_str` renders the operator for the evidence line.
-- **`Judge { standard, min_score }`** — the only detector that reads model output. See below.
+### Revocation
 
-Every arm defaults to *fail* when its input is missing. That is the house style for this crate; a new detector that returns `true` on absent evidence would be a bug.
+Nothing in `evaluate` reads prior state. It looks only at the evidence in front of it, so re-running it on fresh evidence can flip a satisfied target back:
 
-## The judge path
+```rust
+let before = evaluate(&cfg, "g1", &Evidence::new(&dir));  // report.md exists -> satisfied
+std::fs::remove_file(&file).unwrap();
+let after  = evaluate(&cfg, "g1", &Evidence::new(&dir));  // -> unsatisfied
+```
 
-`Detector::Judge` collects the judgments whose `validation` matches the check name, then:
+Keep it that way. A gate that can only promote is a burndown chart with extra steps, and any caching or memoization added here would quietly reintroduce that.
 
-1. **No judgments → fail** (`no judgment recorded for \`X\``).
-2. **Independence enforcement.** If `cfg.providers.enforce_judge_independence` is set and *any* matching judgment has `provider_id == builder_provider_id`, the whole check fails immediately. This is a refusal, not an averaging-out: one self-judgment poisons the check.
-3. **Pool selection.** Independent judgments form the pool. When enforcement is off and no independent judgment exists, the pool falls back to all judgments — that fallback is the only path by which a self-judgment can contribute to a pass, and it requires the config to have explicitly disabled enforcement.
-4. **Scoring.** With `min_score`, the mean of the reported `score` values must reach it, and a pool with no scores at all fails. Without `min_score`, every judgment in the pool must have `passed: true`.
+## The detectors
 
-## Success scenarios
+`run_detector(cfg, name, detector, ev)` is the single dispatch point, returning `(bool, String)` — the verdict and a human-readable evidence line for the report. `name` is the validation's name or the gate rule's id; it is what a judgment is matched on and what a bad regex is blamed on.
 
-Verdicts answer "is this target satisfied?". Success scenarios answer "is that enough to stop?".
+| `Detector` variant | Verdict | Fails closed when |
+|---|---|---|
+| `Script { command, args, expect_exit }` | exit code equals `expect_exit` (default `0`), run in `ev.workdir`; last stderr line is appended to the evidence | the process will not spawn → `GateError::Detector` |
+| `FileExists { path, non_empty }` | `ev.workdir.join(path)` has metadata, and non-zero length when `non_empty` | missing, or present-but-empty under `non_empty` |
+| `RegexMatch { artifact, pattern }` | the compiled pattern matches `ev.artifacts[artifact]` | artifact was not collected; invalid pattern → `GateError::Regex` |
+| `Threshold { metric, op, value }` | `op.apply(actual, value)` over `ev.metrics[metric]` | metric was not reported |
+| `Judge { standard, min_score }` | see below | no judgment recorded for `name` |
 
-`success_met(scenario, verdict)` switches on `SuccessScenario::mode`:
+Every one of these fails on absent input. That is the load-bearing property of the whole table: a missing metric, an uncollected artifact, and an unrecorded judgment each read as *not satisfied*, never as *nothing to object to*.
 
-- `Mode::Percentage` compares `verdict.blocking_pass_rate()` against `threshold` (default `1.0`). The rate counts only blocking checks, and returns `0.0` when there are none — consistent with "no blocking checks means nothing to satisfy".
-- `Mode::Objective` and `Mode::Subjective` both defer to `verdict.satisfied`.
+### The judge detector and independence
 
-`overall_success(cfg, verdicts)` requires *every* scenario targeting `OVERALL` to hold. With no such scenario declared it falls back to the `OVERALL` verdict's own `satisfied` flag, and returns `false` if that verdict is missing entirely.
+`Judge` is the only detector whose input is a model's opinion, and it is the most constrained. A `Judgment` carries both `provider_id` (who judged) and `builder_provider_id` (who produced the work).
 
-## How it plugs into the rest of the workspace
+1. Judgments are filtered to those whose `validation` equals `name`. None → fail, `` no judgment recorded for `name` ``.
+2. If `cfg.execution.providers.enforce_judge_independence` is on, *any* judgment where `provider_id == builder_provider_id` fails the check outright — the evidence line reads `a shared provider shares its blind spots`. This is a refusal, not a downgrade: a self-judgment does not get counted at reduced weight, it collapses the check.
+3. Otherwise the pool is narrowed to the independent judgments, falling back to all of them only when none are independent.
+4. With `min_score`, the pool's mean `score` must reach it; a pool with no scores at all fails. Without `min_score`, every judgment in the pool must have `passed: true`.
+
+If you extend this, preserve step 2's position. Running independence *before* scoring is what stops a self-judgment from being averaged into a passing mean.
+
+## Success criteria
+
+`CheckResult`/`TargetVerdict` answer "did the checks pass". `SuccessScenario` answers the separate question of how much passing is enough.
+
+- `TargetVerdict::blocking_pass_rate()` — fraction of *blocking* checks that passed. It returns `0.0` when there are no blocking checks, consistent with the "nothing to satisfy" rule rather than vacuously perfect.
+- `success_met(s, verdict)` — for `Mode::Percentage`, `blocking_pass_rate() >= s.threshold` (defaulting to `1.0`); for `Mode::Objective` and `Mode::Subjective`, simply `verdict.satisfied`.
+- `overall_success(cfg, verdicts)` — all `cfg.intent.success` scenarios targeting `OVERALL` must be met. With no such scenario declared it falls back to the `OVERALL` verdict's own `satisfied`. This is what `loopsmith-run/src/stop.rs::should_stop` calls to decide the loop is finished.
+
+## Gate rules
+
+A gate rule is structurally the same thing as a validation — a statement plus a detector — so it is decided by the same compiled code and can no more be argued past. `check_rules(cfg, kind, ev)` filters `cfg.safety.gates.rules()` to one `GateKind` (`Entry`, `Approval`, `Rollback`) and maps each through `check_rule`, which is a thin wrapper over `run_detector`.
+
+The difference from a validation is `RuleVerdict::on_fail: GateOutcome` — the rule carries its own consequence (e.g. `GateOutcome::Pause`), and the gate reports it rather than acting on it. `loopsmith-run/src/rules.rs::apply` is what turns that outcome into behavior.
+
+Kinds do not leak: asking for `GateKind::Entry` when only `approval:` rules are configured returns an empty `Vec`, which callers must treat as "no rules of this kind", not "all clear on entry".
+
+## Proposal admission
+
+`admit_proposal(cfg, kind, patch)` is the gate on self-evolution: it decides whether a proposed config change may even be *written down*. It returns `Admission::Admitted` or `Admission::Refused(String)`, where the string is a ledger-ready sentence.
+
+Two independent refusals, in order:
+
+1. **Kind.** If `cfg.evolution_enabled()` and `!cfg.evolution.allows(kind)`, refuse — `` `graph_change` is not in `evolution.allowed_kinds` ``.
+2. **Protected paths.** The patch is parsed as YAML, run through `loopsmith_core::config::legacy::migrate` so a 0.3-shaped fragment is judged as the 1.0 path it means, flattened by `leaf_paths` into dotted paths, and each path tested against `cfg.safety.protected.touches`. Any hit refuses.
+
+The protected-path check runs **regardless of whether evolution is enabled**. A loop that can merely *suggest* loosening its own gates has already started arguing with them.
+
+`leaf_paths` treats a list, a scalar, and an *empty mapping* as leaves. The empty-mapping case is the one that matters: `safety: {}` is a leaf at path `safety`, so wholesale replacement of a protected parent is caught the same as writing to the child. A patch that is not parseable YAML is refused (`its patch is not readable YAML`) — nothing unreadable is admitted. `patch: None` skips the path check entirely and is admitted if the kind allows.
+
+```rust
+// all three are Refused
+admit_proposal(&c, ProposalKind::ValidationChange, Some("stop_gates:\n  max_iterations: 500\n"));
+admit_proposal(&c, ProposalKind::GraphChange, Some("safety:\n  gates: {}\n"));
+admit_proposal(&c, ProposalKind::GraphChange, Some("safety: {}\n"));
+```
+
+## The regression gate
+
+`compare_to_baseline(cfg, measured)` maps `cfg.evolution.regressions(measured)` onto a four-state `BaselineVerdict`:
+
+- `Off` — evolution disabled; nothing is compared.
+- `NoBaseline` — evolution on, no baseline frozen. **This is not a pass.** It reports that the run cannot show an improvement, so proposals are recorded but not adoptable.
+- `Held` — within tolerance on every metric the baseline names.
+- `Regressed(Vec<String>)` — one line per regressed metric.
+
+`BaselineVerdict::describe()` renders a single ledger/terminal line, returning `None` for `Off` because there is then nothing to say. `src/cmd/mod.rs::report_outcome` is the caller that prints it.
+
+The baseline lives under `safety.protected`, which closes the obvious loop: the run being judged cannot move the bar it is judged against.
+
+## How the rest of the workspace uses it
 
 ```mermaid
 flowchart LR
-    run["src/run/mod.rs::execute"] --> ea["evaluate_all"]
-    cmd["src/cmd/gate.rs::execute"] --> ev["evaluate"]
-    mcp["loopsmith-mcp::tool_gate"] --> ev
-    ea --> ev
-    ev --> tv["TargetVerdict"]
-    tv --> stop["src/run/stop.rs::should_stop → overall_success"]
-    tv --> gs["to_goal_state → loopsmith-memory::GoalState"]
+    RUN[loopsmith-run] --> EVAL[evaluate / evaluate_all]
+    RUN --> RULES[check_rules]
+    RUN --> ADMIT[admit_proposal]
+    RUN --> BASE[compare_to_baseline]
+    CLI[loopsmith CLI] --> EVAL
+    MCP[loopsmith-mcp] --> EVAL
+    EVAL --> GS[to_goal_state → GoalState]
+    GS --> MEM[loopsmith-memory]
 ```
 
-- **`src/run/mod.rs::execute`** calls `evaluate_all` each iteration; `src/run/stop.rs::should_stop` feeds the resulting map to `overall_success` to decide whether the loop terminates.
-- **`src/cmd/gate.rs::execute`** is the one-shot `loopsmith gate` CLI path — same `evaluate`, no loop around it.
-- **`loopsmith-mcp::tool_gate`** exposes `evaluate` over the local stdio MCP server, so an agent can *ask* the gate for a verdict without being able to write one.
-- **`src/run/summary.rs`, `src/run/export.rs`, `src/run/stop.rs`** all consume `TargetVerdict` for reporting; because `CheckResult` uses the eval viewer's field names, exports need no translation layer.
-- **`to_goal_state(iteration)`** stamps the verdict with the iteration number and `now_ms()` and hands it to `loopsmith-memory` for persistence.
+| Caller | Uses |
+|---|---|
+| `loopsmith-run/src/running.rs::rule` | `evaluate_all` each iteration |
+| `loopsmith-run/src/stop.rs::should_stop` | `overall_success` to end the loop |
+| `loopsmith-run/src/rules.rs::apply` | `check_rules`, then acts on `on_fail` |
+| `loopsmith-run/src/evolve.rs::write` | `admit_proposal` before recording a proposal |
+| `loopsmith-run/src/closing.rs::judge_against_baseline` | `compare_to_baseline` |
+| `loopsmith-run/src/judgment.rs::parse` | constructs `Judgment` from model output |
+| `loopsmith-run/src/{metrics,phases,summary,export}.rs` | read `TargetVerdict` / `CheckResult` |
+| `src/cmd/gate.rs::execute` | `evaluate` for the one-shot `gate` subcommand |
+| `loopsmith-mcp/src/lib.rs::tool_gate` | `evaluate` exposed over stdio MCP |
 
-Dependencies point one way: the gate reads `loopsmith-core` (the A–J config model, `Detector`, `Validation`, `SuccessScenario`, `Mode`, `CompareOp`, `OVERALL`) and writes `loopsmith-memory` (`GoalState`, `now_ms`). It knows nothing about providers, scheduling, or skills — a provider only ever reaches the gate as an *id string* inside a `Judgment`.
+Upstream, the crate depends on `loopsmith-core` for the config model (`LoopConfig`, `Detector`, `Validation`, `GateRule`, `GateKind`, `GateOutcome`, `SuccessScenario`, `Mode`, `Baseline`, `ProposalKind`, `CompareOp`, `OVERALL`) and on `loopsmith-memory` for `GoalState` and `now_ms`. It has no async runtime, no network, and no provider access — a detector's process is spawned with `std::process::Command`.
 
-## Contributing
+## Serialization
 
-**Adding a detector.** Add the variant in `loopsmith-core`'s `Detector` enum, add the schema entry, then add a `run_detector` arm returning `(bool, String)`. Two obligations: fail when the input is absent, and write an evidence string that says what was checked and what was found, including the concrete values. Evidence strings are the primary debugging surface when a loop refuses to finish.
+`CheckResult` uses the field names `text` / `passed` / `evidence` on purpose: they mirror the grading schema the existing eval viewer reads, so gate reports are consumable by tooling that predates this crate. `Judgment`, `CheckResult`, `TargetVerdict`, and `RuleVerdict` all derive `Serialize`/`Deserialize`; `Judgment`'s `score`, `standard`, and `evidence` are `#[serde(default)]`, so a minimal judgment from a model deserializes.
 
-**Testing.** The unit tests in `src/lib.rs` build configs through `cfg_with`, which splices validation YAML into a minimal config and runs it through `loopsmith_core::parse_str` — so tests exercise real parsing, not hand-built structs. Filesystem tests use `loopsmith_util::testing::temp_dir` (available via the `testing` feature, a dev-dependency only).
+`Evidence` is deliberately *not* serializable — it is assembled per-evaluation from live filesystem and run state.
 
-**Packaging.** `Cargo.toml` ships only `/src/**/*` and the README. Integration tests read `config/examples/` and `config/loop.schema.json` from the repository root, which no crate tarball can contain; including them would publish tests that cannot pass.
+## Contributing here
 
-**What not to change without a very good reason.** The single-constructor property of satisfied `GoalState`, the never-satisfied-without-blocking-checks rule, the revocation behavior, and the judge independence refusal. Each has a test named after the property it protects, and each is load-bearing for the claim the project makes about itself.
+The tests in `src/lib.rs` are the specification, and each name states a property rather than a mechanism: `a_target_with_no_blocking_validation_is_never_satisfied`, `a_missing_metric_fails_rather_than_passes_by_default`, `judge_on_the_builders_provider_is_refused`, `the_gate_can_take_done_back`, `a_rule_whose_detector_cannot_run_does_not_pass`, `only_the_gate_builds_a_satisfied_goal_state`. Treat them as the contract; adding a detector means adding the corresponding fails-closed test.
+
+Three rules for changes in this crate:
+
+1. **New detectors fail closed.** Missing input, unparseable input, and un-runnable tooling all produce `(false, …)` with an evidence line that says which of those it was.
+2. **`to_goal_state` stays the only constructor of a satisfied `GoalState`.** If another crate needs one, it needs a `TargetVerdict` first.
+3. **`evaluate` stays stateless.** No history, no cache, no memory of a previous pass — that is what makes revocation work.
+
+Note that `Cargo.toml` restricts `include` to `/src/**/*` and the README: the integration tests read `config/examples/` and `config/loop.schema.json` from the repository root, which a crate tarball cannot carry, so they are excluded rather than shipped broken.

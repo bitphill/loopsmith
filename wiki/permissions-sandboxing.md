@@ -2,132 +2,144 @@
 
 # Permissions & Sandboxing
 
-Derives the narrowest permission grant a loop config actually needs, renders it for human review, and writes it into the settings file the harness reads. A second, separate concern lives alongside it: detector scripts run with no shell, so the module also ships the portability shim those scripts source.
+Two unrelated mechanisms share this territory, and keeping them apart is the point of the design:
 
-**Files**
+- **The permission grant** is what stops the harness from interrupting a hands-off run with a consent prompt. It is a convenience that buys uninterrupted execution.
+- **The constraint and isolation machinery** is what stops a run from doing something you cannot undo. It is the safety property.
 
-| Path | Role |
+The grant is derived, narrow, and additive. It is *not* a security boundary, and the code says so in several places — `permissions.template.json` carries a `$deny_note` explaining that nothing is denied by default because "denial is not the mechanism that protects you," and `render()` ends every preflight block with the reminder that human checkpoints stop the run "grant or no grant."
+
+---
+
+## Deriving the grant
+
+`loopsmith_core::permissions::required(&LoopConfig) -> Vec<String>`
+(`runtime/crates/loopsmith-core/src/permissions.rs:17`)
+
+The grant is computed from the config, never guessed or templated. It accumulates into a `BTreeSet<String>`, so the output is deduplicated and sorted — a property with a test of its own (`the_grant_has_no_duplicates_and_is_sorted`), because a sorted grant produces a stable diff in `.claude/settings.local.json`.
+
+| Rule | Derived from |
 |---|---|
-| `runtime/crates/loopsmith-cli/src/permissions.rs` | Derivation, rendering, and settings-file merge |
-| `runtime/crates/loopsmith-cli/src/cmd/permissions.rs` | `loopsmith permissions` subcommand |
-| `runtime/crates/loopsmith-cli/templates/permissions.template.json` | Documented reference shape (not a generated artifact) |
-| `runtime/crates/loopsmith-cli/templates/compat.template.sh` | Sourced by generated detector scripts |
+| `Read`, `Write`, `Edit`, `Glob`, `Grep` | Unconditional. The loop reads and writes inside its own directory. |
+| `Bash(<command>:*)` per provider | `cfg.execution.providers.providers[].command` |
+| `Bash(<command>:*)` per script detector | `cfg.safety.checks[].detector`, matched on `Detector::Script { command, .. }` |
+| `Bash(npx skills:*)` + `WebFetch(domain:claudemarketplaces.com)` | Only when `cfg.execution.skills.acquisition_order` contains `AcquisitionSource::Marketplace` |
 
-## Why derivation instead of a fixed allowlist
+The marketplace pair is the case that best shows the intent: a loop whose `acquisition_order` is `[installed]` gets no network rule at all. `marketplace_access_is_only_requested_when_the_policy_uses_it` asserts both directions — that the rules appear when the policy uses the marketplace, and that they are absent when it does not.
 
-A hands-off run cannot pause to ask for consent, but a run that grants itself blanket access is not hands-off — it is unsupervised. The resolution is to compute the rules from the config, show them once, and grant once. A loop with no script detectors never asks to run `cargo`; a loop whose `skills.acquisition_order` never reaches the marketplace never asks for network access.
+Note that `required()` reads the **acquisition policy**, not `features.marketplace_skills`. The feature flag gates whether acquisition may happen at run time; the grant reflects what the config declares it intends to reach.
 
-The important thing to understand before changing anything here: **this grant is not the safety mechanism.** The `$deny_note` in the template says so explicitly, and `render` repeats it to the user — the constraint block in the loop config is what stops on irreversible actions, and it stops regardless of what the settings file allows. Permissions exist to remove *prompts*, not to bound behaviour. Don't add denial logic here expecting it to enforce policy.
-
-## The three functions
+## Presenting and writing it
 
 ```mermaid
-graph LR
-    CFG[LoopConfig] --> REQ[required]
-    REQ --> G["Vec&lt;String&gt;<br/>sorted, deduped"]
-    G --> R[render] --> OUT[stdout preflight]
-    G --> M[merge_into] --> F[settings.local.json]
-    CMD[cmd::permissions::execute] --> REQ
-    SC[scaffold] --> REQ
-    WEB[web::assemble::review_config] --> REQ
+flowchart LR
+    C[loop config] --> R["required(&cfg)"]
+    R --> G["grant: Vec&lt;String&gt;"]
+    G -->|no --write| P["render(&grant)<br/>stdout"]
+    G -->|--write path| M["merge_into(path, &grant)"]
+    M --> S[".claude/settings.local.json"]
 ```
 
-### `required(&LoopConfig) -> Vec<String>`
+**`render(&[String]) -> String`** produces the human-readable preflight block: a header, the rules one per line, and the closing note about checkpoints. It is the "show it once, then ask once" half of the compromise described in the module doc comment. `render_mentions_that_checkpoints_still_stop` pins the closing note in place so a reword cannot quietly drop it.
 
-Collects into a `BTreeSet<String>`, so the returned vector is sorted and duplicate-free by construction — `the_grant_has_no_duplicates_and_is_sorted` pins that property rather than the function sorting explicitly. Four sources contribute:
+**`merge_into(&Path, &[String]) -> io::Result<String>`** is the write path, and its contract is *additive and non-destructive*:
 
-- **Providers** — every entry in `cfg.providers.providers` is a command, so each yields `Bash({p.command}:*)`.
-- **Script detectors** — each `Detector::Script { command, .. }` in `cfg.validations` yields `Bash({command}:*)`, so the gate can run its checks without a mid-run prompt.
-- **Skill acquisition** — only when `cfg.skills.acquisition_order` contains `AcquisitionSource::Marketplace`, and then both `Bash(npx skills:*)` and `WebFetch(domain:claudemarketplaces.com)`.
-- **Core tools** — `Read`, `Write`, `Edit`, `Glob`, `Grep`, unconditionally, because the loop reads and writes inside its own directory.
+- A missing file becomes `{}`; an existing file that fails to parse as JSON also becomes `{}` (`unwrap_or_else(|_| json!({}))`) rather than an error — a corrupt settings file does not block a run. A non-object root is likewise replaced.
+- `permissions.allow` is created if absent, then each grant string is appended only when not already present. Existing rules survive, and unrelated top-level keys survive: `merging_preserves_existing_rules_and_adds_new_ones` checks that both a hand-added `Skill(claude-api)` and an unrelated `"theme": "light"` are intact afterwards.
+- Repeated calls are no-ops (`merging_is_idempotent`), which is what makes it safe to wire into scaffolding and into a web button.
+- Parent directories are created before the write, so `--write .claude/settings.local.json` works in a fresh directory.
 
-Note that the provider and detector rules collapse when they share a binary: a config whose provider command and detector command are both `cargo` produces one rule, not two.
+The returned string is the pretty-printed result, so every caller can display exactly what landed on disk.
 
-### `render(&[String]) -> String`
+## The CLI surface
 
-The preflight block shown before the single grant. It lists the rules, then states two things the reader needs: nothing outside the list is requested, and human checkpoints still stop and wait regardless of the grant. `render_mentions_that_checkpoints_still_stop` guards the second sentence — it is a load-bearing claim about the system, not decoration, so keep it if you rewrite the copy.
-
-### `merge_into(&Path, &[String]) -> io::Result<String>`
-
-Additive, idempotent, and deliberately forgiving of whatever is already in the file:
-
-1. Read and parse the existing file if it exists; **unparseable JSON falls back to `json!({})`** rather than erroring. A non-object root (array, string, number) is likewise replaced.
-2. Walk to `permissions.allow`, creating `permissions` as `{}` and `allow` as `[]` if absent.
-3. Build a `BTreeSet` of the existing string entries and push only rules not already present.
-4. Pretty-print, `create_dir_all` the parent, write with a trailing newline, and return the serialized JSON so the caller can display it.
-
-Two behaviours worth knowing before you touch this:
-
-- **Unrelated keys survive.** `merging_preserves_existing_rules_and_adds_new_ones` asserts both that a pre-existing `Skill(claude-api)` rule is retained and that a sibling `"theme": "light"` is untouched. Any rewrite of this function must keep that true — it edits a file the user also owns.
-- **A malformed `permissions` value is silently skipped.** If `permissions` exists but is not an object, `as_object_mut()` yields `None`, `allow` becomes `None`, and no rules are added — yet the file is still rewritten and `Ok` is returned. The caller reports success with a count that was never applied. If you need that surfaced, this is the place to change it.
-
-Corrupt-file recovery is destructive by design (step 1 discards unparseable content), which is fine for `settings.local.json` but is the reason this function should not be pointed at a file whose content it did not expect.
-
-## The `permissions` subcommand
-
-`cmd::permissions::execute(config, write)` loads the config via `loopsmith_core::load`, computes the grant, and branches on the destination:
+`runtime/crates/loopsmith-cli/src/cmd/permissions.rs` is a thin shell over the two core functions:
 
 ```
-loopsmith permissions ./loop.yaml
-    → render(&grant) to stdout, for a human to read before granting
-
-loopsmith permissions ./loop.yaml --write .claude/settings.local.json
-    → merge_into, then print "wrote N permission rule(s) to <path>" and the merged JSON
+loopsmith loop permissions <config> [--write <path>]
 ```
 
-`N` is `grant.len()`, i.e. the number of rules *required*, not the number newly added — a second identical run reports the same count while changing nothing.
+It loads the config with `loopsmith_core::load`, derives the grant, and either prints `render(&grant)` or merges into `--write`'s path and prints a count plus the merged JSON. Every error is flattened to `String` via `map_err(|e| e.to_string())`; success is always `ExitCode::SUCCESS`.
 
-## Other callers of `required`
+`permissions` is in the 0.3 alias table (`loopsmith-cli/src/cli/alias.rs`) mapped to the `loop` noun, so the bare `loopsmith permissions <config>` spelling still works and is rewritten before clap sees the arguments.
 
-Two paths consume the derivation without going through the subcommand, and both must keep working when it changes:
+### Other callers
 
-- `scaffold::scaffold` (`loopsmith-cli/src/scaffold.rs`) — bakes the grant into a freshly generated loop directory.
-- `web::assemble::review_config` (`src/web/assemble.rs`) — surfaces it in the browser review step, so the guided flow shows the same list the CLI would.
+- **Scaffolding** (`loopsmith-cli/src/scaffold.rs:664`) derives the grant for the config it just generated and merges it straight into `.claude/settings.local.json`, falling back to `render(&grant)` as the file contents if the merge fails — so a new loop directory always ships with *something* readable in place. It also writes `permissions.template.json` alongside as documentation.
+- **The web UI** surfaces the grant twice: `loopsmith-web/src/assemble.rs:134` puts `required(cfg)` into the `Review` struct that the draft-review endpoint returns as you type (the `permissions_are_derived_rather_than_guessed` test covers that field), and `Action::PermissionsWrite { config, settings }` in `loopsmith-web/src/exec.rs:506` spawns the CLI as `loop permissions <config> --write <settings>` — the browser never touches the file itself, it asks for one of a closed set of argv shapes.
 
-Because all three share one function, a new rule source added to `required` propagates everywhere at once. That is the intended design; adding a rule in a caller instead is the thing to avoid.
+## `permissions.template.json` — the shape, not the answer
 
-## `permissions.template.json` is documentation, not output
+The scaffolded template is deliberately over-broad and deliberately annotated as such. Its `$comment` tells the reader to generate the real file with `loopsmith loop permissions <config> --write .claude/settings.local.json`; the `$sections` map explains each group (`core_tools`, `control_plane`, `providers`, `detectors`, `acquisition`); and `$still_stops` enumerates what no allow-rule can authorise:
 
-The template's own `$comment` is blunt about this: *"This file is the shape, not the answer."* It exists so a reader can see the full space of rules, with `$sections` explaining each category and `$still_stops` listing what remains gated no matter what (`constraints.human_checkpoint` entries, publishing/sending/deleting/paying, promoting a quarantined sub-agent out of `generated-skills/`, applying anything in `proposals/`).
+- anything in `constraints.human_checkpoint`
+- publishing, sending, deleting, or paying
+- promoting a quarantined sub-agent out of `generated-skills/`
+- applying anything written to `proposals/`
 
-One concrete divergence to be aware of: the template lists `Bash(loopsmith:*)` under `control_plane`, but `required` does not emit it. Nothing keeps the two in sync automatically — if you add a rule source, update the template's prose too, and if you believe the control-plane rule should be granted, that's a change to `required`, not to the template.
+## What actually constrains a run
 
-## `compat.template.sh` — the detector execution environment
+The grant says what will not prompt. These are the mechanisms that say what cannot happen.
 
-Loopsmith runs a detector **with no shell**: `command` is `argv[0]` and `args` are literal. A detector is therefore a real file with a real shebang, not a shell string, and this file is what it sources:
+**Constraints** (`loopsmith-core/src/config/constraints.rs`). `ConstraintSet` carries `rules`, `forbidden_paths`, `forbidden_commands`, `max_tokens`, `max_seconds`, and `human_checkpoint` — the last documented as Bezos Type 1: "irreversible decisions do not get made at machine speed." `ConstraintSet::merged(global, node)` appends node lists onto the global ones and lets node limits win where present. `frozen_git_rules()` is the canned set (no `git stash`, no `git reset`, no git command except committing a specific file) emitted into parallel nodes.
 
-```sh
-. ./scripts/compat.sh
+Constraints reach a node two ways. `loopsmith-run/src/prompts.rs:32` renders them into the system prompt as `Never touch:`, `Never run:`, and `Stop and ask a human before:` lines. That is instruction, not enforcement — and the code is honest about the difference: `publish::forbidden_changes` (`loopsmith-run/src/publish.rs:88`) enforces `forbidden_paths` *mechanically*, but only for a node with `Isolation::Worktree`, where the worktree's git status is an exact record of what changed. A node sharing the loop root "leaves no such record, so its `forbidden_paths` remain a prompt-level instruction and nothing more." When a worktree node does touch a forbidden path, `waves.rs:831` publishes **nothing** from it — "the whole worktree is suspect, not just the offending file."
+
+**Protected components** (`loopsmith-core/src/config/protected.rs`). Self-evolution is only safe if the evolving thing cannot reach what constrains it. `ProtectedComponent` maps each protected area to dotted config paths, and the list includes `Approvals` → `safety.limits.global.human_checkpoint`, `safety.gates.approval`; `Credentials` → `execution.providers.providers.requires_env`, `secrets`; and `Protected` itself. The check lives in the gate — compiled code the loop cannot dispatch to.
+
+**Feature flags** (`loopsmith-core/src/config/environment.rs`). `Features` keeps capability separate from policy: `self_evolution`, `marketplace_skills` ("this is the supply-chain surface"), and `external_side_effects` all default to `false`; `human_approval` defaults to `true` and turning it off is refused outright in `prod`.
+
+## Process isolation
+
+```mermaid
+flowchart TD
+    I{"node isolation"} -->|not Container| H[Containment::Host]
+    I -->|Container| IMG{"image named?"}
+    IMG -->|no| D["Degraded(no image)"]
+    IMG -->|yes| RT{"runtime probe"}
+    RT -->|Err| D2["Degraded(why)"]
+    RT -->|Ok| CN["Container(image, network, runtime)"]
 ```
 
-Everything in it detects at run time rather than being baked in when the loop was generated — a loop directory gets copied to a build box, a container, or a colleague's laptop, and a pre-computed answer would be wrong on arrival with no sign that anything had changed.
+`container::resolve` (`loopsmith-run/src/container.rs:98`) answers where a node's provider command runs, given the node's `Isolation`, the graph-level `execution.graph.container_image` fallback, and the result of `container::probe`. The node image wins over the graph image; `network` defaults off.
 
-**Exported environment**
+The load-bearing decision is that a container node **degrades to a worktree** rather than failing when the runtime is absent, its daemon is stopped, or no image is named — machines without Docker are the common case, and "a loop that refused to run there would be a loop that only runs on its author's machine." The ledger records which happened. `probe()` caches its answer in a `OnceLock` (the answer cannot change mid-process, and a five-second daemon timeout in front of every dispatch would be intolerable) and reads `LOOPSMITH_DOCKER` to allow a CLI-compatible runtime such as `podman`.
 
-- `LOOPSMITH_OS` — `uname -s`, or `unknown`.
-- `LOOPSMITH_USERLAND` — `gnu` if `sed --version` succeeds, else `bsd`.
-- `LOOPSMITH_BASH_MAJOR` — major version of the `bash` on `PATH`, or `0` when there is none.
+`loopsmith_provider::container_argv` (`loopsmith-provider/src/lib.rs:134`) builds the invocation: `run --rm`, `-i` when the provider takes its prompt on stdin, `--network none` unless the node asked for a network, `-v <workdir>:/work -w /work`, then `-e KEY` for each entry in `requires_env`. Passing env vars **by name** is deliberate — the runtime reads each value from the parent process's environment, so a secret never appears in argv where anyone on the machine could read it from the process table. The provider CLI must exist inside the image; the host's copy is not visible, which is the isolation.
 
-**Helpers**
+## Detectors run with no shell
 
-| Function | Papers over |
+A `Detector::Script { command, args, expect_exit }` is executed by `run_detector` in `loopsmith-gate/src/lib.rs:436` as `Command::new(command).args(args).current_dir(&ev.workdir)`. There is no shell: `command` is argv[0] and every `arg` is a literal. No globbing, no pipes, no `&&`, no variable expansion. A detector that needs any of that is a real file with a real shebang.
+
+`compat.template.sh` (scaffolded to `scripts/compat.sh`, mode `0o755`) is what such a file should source. Three rules govern it:
+
+1. **Everything is detected at run time.** A loop directory gets copied to a build box, a container, or a colleague's laptop, and a baked-in answer "would be wrong on arrival with no sign that anything had changed." `scaffold.rs` ships this file verbatim rather than generating it for exactly that reason.
+2. **POSIX `sh` unless `need_bash 4` says otherwise**, because macOS ships bash 3.2.57 and associative arrays, `${x,,}`, `mapfile`, `&>>` and `**` all arrived in 4.0.
+3. **Exit 2, not 1, when the machine cannot run the check.** `need_bash` and `require` both exit 2, and the comment explains why: a detector's exit code is its verdict, and "this machine cannot run the check" is a different fact from "the check failed." A gate that conflates them reports missing tooling as unfinished work — and since `expect_exit` defaults to 0, a 2 is a clean failure with a distinguishable code rather than a false negative.
+
+The exported environment (`LOOPSMITH_OS`, `LOOPSMITH_USERLAND`, `LOOPSMITH_BASH_MAJOR`) and the helpers built on it cover the differences that actually break scripts:
+
+| Helper | Papers over |
 |---|---|
-| `sed_i <expr> <file>…` | GNU `sed -i` takes no argument, BSD requires one. Getting it wrong on BSD consumes the next argument as a backup suffix — which is how a script ends up editing a file named `-e`. |
-| `stat_size` / `stat_mtime` | `-c%s`/`-c%Y` on GNU, `-f%z`/`-f%m` on BSD. |
-| `readlink_f <path>` | `readlink -f` is absent from BSD readlink before macOS 12; falls back to a `cd`/`pwd -P` walk. |
-| `sha256 <file>` | `sha256sum` or `shasum -a 256`, whichever exists; exits 127 with a message if neither. |
-| `need_bash <major>` | macOS ships bash 3.2.57 (4.0 changed licence). Associative arrays, `${x,,}`, `mapfile`, `&>>`, and `**` all arrived in 4.0. |
-| `require <command>…` | A tool the detector needs is not on `PATH`. |
-| `compat_report` | One line of environment for a log or bug report. |
+| `sed_i` | GNU `sed -i` takes no argument, BSD requires one — get it wrong on BSD and you edit a file called `-e` |
+| `stat_size`, `stat_mtime` | `-c%s`/`-c%Y` on GNU, `-f%z`/`-f%m` on BSD |
+| `readlink_f` | `readlink -f` is missing from every BSD before macOS 12; falls back to a `cd`/`pwd -P` walk |
+| `sha256` | `sha256sum` or `shasum -a 256`, whichever exists; 127 with a message when neither does |
+| `require`, `need_bash` | Missing tooling, reported as exit 2 |
+| `compat_report` | One line for a log or bug report |
 
-### The exit-2 convention
+Windows is in scope only through Git Bash, WSL, or MSYS. Nothing here runs under `cmd.exe` or PowerShell — a detector for those is a `.cmd` or `.ps1` naming its own interpreter, which works precisely because there is no shell in the way. The same reasoning is why scaffolding writes both `run.sh`/`resume.sh` and `run.cmd`/`resume.cmd` on every host.
 
-`need_bash` and `require` exit **2**, not 1, and this is the single most important contract in the file. A detector's exit code *is* its verdict: `1` means the check failed, `2` means this machine cannot run the check. A gate that cannot distinguish them reports missing tooling as unfinished work. Preserve the distinction in any new helper that can abort.
+---
 
-### Writing detectors against this
+## Contributing
 
-Target POSIX `sh` unless `need_bash 4` says otherwise — that is what the rest of a generated loop uses. On Windows the file runs under Git Bash, WSL, or MSYS and behaves as it does on Linux; nothing here runs under `cmd.exe` or PowerShell. A detector meant for those is a `.cmd` or `.ps1` naming its own interpreter, precisely because there is no shell to interpret it.
+**Adding a permission rule.** Put the derivation in `required()` and key it off a config field, never off a guess. If the rule is conditional, add a test in the style of `marketplace_access_is_only_requested_when_the_policy_uses_it` that asserts *both* presence and absence — a rule that is always emitted is indistinguishable from a template, which is what this module exists to replace. If the rule group is new, add a line to `$sections` in `permissions.template.json`.
 
-## Tests
+**Do not add a deny list.** The empty deny list is a decision, documented in `$deny_note`. Something that must not happen belongs in `constraints`, `safety.protected`, or a `features` flag — places the gate enforces and evolution cannot reach.
 
-The unit tests in `permissions.rs` build configs from YAML through `loopsmith_core::parse_str` via the local `cfg(extra: &str)` helper, which is how the marketplace test mutates `skills.acquisition_order` to `[Installed]` and asserts the network and `npx skills` rules disappear. Filesystem tests use `loopsmith_util::testing::temp_dir` and clean up with a best-effort `remove_dir_all`. When adding a rule source, add both halves of the marketplace pattern: the rule appears when the config needs it, and is absent when it does not.
+**Touching `merge_into`.** The three invariants under test are: existing rules survive, unrelated keys survive, and repeat calls add nothing. The scaffolder and the web UI both depend on all three.
+
+**Touching `compat.sh`.** Add a helper that probes rather than a constant that was true on your machine, and use exit 2 for "cannot check." `loopsmith-cli/tests/compat.rs` exercises the shipped template.
+
+**Adding a web action.** `Action` in `loopsmith-web/src/exec.rs` is a closed set with no wildcard arm in `named()`, so a new variant is a compile error until it is added to `all_actions()` — and the argv it produces must be a spelling the 1.0 grammar accepts without tripping the 0.3 alias notice.

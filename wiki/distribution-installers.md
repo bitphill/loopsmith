@@ -2,193 +2,184 @@
 
 # Distribution & Installers
 
-Everything outside `runtime/` that gets a `loopsmith` binary onto a machine. The Rust workspace produces one executable; this module is the five different stories told about how that executable arrives, plus the tooling that keeps those stories agreeing on a version number.
+Everything that gets `loopsmith` onto a machine that does not have it. Five acquisition paths, two install strategies, and one script that keeps the version number the same in all of them.
 
-Nothing here is linked into the binary. It is shell, PowerShell, Ruby, JavaScript, and Python that runs on the user's machine before `loopsmith` ever executes.
+## The two strategies
 
-## The channels
+| Strategy | Paths | What lands on disk |
+|---|---|---|
+| **Build from source** | `install.sh`, `install.bat` → `install.ps1`, `brew install` | A binary compiled on the host by cargo |
+| **Fetch a prebuilt release asset** | `npm install -g @bitphill/loopsmith`, `pipx install loopsmith-cli` | A binary downloaded from the GitHub release for this package's version, checksum-verified |
 
-| Channel | Entry point | How the binary is obtained | When |
-|---|---|---|---|
-| Source install (POSIX) | `install.sh` | `cargo build --release` | at install |
-| Source install (Windows) | `install.bat` → `installers/install.ps1` | `cargo build --release` | at install |
-| Homebrew | `Formula/loopsmith.rb` | `cargo install` via `std_cargo_args` | at install |
-| npm | `npm/scripts/install.js` (`postinstall`) | download + SHA256 verify | at install |
-| PyPI | `pypi/src/loopsmith_cli/` | download + SHA256 verify | **first run** |
-| crates.io | `cargo install loopsmith` | compiled by cargo | at install |
-
-Three of these compile from source and two ship a prebuilt artifact. The split matters because it determines what can go wrong: the compiling channels fail on toolchain problems (no cargo, cargo too old, no MSVC linker), and the downloading channels fail on host-detection and integrity problems (wrong target triple, checksum mismatch, unlisted asset).
+The split is deliberate: the shell installers exist for people who have cloned the repository or want a toolchain anyway, and the registry packages exist so a Node or Python user never installs Rust. Both npm and PyPI packages are *Rust binaries wearing a package manager's clothes* — there is nothing to `require()` and nothing to `import`.
 
 ```mermaid
 flowchart TD
-    A[user] --> B[install.sh / install.bat]
-    A --> C[brew install]
-    A --> D[npm i -g]
-    A --> E[pip install]
-    B --> F[cargo build --release]
-    C --> F
-    D --> G[download release asset]
-    E --> G
-    G --> H[verify against SHA256SUMS]
-    F --> I[loopsmith on PATH]
-    H --> I
+    A[install.sh / install.bat] --> D[installers/deps.sh<br/>deps.ps1]
+    D --> E[cargo build --release]
+    B[brew install] --> E
+    C[npm / pipx] --> F[GitHub release asset]
+    F --> G[SHA256SUMS verify]
+    G --> H[loopsmith on PATH]
+    E --> H
 ```
 
-## Build-from-source installers
+## Source installers
 
-### `install.sh`
+### `installers/manifest.json` is the single source of truth
 
-Bash, `set -euo pipefail`, re-runnable — running it a second time is the documented upgrade path. It is deliberately bash and not POSIX sh, in contrast to the loop scripts the tool *generates*: an installer runs once on a machine someone is sitting at.
+`install.sh` and `install.ps1` read every shared fact — repository URL, branch, binary name, install directory name, cargo build arguments, the post-install next steps — out of one JSON file via the `manifest.sh` shell helpers:
 
-The sequence:
-
-1. `detect_os` normalizes `uname -s` to `linux`/`macos`/`bsd`/`windows`/`unknown`. `unknown` is fatal; `windows` (MSYS/Cygwin) warns and continues, since a POSIX layer is present.
-2. Delegates to `installers/deps.sh` if it exists beside the script; otherwise falls back to an inline `rustup` install.
-3. Prepends `$HOME/.cargo/bin` to `PATH` **for this process**. rustup writes its PATH line into `~/.profile`, which zsh never reads — so a machine that just installed cargo can still not see it.
-4. Picks a source directory: a `runtime/` directory beside the script wins over cloning. This is what makes `git clone && ./install.sh` install the code you just cloned rather than whatever `main` happens to be. Otherwise `git clone --depth 1 --branch "$BRANCH"` into `$INSTALL_DIR/src`.
-5. `cargo build --release --bin loopsmith` in `$SRC_DIR/runtime`, then `install -m 0755` the result into `$INSTALL_DIR/bin/loopsmith`.
-6. Symlinks into `$BIN_LINK_DIR` **only if it is writable or we are root** — no implicit sudo. When it can't, it prints the `export PATH=...` line instead of failing.
-
-Knobs, all environment variables with defaults:
-
-| Variable | Default |
-|---|---|
-| `LOOPSMITH_REPO_URL` | `https://github.com/bitphill/loopsmith.git` |
-| `LOOPSMITH_HOME` | `$HOME/.loopsmith` |
-| `LOOPSMITH_BIN_DIR` | `/usr/local/bin` |
-| `LOOPSMITH_BRANCH` | `main` |
-
-Everything is teed to `$INSTALL_DIR/install.log`, truncated at the start of each run.
-
-### `installers/deps.sh`
-
-Callable on its own. Two rules shape it: **install nothing already present**, and **never install a package manager**. A host with no package manager is a decision someone made, and `pkg_install` reports it rather than working around it.
-
-`pkg_install` dispatches on the *package manager*, not the OS — `apt-get`, `dnf`, `yum`, `pacman`, `apk`, `zypper`, `brew`, `pkg` — because a Debian container may have apt and no sudo, and a Mac may have brew or nothing. `sudo` is prefixed only when not root and `sudo` exists.
-
-It installs `git` and `curl` when missing, then rustup with `--profile minimal` if `cargo` is absent. It deliberately installs **no** pkg-config or OpenSSL headers: loopsmith links no C libraries and never does TLS in-process, because every provider is an external command.
-
-The last check parses `cargo --version` and warns if the minor version is below **1.75**, the declared `rust-version`. Without that warning, an older toolchain fails deep inside a dependency with a message about a syntax feature, which is not a useful clue.
-
-### `install.bat` and `installers/install.ps1`
-
-`install.bat` exists so the install is one word instead of an execution-policy incantation. It checks for `powershell` on `PATH` (exit `127` with a clear message if absent) and invokes `install.ps1` with `-NoProfile -ExecutionPolicy Bypass`, scoped to that one process — nothing about the machine changes.
-
-`install.ps1` mirrors `install.sh` step for step: log file under `$InstallDir`, delegate to `deps.ps1`, prepend `%USERPROFILE%\.cargo\bin`, prefer a `runtime` directory beside the repo root over cloning, `cargo build --release --bin loopsmith`, copy `loopsmith.exe` into `$InstallDir\bin`.
-
-The one structural difference: there is no symlink step. Instead it edits the **User** PATH via `[Environment]::SetEnvironmentVariable(..., 'User')` — no elevation needed, and a tool installed into a home directory has no business touching a machine-wide setting. It also updates `$env:PATH` in-process and tells the user to open a new shell.
-
-`deps.ps1` follows `deps.sh`'s policy with `winget` and `choco` as the two managers, installs neither, and adds two Windows-specific concerns: `Rustup.Rustup` pulls the MSVC toolchain, so the script warns when `link.exe` is missing and names the Visual Studio C++ build tools package. Without winget it downloads `rustup-init.exe` from `https://win.rustup.rs/x86_64` and deletes it afterward.
-
-## `Formula/loopsmith.rb`
-
-This file is the **source of truth**; the release workflow renders `url` and `sha256` for the tag being released and pushes the result to `bitphill/homebrew-loopsmith`, which is what `brew install` actually reads. Edit the body here — those two lines get overwritten.
-
-Two details a contributor will trip over:
-
-- **The cargo workspace root is `runtime/`, not the repository root.** `install` does `cd "runtime"` and then `system "cargo", "install", *std_cargo_args(path: "crates/loopsmith-cli")`. Note the path is the *crate* here, where the shell installers use `--bin loopsmith` from the workspace root.
-- **Getting the `sha256` right is the recurring failure.** codeload rate-limits unauthenticated archive downloads and `curl -sL` reports success while writing the error body; hashing that produces a digest no install can ever match. Check the size and gzip validity first — the file should be ~2 MB — and note that `gh api repos/.../tarball/<ref>` is not a substitute: it mangles binary output and returns a 199-byte fragment for every ref.
-
-The `test do` block is a real smoke test, not a version print. It asserts `--version`, asserts `doctor` emits `platform` and `userland` (`doctor` must stay advisory so a constrained CI container can't make it fail), scaffolds a loop with `loopsmith new`, checks that `loop.yaml`, `run.sh`, and `run.cmd` all landed, and then asserts that `validate` **exits 1** mentioning `pre_execution`. That refusal is the product; a build where it stops happening is a broken build.
-
-## Prebuilt-binary channels
-
-Both the npm and PyPI packages are Rust binaries wearing a package manager's clothes. Neither exposes anything to `require()` or `import`; the installed command is `loopsmith` and its exit codes are its API.
-
-### The shared contract
-
-Every release publishes, per target triple, an archive named:
-
-```
-loopsmith-v<VERSION>-<TARGET>.tar.gz     # .zip on Windows
+```sh
+BINARY="$(m_str binary)"                       # one scalar
+m_list requires | while read -r tool; ...      # one value per line
 ```
 
-alongside a `SHA256SUMS` file listing all of them, at `https://github.com/bitphill/loopsmith/releases/download/v<VERSION>/`.
+`m_str` returns a scalar; `m_list` emits one element per line. `install.sh` feeds `m_list build_args` into `"$@"` one line at a time precisely so an argument containing a space survives as one argument:
 
-Six targets are prebuilt: `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-gnu`, `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`. Anything else falls back to `cargo install loopsmith`.
+```sh
+set --
+while IFS= read -r arg; do set -- "$@" "$arg"; done <<EOF
+$(m_list build_args)
+EOF
+( cd "$SRC_DIR/$BUILD_DIR" && cargo "$@" )
+```
 
-**The verification step is the point of both implementations.** A postinstall script that pipes a downloaded binary onto disk unverified is a supply-chain hole with a progress bar. Both fetch `SHA256SUMS`, find the line ending in the asset name, and refuse if the asset is unlisted or the digest doesn't match — before the file is made executable.
+That means `cargo build --release --bin loopsmith` is a manifest fact, not a shell fact. **When you change how the binary is built, edit the manifest, not the scripts.**
+
+### `install.sh` (Linux, macOS, BSD)
+
+Requires bash — unlike the loop scripts loopsmith *generates*, which are POSIX sh. The distinction is intentional and documented in the header: an installer runs once on a machine someone is sitting at; a generated loop script runs unattended on a machine nobody chose.
+
+Flow:
+
+1. `detect_os` normalizes `uname -s` to `linux`/`macos`/`bsd`/`windows`/`unknown`. `unknown` is fatal; `windows` (MSYS/Cygwin) warns and continues because a POSIX layer is present.
+2. Delegates to `installers/deps.sh` when present; otherwise falls back to an inline `rustup` install.
+3. Prepends `$HOME/.cargo/bin` to `PATH` for this process. rustup writes its PATH line to `~/.profile`, which zsh never reads, so a host with cargo installed can still not see it.
+4. Verifies `m_list requires`. **Note the trap here:** that loop runs in a subshell, so its `err` cannot exit the installer. `cargo` and `git` are therefore re-checked outside the loop. If you add a hard requirement, add an explicit check alongside them rather than trusting the loop.
+5. Picks a source tree: a checkout beside the script wins over cloning, which is what makes `git clone && ./install.sh` install the code you just cloned rather than whatever `main` happens to be.
+6. `install -m 0755` the built binary into `$INSTALL_DIR/<bin_subdir>/`, then symlink into the link directory if it is writable (or root). If not, it prints the `export PATH=...` line instead of asking for a password.
+
+Everything is `tee`'d to `$INSTALL_DIR/install.log`, truncated at the start of each run. Re-running is the upgrade path.
+
+Environment overrides: `LOOPSMITH_REPO_URL`, `LOOPSMITH_HOME`, `LOOPSMITH_BIN_DIR`, `LOOPSMITH_BRANCH`.
+
+### `install.bat` (Windows)
+
+Eleven meaningful lines. It exists so the install is one word instead of an execution-policy incantation: it checks that `powershell` is on `PATH` (exit `127` with a message if not) and runs `install.ps1` with `-NoProfile -ExecutionPolicy Bypass` scoped to that one process, which changes nothing about the machine. Arguments and the exit code pass straight through.
+
+### Dependency resolution
+
+`installers/deps.sh` and `installers/deps.ps1` are callable on their own and are safe to re-run. Both hold the same two rules:
+
+- **Install nothing already present.** `have()` / `Test-Have` gate every step.
+- **Never install a package manager.** A host with none is a decision somebody made; the script reports it and stops rather than working around it.
+
+`pkg_install` in `deps.sh` dispatches on the package manager, not the OS — a Debian container may have `apt` and no `sudo`, an Alpine one has `apk`, a Mac may have `brew` or nothing:
+
+```
+apt-get · dnf · yum · pacman · apk · zypper · brew · pkg
+```
+
+`sudo` is prefixed only when the effective UID is non-zero *and* `sudo` exists. On Windows, `Install-Pkg` tries `winget`, then `choco`, then dies with the package name to install by hand.
+
+What gets installed: `git`, `curl`, and rustup (minimal profile, stable toolchain) — nothing else. The comment is load-bearing: loopsmith links no C libraries and never uses TLS from inside the process, because providers are external commands, so `pkg-config` and openssl headers are deliberately absent from the list.
+
+Both scripts warn (not fail) when cargo is older than **1.75**, the declared `rust-version`. An older toolchain otherwise fails deep in a dependency with a message about a syntax feature, which is not a useful clue. `deps.ps1` additionally warns when `link.exe` is missing and names the Visual Studio C++ build tools, since `Rustup.Rustup` pulls the MSVC toolchain.
+
+## Prebuilt-asset packages
+
+Both registry packages consume the same release contract:
+
+```
+https://github.com/bitphill/loopsmith/releases/download/v<VERSION>/
+  loopsmith-v<VERSION>-<target-triple>.tar.gz   # or .zip on Windows
+  SHA256SUMS
+```
+
+`<VERSION>` comes from the package's own metadata, never from a "latest" lookup, so a pinned package resolves to a pinned asset.
+
+**The checksum step is the reason these scripts exist at all.** A postinstall that pipes a downloaded binary onto disk unverified is a supply-chain hole with a progress bar; the release workflow publishes `SHA256SUMS` so the installers can refuse. In both implementations the asset's line is located in `SHA256SUMS` by suffix match, a missing line is an error, and a digest mismatch aborts before anything is made executable.
 
 ### npm — `npm/scripts/install.js`
 
-Runs as `postinstall`. Flow: `main` → `resolveTarget` → `isMusl`, then two parallel `fetchBuffer` calls (asset and `SHA256SUMS`), digest comparison, and `tar` extraction of a single named member into `npm/bin/`, renamed to `loopsmith-bin` (`loopsmith.exe` on Windows). The wrapper `bin/loopsmith.js` — the `bin` entry in `package.json` — is what npm links onto PATH and what reports a clear error if the binary never landed.
+Runs as `postinstall`. `main()` → `resolveTarget()` → `isMusl()`, then downloads asset and sums concurrently via `fetchBuffer()`.
 
-`isMusl` is subtle enough to be worth reading before touching: musl's `ldd` has no `--version` flag, prints usage plus `musl libc` to **stderr**, and exits non-zero, where glibc's answers and exits 0. So the detection is "did `execFileSync` throw, and does the captured stderr match `/musl/i`". Getting this wrong yields a binary that dies with a bare `not found` on a perfectly good libc.
+`isMusl()` is worth reading before you touch it: musl's `ldd` has no `--version` flag — it prints usage plus `musl libc` to *stderr* and exits non-zero, where glibc's answers and exits 0. So the detector treats a throw whose stderr matches `/musl/i` as musl. Getting this wrong ships a glibc binary that dies with a bare "not found" on a perfectly good libc.
 
-Extraction shells out to `tar` in both cases — `tar.exe` has shipped with Windows 10 1803 and later and reads zips.
+Extraction uses the system `tar`, including on Windows — `tar.exe` has shipped since Windows 10 1803 and reads zips — and pulls exactly one named member (`loopsmith` / `loopsmith.exe`), renaming it to `bin/loopsmith-bin` (`bin/loopsmith.exe` on Windows) with mode `0755`. The temp archive is removed in a `finally`.
 
-The failure handler sets `process.exitCode = 0` **on purpose**. A flaky download should not hard-fail an `npm install` that may be installing twenty other packages; the launcher surfaces the problem at run time instead.
+**Failure is non-fatal on purpose:** the top-level `.catch` logs, suggests `cargo install loopsmith`, and sets `process.exitCode = 0`. A flaky download should not hard-fail an `npm install` that is also installing twenty other things; `bin/loopsmith.js` reports a clear error at run time if the binary never landed. The `bin` shim is what `package.json` maps the `loopsmith` command to.
+
+`package.json` constrains where this is even attempted: `os: [linux, darwin, win32]`, `cpu: [x64, arm64]`, `engines.node >= 18` (the script uses global `fetch`).
 
 ### PyPI — `pypi/src/loopsmith_cli/`
 
-The important divergence from npm: **the binary is fetched on first run, not during `pip install`**, and cached under `~/.loopsmith/bin/<version>/` (`LOOPSMITH_HOME` overrides the root). A wheel that downloads at install time breaks in every environment that installs without a network and runs with one — CI images, Docker build stages, locked-down build hosts — and the failure surfaces as an install error for a package the user hasn't tried to use yet.
+The distribution is `loopsmith-cli` because `loopsmith` was already registered; the console script is `loopsmith`, wired through `[project.scripts]` to `loopsmith_cli.__main__:main`.
 
-`__init__.py` holds the resolution logic:
+The timing differs from npm deliberately: **the binary is fetched on first run, not at install time.** A wheel that downloads during `pip install` breaks in every environment that installs without network and then runs with one — CI images, Docker build stages, locked-down build hosts — and surfaces as an install error for a package the user has not tried to use yet.
 
-- `_target()` maps `platform.system()` / `platform.machine()` to a triple, raising `ResolveError` for unsupported hosts. It uses `platform.machine()` rather than `platform.processor()`, which is empty on most Linux distributions and returns marketing strings on Windows. musl detection here is `platform.libc_ver()` returning empty — a different mechanism from the npm side, solving the same problem.
-- `cache_dir()` is versioned, so an upgrade re-fetches rather than reusing a stale binary.
-- `_expected_digest(asset)` reads `SHA256SUMS` over `_read` and returns the matching line's digest, or raises.
-- `ensure_binary()` orchestrates: cache hit → return; otherwise `_target` → `_expected_digest` → `_read` → compare → `_extract` into a `TemporaryDirectory` → `shutil.move` into the cache → chmod +x.
-- `_extract()` extracts **one named member**, never `extractall`, and rejects symlinks and hardlinks. An archive is untrusted input even when its checksum matched, and a path-traversing entry only needs one careless extraction.
+`ensure_binary()` is the whole story:
 
-`__main__.py` is the console entry point declared by `[project.scripts]`. Two hazards drive its shape:
+```
+ensure_binary → cache_dir        # $LOOPSMITH_HOME or ~/.loopsmith, then bin/<version>
+              → _target          # Rust triple from platform.system/machine
+              → _expected_digest → _read   # SHA256SUMS
+              → _read            # the asset
+              → _extract         # one named member
+```
 
-1. **There is deliberately no "reuse a `loopsmith` already on PATH" shortcut.** pip installs *this package's* console script as `loopsmith`, so `shutil.which("loopsmith")` finds the very script that is running, and `execv`ing it re-enters `ensure_binary` — an infinite exec loop that presents as the command hanging with no output at all. `main()` additionally compares `Path(exe).resolve()` against `Path(sys.argv[0]).resolve()` and refuses, as belt-and-braces against the one failure mode with no useful symptom.
-2. **On POSIX it `os.execv`s rather than wrapping.** loopsmith is long-running and interactive; a Python parent would have to forward signals correctly and would get it wrong at least once. `execv` makes the shell's Ctrl-C reach the real binary and its exit code arrive unchanged. Windows has no process-replacing exec, so it falls back to `subprocess.call` and maps `KeyboardInterrupt` to `130`.
+`cache_dir()` is versioned, so an upgrade re-fetches instead of running a stale binary. `_target()` uses `platform.machine()` rather than `platform.processor()` (empty on most Linux distros, marketing strings on Windows) and decides musl vs glibc from `platform.libc_ver()`. `_extract()` refuses `extractall`: an archive is untrusted input even when its checksum matched, so it resolves one member by name and rejects it if the name differs or the entry is a symlink or hard link.
 
-Both `ResolveError` and `OSError` map to exit `127` with a `cargo install loopsmith` suggestion.
+Two comments document the same hazard and both guard against it:
 
-### `pypi/build.sh`
+- `ensure_binary` has **no "reuse a `loopsmith` already on PATH" shortcut**. pip installs *this package's* console script as `loopsmith`, so `shutil.which("loopsmith")` finds the script that is currently running, and `execv`-ing it re-enters the function — an infinite exec loop that presents as a hang with no output.
+- `main()` re-checks the same thing by comparing the resolved `exe` against resolved `sys.argv[0]` and returning `127` rather than exec'ing itself. An unresolvable `argv[0]` is caught and ignored — it is not a reason to refuse to run.
 
-Builds sdist + wheel into `dist/` and runs `twine check`; `--upload` publishes using `PYPI_TOKEN`.
+On POSIX, `main()` ends in `os.execv`, replacing the process so the shell's Ctrl-C reaches the real binary and its exit code arrives unchanged. Windows has no such exec, so it falls back to `subprocess.call` and maps `KeyboardInterrupt` to `130`. All resolution and download failures exit `127` with the `cargo install loopsmith` fallback.
 
-It creates a throwaway `.venv-build` rather than calling `python3 -m build` directly, because the interpreter first on `PATH` is not a stable fact: installing anything through Homebrew can put a new `python3` ahead of the one whose user site-packages holds `build` and `twine`, and the failure reads as `No module named build` on a machine where build is very much installed. Homebrew's Python is also PEP 668 externally-managed, so `pip install --user` into it is refused outright. `pick_python()` walks an explicit candidate list (`python3.13` … `/usr/bin/python3`) and requires `import venv` to succeed, so the choice doesn't depend on PATH order.
+`pypi/build.sh` builds and optionally uploads. It creates a throwaway `.venv-build` and installs `build` and `twine` there rather than calling a bare `python3 -m build`: the interpreter first on `PATH` is not a stable fact, a Homebrew install can put a `python3` ahead of the one whose user site-packages holds the tools, and Homebrew's Python is PEP 668 externally-managed so `pip install --user` into it is refused outright. `pick_python()` walks an explicit candidate list (3.13 → 3.9 → `python3` → `/usr/bin/python3`) requiring the `venv` module, so the choice does not depend on `PATH` order. `--upload` needs `PYPI_TOKEN`.
 
-## Version synchronization — `tools/sync-version.sh`
+## Homebrew — `Formula/loopsmith.rb`
+
+This copy is the source of truth and a **template**. The release workflow renders `url` and `sha256` for the tag being released and pushes the result to `bitphill/homebrew-loopsmith`, which is what `brew install` actually reads. Edit the body here; those two lines get overwritten. Nothing in the file is tap-specific, so the same formula can be submitted to homebrew-core when that is worth doing.
+
+`install` builds with `std_cargo_args(path: "crates/loopsmith-cli")` from inside `cd "runtime"` — the cargo workspace root is `runtime/`, not the repository root.
+
+`caveats` is the one place a tap can talk to someone who has just arrived, and it spends that space on `loopsmith --web` and `loopsmith --guided` rather than a config format.
+
+The `test do` block is the interesting part, because it asserts product behavior rather than that the binary runs:
+
+- `--version` matches the formula's `version`.
+- `doctor` prints `platform` and `userland`, and must stay **advisory** so a constrained CI container cannot make it fail.
+- `loop new` scaffolds `loop.yaml`, `run.sh`, `run.cmd`; then `loop validate` is expected to **exit 1** mentioning `intent.prerequisites`. That refusal is the product, so a build where it stops happening is a broken build. If you ever change prerequisite gating, this test is one of the things that will tell you.
+
+The header comment also records a release-time trap: `codeload` rate-limits unauthenticated archive downloads, `curl -sL` reports success while writing the error body, and hashing that produces a checksum no install can match. Verify size and gzip integrity before trusting a digest, and do not substitute `gh api .../tarball/<ref>` — it mangles binary output and returns a 199-byte fragment for every ref.
+
+## Version fan-out — `tools/sync-version.sh`
 
 `runtime/Cargo.toml`'s `[workspace.package] version` is the single source of truth. Everything else is derived:
 
-- `runtime/Cargo.toml` workspace path-dependency versions
-- `npm/package.json` `version`
-- `pypi/pyproject.toml` `version`
-- `pypi/src/loopsmith_cli/__init__.py` `__version__`
-- `Formula/loopsmith.rb` — the tag inside the `url`
-- The tag-pinned logo URL and START-HERE link in `npm/README.md`, `pypi/README.md`, and `runtime/crates/*/README.md`
+| Target | What is rewritten |
+|---|---|
+| `runtime/Cargo.toml` | workspace path-dep versions |
+| `npm/package.json` | `"version"` |
+| `pypi/pyproject.toml` | `version` |
+| `pypi/src/loopsmith_cli/__init__.py` | `__version__` |
+| `Formula/loopsmith.rb` | the `archive/refs/tags/vX.Y.Z` URL |
+| `npm/README.md`, `pypi/README.md`, `runtime/crates/*/README.md` | tag-pinned logo URL and tag-pinned `README-FOR-DUMMIES.md` link |
 
-```bash
-./tools/sync-version.sh           # rewrite everything to match
-./tools/sync-version.sh --check   # non-zero if anything drifted (CI uses this)
-```
+Two modes: bare invocation rewrites; `--check` reports drift and exits 1, which is what CI runs. The `apply()` helper writes to a temp file and `mv`s it rather than using `sed -i`, whose spelling differs between GNU and BSD — the same reason generated detector scripts source a compat shim instead of branching.
 
-Hand-editing eight files per release is how one gets missed, and the one that gets missed is usually a URL — failing silently as a broken image on a registry page nobody looks at twice. The READMEs pin to a **tag**, not `main`, because a published README is immutable and an image URL that can move underneath it will eventually be wrong.
+READMEs pin the logo and START-HERE links to the release tag rather than `main` because a published registry README is immutable: an image URL that can move underneath it will eventually be wrong, and it fails silently as a broken image on a page nobody looks at twice.
 
-Two implementation notes:
+The formula's `sha256` is the only thing not derivable locally — it is the digest of a tarball GitHub generates — so it stays manual, and the script prints the exact verification commands on exit.
 
-- `apply()` writes through `mktemp` and `mv` rather than using `sed -i`, whose spelling differs between GNU and BSD.
-- The formula's `sha256` is **not** synced. It's the digest of a tarball GitHub generates, so it can't be derived from anything local; the script prints the `curl | gzip -t | wc -c | shasum` recipe at the end as a reminder, and the release checklist owns it.
+The script deliberately lives in `tools/`, not `scripts/`: that name is reserved for a loop's own detector scripts, and the repository ships none so the `pre_execution` refusal keeps its teaching value.
 
-The script lives in `tools/`, not `scripts/` — `scripts/` is reserved for a loop's own detector scripts, and the repository deliberately ships none so the `pre_execution` refusal keeps its teaching value.
+## Contributing notes
 
-## Registry names
-
-`loopsmith` was already taken on both npm and PyPI by unrelated projects, so the published names differ from the command:
-
-| Registry | Package | Command |
-|---|---|---|
-| npm | `@bitphill/loopsmith` | `loopsmith` |
-| PyPI | `loopsmith-cli` | `loopsmith` |
-| crates.io | `loopsmith` | `loopsmith` |
-| Homebrew | `bitphill/loopsmith` tap | `loopsmith` |
-
-The Homebrew formula requires a `brew tap` step because it isn't in homebrew-core; the file carries nothing tap-specific, so it can be submitted unchanged when the project has enough history behind it.
-
-`npm/README.md` and `pypi/README.md` are near-identical marketing copy maintained in parallel — they exist because registry pages render their own README and can't follow a relative link. They differ only in their install commands, badges, and the section describing that channel's install mechanism. Keeping them in sync is manual apart from the URL lines `sync-version.sh` owns.
-
-## Adding a platform
-
-1. Add the target to the release workflow's build matrix so an archive and a `SHA256SUMS` line exist.
-2. Add the mapping to `resolveTarget()` in `npm/scripts/install.js` and to `_target()` in `pypi/src/loopsmith_cli/__init__.py`. These are independent implementations of the same table — changing one without the other means one ecosystem silently falls through to "build from source".
-3. Add the row to the prebuilt tables in both READMEs.
-4. If the platform needs a new libc or ABI discriminator, it needs a detection function in each language, and each one is its own hazard — see `isMusl` and `platform.libc_ver()` above.
-
-Nothing in `install.sh`, `install.ps1`, or the formula needs touching: those compile for whatever host they run on.
+- **Changing what gets built or where it goes** → `installers/manifest.json`. Three copies of a repository URL is three chances to move the repository and fix two of them, and the one nobody fixes is the script for the OS they are not on.
+- **Changing the release asset naming or adding a target triple** → update `resolveTarget()` in `npm/scripts/install.js` *and* `_target()` in `pypi/src/loopsmith_cli/__init__.py`. They are independent implementations of the same contract and currently do not cover an identical set of triples (`aarch64-unknown-linux-gnu` is present in both; there is no arm64-musl target in either, and `resolveTarget` rejects non-x64 Windows).
+- **Changing the version** → `runtime/Cargo.toml`, then `./tools/sync-version.sh`, then the formula `sha256` once the tag exists. Never hand-edit the derived files; CI's `--check` will catch it, but only after you have pushed.
+- **Never** weaken the `SHA256SUMS` step in either downloader, and keep npm's postinstall failure non-fatal while PyPI's fetch stays lazy — both are answers to specific, unpleasant failure modes rather than stylistic choices.
