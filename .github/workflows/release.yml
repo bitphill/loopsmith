@@ -393,14 +393,24 @@ jobs:
           # not a failure: git commit exits non-zero when there is nothing to do.
           if git diff --quiet; then
             echo "tap already carries ${{ steps.render.outputs.tag }}"
-            exit 0
-          fi
-
-          git config user.name "loopsmith release"
-          git config user.email "bitphill@duck.com"
-          git commit -aqm "loopsmith ${{ steps.render.outputs.version }}
+          else
+            git config user.name "loopsmith release"
+            git config user.email "bitphill@duck.com"
+            git commit -aqm "loopsmith ${{ steps.render.outputs.version }}
 
           Digest verified against the real tarball: valid gzip, plausible size,
           and distinct from the previous release's."
-          git push origin HEAD
-          echo "tap updated to ${{ steps.render.outputs.tag }}"
+            git push origin HEAD
+            echo "tap updated to ${{ steps.render.outputs.tag }}"
+          fi
+
+          # The README's Homebrew badge reads the tap's newest tag, so the tag is
+          # what makes that badge a fact rather than a claim: it exists only once
+          # this job has pushed the formula, and a release whose Homebrew step
+          # failed — 0.3.0's did — leaves the badge on the previous version
+          # instead of announcing one nobody can install. Pushed on the re-run
+          # path too, so a tap updated by hand still gets its tag. Forced, so a
+          # re-run lands it on the same commit rather than failing because it
+          # already exists.
+          git tag -f "${{ steps.render.outputs.tag }}"
+          git push -f origin "refs/tags/${{ steps.render.outputs.tag }}"
