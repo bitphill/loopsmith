@@ -199,13 +199,7 @@ impl Fixture {
         }
 
         if windows {
-            for v in &mut self.cfg.safety.checks {
-                if let Detector::Script { command, .. } = &mut v.detector {
-                    if command.contains('/') && command.ends_with(".sh") {
-                        *command = format!("{}.cmd", command.trim_end_matches(".sh"));
-                    }
-                }
-            }
+            point_at_cmd_stubs(&mut self.cfg);
             self.write_config();
         }
         self
@@ -220,20 +214,7 @@ impl Fixture {
     /// missing file. That is exactly how the first example to use an entry
     /// gate found this.
     pub fn script_detectors(&self) -> BTreeSet<String> {
-        let gates = &self.cfg.safety.gates;
-        let rules = gates
-            .entry
-            .iter()
-            .chain(gates.approval.iter())
-            .chain(gates.rollback.iter())
-            .map(|r| &r.detector);
-
-        self.cfg
-            .safety
-            .checks
-            .iter()
-            .map(|v| &v.detector)
-            .chain(rules)
+        detectors(&self.cfg)
             .filter_map(|d| match d {
                 Detector::Script { command, .. } => Some(command.clone()),
                 _ => None,
@@ -503,6 +484,55 @@ fn satisfying_value(op: loopsmith_core::CompareOp, want: f64) -> f64 {
 
 /// `cmd.exe` needs CRLF in a batch file: with LF only, the trailing newline joins
 /// the last token on the line and `exit /b 0` becomes an unknown command.
+/// Every detector in a config: each check's, then each entry, approval and
+/// rollback gate rule's.
+///
+/// This and [`detectors_mut`] are the one list both halves of stubbing walk —
+/// which scripts get a stub, and which commands are repointed at the Windows
+/// stub. They were two lists once, and only the first learned about gates: on
+/// Windows an entry gate went on naming the `.sh` whose `.cmd` replacement had
+/// been written, failed while the run was still validating, and the only
+/// symptom was "a run must open the ledger". Keep the two side by side.
+fn detectors(cfg: &LoopConfig) -> impl Iterator<Item = &Detector> {
+    let s = &cfg.safety;
+    s.checks.iter().map(|v| &v.detector).chain(
+        s.gates
+            .entry
+            .iter()
+            .chain(&s.gates.approval)
+            .chain(&s.gates.rollback)
+            .map(|r| &r.detector),
+    )
+}
+
+/// [`detectors`], mutably. Same order, same members.
+fn detectors_mut(cfg: &mut LoopConfig) -> impl Iterator<Item = &mut Detector> {
+    let s = &mut cfg.safety;
+    s.checks.iter_mut().map(|v| &mut v.detector).chain(
+        s.gates
+            .entry
+            .iter_mut()
+            .chain(&mut s.gates.approval)
+            .chain(&mut s.gates.rollback)
+            .map(|r| &mut r.detector),
+    )
+}
+
+/// Repoint every `scripts/*.sh` detector at the `.cmd` stub written in its place.
+///
+/// Windows-only in use, but a plain function of the config so that every OS can
+/// test it: the only place its gate-rule bug could show was a Windows runner,
+/// which is the one leg nobody runs locally.
+pub fn point_at_cmd_stubs(cfg: &mut LoopConfig) {
+    for d in detectors_mut(cfg) {
+        if let Detector::Script { command, .. } = d {
+            if command.contains('/') && command.ends_with(".sh") {
+                *command = format!("{}.cmd", command.trim_end_matches(".sh"));
+            }
+        }
+    }
+}
+
 fn crlf(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\n', "\r\n")
 }

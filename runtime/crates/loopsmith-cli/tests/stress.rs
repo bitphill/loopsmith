@@ -13,7 +13,7 @@
 
 mod harness;
 
-use harness::{all_examples, Fixture, Stubs};
+use harness::{all_examples, point_at_cmd_stubs, Fixture, Stubs};
 use loopsmith_core::Detector;
 use loopsmith_memory::{LedgerKind, Store};
 
@@ -40,6 +40,42 @@ fn cap(cfg: &mut loopsmith_core::LoopConfig, iterations: u32) {
 // ---------------------------------------------------------------------------
 // The whole set, once each
 // ---------------------------------------------------------------------------
+
+/// On Windows every stubbed `.sh` detector is repointed at its `.cmd` stub —
+/// the gates' as well as the checks'.
+///
+/// The Windows half of stubbing is the only part of this harness no developer
+/// runs locally, and it went wrong there without a trace anywhere else: stubs
+/// were written for gate scripts, but only the checks were repointed at them, so
+/// `container-refactor-loop`'s entry gate kept naming a `.sh` and the run
+/// stopped before it opened its ledger. The repoint is a plain function of the
+/// config, so this runs on every OS and fails here first.
+#[test]
+fn the_windows_stubs_are_named_by_every_detector_they_replace() {
+    let mut gate_scripts = 0;
+    for (i, name) in all_examples().iter().enumerate() {
+        let mut f = Fixture::example(name, &format!("cmd-{i}"));
+        let gates = &f.cfg.safety.gates;
+        gate_scripts += gates
+            .entry
+            .iter()
+            .chain(&gates.approval)
+            .chain(&gates.rollback)
+            .filter(|r| matches!(&r.detector, Detector::Script { command, .. } if command.contains('/')))
+            .count();
+
+        let before = f.script_detectors();
+        point_at_cmd_stubs(&mut f.cfg);
+        let after = f.script_detectors();
+
+        let missed: Vec<_> = after.iter().filter(|c| c.ends_with(".sh")).collect();
+        assert!(missed.is_empty(), "{name}: still names {missed:?} on Windows");
+        assert_eq!(before.len(), after.len(), "{name}: the repoint merged or dropped a detector");
+    }
+    // Without a gate that runs a script, this would pass while proving nothing
+    // about the half of the list that broke.
+    assert!(gate_scripts > 0, "no example puts a script in a gate rule any more");
+}
 
 /// Every example must survive one supervised iteration with its detectors
 /// satisfiable. This is the broadest thing the harness asserts and the cheapest
