@@ -73,7 +73,7 @@ pip install loopsmith-cli                     # if you have Python
 ```
 
 ```bash
-cargo install loopsmith                       # if you have Rust
+cargo install --locked --git https://github.com/bitphill/loopsmith --tag v1.0.0 loopsmith   # if you have Rust
 ```
 
 Nothing above installed? Download the project and run the installer — it fetches

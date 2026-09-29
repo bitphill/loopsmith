@@ -65,8 +65,9 @@ Pick whichever package manager you already have. All of them put a `loopsmith`
 on `PATH`.
 
 ```bash
-# crates.io — builds from source
-cargo install loopsmith
+# Rust — builds from source. crates.io is still on 0.3.1 until its 1.0 release
+# follows, so this takes 1.0.0 straight from the tag in the meantime.
+cargo install --locked --git https://github.com/bitphill/loopsmith --tag v1.0.0 loopsmith
 
 # npm — downloads a prebuilt binary
 npm install -g @bitphill/loopsmith
@@ -248,8 +249,8 @@ same rule `requires_env` has always had.
 | Runs | by spawning this same binary, never by reimplementing it |
 | Needs | nothing installed; the whole UI is compiled in |
 
-Build without it — dropping the async dependency tree entirely — with
-`cargo install loopsmith --no-default-features`.
+Build without it — dropping the async dependency tree entirely — by adding
+`--no-default-features` to the `cargo install` line under [Install](#install).
 
 ---
 
@@ -257,7 +258,8 @@ Build without it — dropping the async dependency tree entirely — with
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"     # rustup writes to ~/.profile, which zsh never reads
-cargo install loopsmith                  # or: cd runtime && cargo build --release
+cargo install --locked --git https://github.com/bitphill/loopsmith --tag v1.0.0 loopsmith
+# or, from a checkout of this repository: cd runtime && cargo build --release
 
 # --path must be outside this repository: a loop edits files and writes state,
 # so it does not get pointed at the tool that runs it.

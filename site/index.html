@@ -270,8 +270,8 @@
         <div class="wrap">
           <h2>Install</h2>
           <p>Pick whichever package manager you already have. All of them put a <code>loopsmith</code> on your <code>PATH</code>.</p>
-          <pre><code><span class="c"># crates.io — builds from source</span>
-cargo install loopsmith
+          <pre><code><span class="c"># Rust — builds from source; crates.io follows at 1.0 shortly</span>
+cargo install --locked --git https://github.com/bitphill/loopsmith --tag v1.0.0 loopsmith
 
 <span class="c"># npm — downloads a prebuilt binary</span>
 npm install -g @bitphill/loopsmith

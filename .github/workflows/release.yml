@@ -151,8 +151,22 @@ jobs:
   #
   # Configure once at crates.io → each crate → Settings → Trusted Publishing:
   # repository `bitphill/loopsmith`, workflow `release.yml`.
+  #
+  # Off unless the repository variable `PUBLISH_CRATES` is `true` (Settings →
+  # Secrets and variables → Actions → Variables). 1.0.0 went to npm, PyPI and
+  # Homebrew without crates.io, which stayed at 0.3.1, because that release
+  # cannot be done by this job: it introduced three crates, a Trusted Publishing
+  # token cannot create a crate, and the nine that exist are set to accept
+  # nothing but Trusted Publishing. So 1.0.0 goes to crates.io by hand — unlock,
+  # publish all twelve in dependency order, give the three new ones a publisher
+  # config, lock again — and after that every crate exists and has a config, so
+  # this job can do every later release on its own. Set the variable then.
+  #
+  # Nothing depends on this job; `pypi`, `npm` and `homebrew` all hang off
+  # `publish`. Skipping it skips crates.io and nothing else.
   crates:
     name: crates.io
+    if: vars.PUBLISH_CRATES == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:
