@@ -315,7 +315,13 @@ mod tests {
             let name = entry.file_name();
             let name = name.to_string_lossy();
             if path.is_dir() {
-                if !SKIP.contains(&name.as_ref()) {
+                // A directory with a `.git` of its own is a different checkout —
+                // a worktree, a clone, a submodule — so its documents are not
+                // this repository's, whatever commit they happen to be at. Any
+                // tool that parks a worktree under the root would otherwise fail
+                // both guards with findings from a tree nobody here is editing;
+                // a name list cannot keep up with which tools do that.
+                if !SKIP.contains(&name.as_ref()) && !path.join(".git").exists() {
                     documents(&path, into);
                 }
             } else if matches!(
