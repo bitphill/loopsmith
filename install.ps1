@@ -16,7 +16,10 @@ $RepoRoot  = $ScriptDir
 
 # Every fact this shares with install.sh comes from one file, so moving the
 # repository or changing the build command is one edit rather than three.
-$Manifest   = Get-Content (Join-Path $ScriptDir 'installers\manifest.json') -Raw | ConvertFrom-Json
+# `-Encoding UTF8` because Windows PowerShell 5.1, which install.bat runs, reads
+# a file without a byte-order mark in the ANSI code page — the manifest is UTF-8
+# with no BOM, so any non-ASCII character in it would print as mojibake.
+$Manifest   = Get-Content (Join-Path $ScriptDir 'installers\manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $RepoUrl    = if ($env:LOOPSMITH_REPO_URL) { $env:LOOPSMITH_REPO_URL } else { $Manifest.repo_url }
 $Branch     = if ($env:LOOPSMITH_BRANCH)   { $env:LOOPSMITH_BRANCH }   else { $Manifest.branch }
