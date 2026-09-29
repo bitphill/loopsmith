@@ -142,8 +142,11 @@ these implemented but wrong. Each is fixed with a test at the seam it failed at.
   byte-order mark in the ANSI code page, where the last byte of an em dash is a
   curly double quote — and PowerShell takes curly quotes as string delimiters.
   One dash in a log message ended its string early and the script failed to
-  parse on first use. Nothing ran it on Windows until 1.0's CI did. The Windows
-  scripts are plain ASCII now, and a test keeps them that way.
+  parse on first use. Behind that was a second failure: 5.1 treats a native
+  command's stderr as an error once it is redirected, so even a successful
+  build died on cargo's own progress lines. Nothing ran the installer on
+  Windows until 1.0's CI did. The Windows scripts are plain ASCII now, with a
+  test that keeps them so, and every native step is judged by its exit code.
 - **The PyPI package's first run could sit silent for minutes.** It downloads
   the binary with Python's `urllib`, which spends its whole timeout on each
   address that does not answer before trying the next; on a network that could
