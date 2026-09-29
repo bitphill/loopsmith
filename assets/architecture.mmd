@@ -1,0 +1,37 @@
+graph TD
+%% The canonical architecture diagram. `tools/render-diagrams.sh` renders
+%% `architecture.png` and `architecture.txt` from this file, and CI fails when
+%% either is out of date. Two conventions the text renderer depends on: a
+%% subgraph is a plane, and a node label is `name: what it does`.
+    subgraph invocation["INVOCATION"]
+        entry["loopsmith loop new --path &lt;dir&gt;: or --guided, or --web"]
+        grant["permission preflight: one grant, then hands-off"]
+    end
+
+    subgraph control["CONTROL PLANE — loopsmith (Rust), owns truth"]
+        core["core: the four-bundle config model, validation, and the 0.3 migration"]
+        graph_["graph: DAG, waves, critical path, Amdahl sizing"]
+        memory["memory: sled — episodes, goal state, ledger, checkpoints"]
+        gate["gate: deterministic verdicts — the ONLY writer of goal_satisfied, and able to revoke it"]
+        provider["provider: command-template routing, token and cost accounting"]
+        skills["skills: acquire, trial, rank, propose"]
+        run["run: the run lifecycle and its state machine"]
+        wizard["wizard: the interview, as data both front ends render"]
+        web["web: the browser UI, which spawns this same binary"]
+        util["util: platform differences, in one place"]
+        mcp["mcp: stdio server — plan, ledger, gate, scratchpad"]
+    end
+
+    subgraph execution["EXECUTION — any provider, owns judgment"]
+        models["Claude Code · Ollama · Grok · OpenAI · Gemini · Hermes: any BYOK command, any MCP server"]
+    end
+
+    entry --> grant
+    grant --> core
+
+    %% The provider crate is what dispatches, and the gate is what the answer
+    %% comes back to. Drawing it as `control --> execution` would be tidier and
+    %% would say less: the point of the picture is that judgment leaves and a
+    %% verdict does not.
+    provider --> models
+    models --> gate

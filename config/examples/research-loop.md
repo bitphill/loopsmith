@@ -2,12 +2,19 @@
 
 - version: 0.1.0
 - description: Research a question against primary sources, verify every claim against the source it came from, and stop when the brief is both complete and cited.
+- environment: dev
+- features:
+  - self_evolution: false
+  - marketplace_skills: false
+  - external_side_effects: false
+  - parallel_execution: true
+  - human_approval: true
 
-## A. Information
+## Background
 
 ### output_path
-- value: out/brief.md
 - note: The deliverable. Everything else is working material.
+- value: out/brief.md
 
 ### citation_rule
 - value: Every factual claim carries a URL or a file path plus line reference.
@@ -16,11 +23,11 @@
 - value: At least four independent sources; a single origin is not corroboration.
 
 
-## B. Pre-execution
+## Prerequisites
 
 ### Ran this research by hand once and kept the transcript
-- done: false
 - evidence: link the transcript here
+- done: false
 
 ### Wrote down what a finished brief contains, in checkable terms
 - done: false
@@ -29,7 +36,7 @@
 - done: false
 
 
-## C. Goals
+## Goals
 
 ### gather
 - description: Collect primary sources that actually address the question, not adjacent material.
@@ -43,92 +50,14 @@
 - depends_on: ["draft"]
 
 
-## D. Validations
-
-### source-count
-- target: gather
-- mode: percentage
-- statement: At least four independent sources were collected.
-- detector:
-  - type: threshold
-  - metric: independent_sources
-  - op: gte
-  - value: 4.0
-- blocking: true
-
-### brief-exists
-- target: draft
-- mode: objective
-- statement: The brief exists and is non-empty.
-- detector:
-  - type: file_exists
-  - path: out/brief.md
-  - non_empty: true
-- blocking: true
-
-### every-claim-cited
-- target: draft
-- mode: objective
-- statement: The citation checker finds no uncited claim.
-- detector:
-  - type: script
-  - command: scripts/check-citations.sh
-- blocking: true
-
-### countercase-present
-- target: adversarial
-- mode: subjective
-- statement: The brief engages the strongest opposing argument rather than a weak version of it.
-- detector:
-  - type: judge
-  - standard: "steelman test: the opposing case is stated so its own advocates would accept the phrasing"
-- blocking: true
-
-### no-broken-links
-- target: overall
-- mode: objective
-- statement: Every cited URL resolves.
-- detector:
-  - type: script
-  - command: scripts/check-links.sh
-- blocking: true
-
-
-## E. Success
+## Success
 
 ### complete-and-cited
 - target: overall
+- threshold: 1.0
 - mode: percentage
 - statement: Every blocking validation passes.
-- threshold: 1.0
 
-
-## F. Stop gates
-
-- max_iterations: 6
-- max_revisions_per_node: 3
-- max_wall_clock_seconds: 5400
-- max_tokens: 3000000
-- max_cost_usd: 8.0
-- no_progress_iterations: 2
-- stop_on_overall_success: true
-
-## G. Schedules
-
-### manual
-
-
-## H. Constraints
-
-- global:
-  - rules: ["Quote at most one sentence per source; paraphrase the rest.","A claim you cannot trace to a source does not go in the brief.","State uncertainty explicitly rather than smoothing it over."]
-  - forbidden_paths: [".git/","state/"]
-  - forbidden_commands: ["rm -rf","git push"]
-  - max_seconds: 900
-  - human_checkpoint: ["publishing the brief anywhere","contacting a source"]
-- per_node:
-  - critic:
-    - rules: ["You are not here to approve. Find the strongest objection that survives scrutiny."]
 
 ## Graph
 
@@ -136,34 +65,41 @@
   - mode: auto
   - cap: 8
   - min_marginal_gain: 0.05
+- join:
+  - strategy: wait_for_all
 
 ### search
+- isolation:
+  - mode: none
 - role: researcher
 - instruction: Find primary sources that directly address the question. Prefer the original over commentary about it. Record why each source qualifies.
 - goals: ["gather"]
 - tier: cheap
 - weight: 2.0
-- isolated: false
 
 ### write
+- isolation:
+  - mode: worktree
 - role: builder
 - instruction: Draft the brief from the gathered sources. Every claim carries its citation inline. State assumptions you had to make.
 - depends_on: ["search"]
 - goals: ["draft"]
 - tier: standard
 - weight: 3.0
-- isolated: true
 
 ### critic
+- isolation:
+  - mode: none
 - role: adversary
 - instruction: Argue against the brief's conclusion using its own sources. Name the single strongest objection and whether the brief survives it.
 - depends_on: ["write"]
 - goals: ["adversarial"]
 - tier: strong
 - weight: 1.0
-- isolated: false
 
 ### verify
+- isolation:
+  - mode: none
 - role: judge
 - instruction: Check each claim against the source it cites. Report per-claim PASS or FAIL with the quoted evidence. Do not summarise.
 - depends_on: ["write"]
@@ -171,7 +107,6 @@
 - tier: strong
 - provider: openai
 - weight: 1.0
-- isolated: false
 
 
 ## Providers
@@ -218,9 +153,156 @@
 - require_human_promotion: true
 - explore: false
 - min_trials: 3
+- min_trust_level: reviewed
+- require_checksum: false
+- allow_external_side_effects: false
 
-## Context
+## Memory
 
 - carry_summaries: 2
 - max_summary_chars: 1200
+- namespaces:
+  - episodic:
+    - enabled: true
+    - promotion:
+      - rule: never
+    - min_confidence: 0.75
+    - require_provenance: false
+  - semantic:
+    - enabled: true
+    - promotion:
+      - rule: repeated_validation
+      - times: 3
+    - min_confidence: 0.75
+    - require_provenance: true
+  - procedural:
+    - enabled: true
+    - promotion:
+      - rule: repeated_validation
+      - times: 3
+    - min_confidence: 0.75
+    - require_provenance: true
+  - failure:
+    - enabled: true
+    - promotion:
+      - rule: automatic
+    - min_confidence: 0.75
+    - require_provenance: true
+- max_retrieved: 10
 
+## Triggers
+
+- max_depth: 5
+- dedup_window_seconds: 300
+
+### manual
+- enabled: true
+
+
+## Checks
+
+### source-count
+- target: gather
+- blocking: true
+- mode: percentage
+- statement: At least four independent sources were collected.
+- detector:
+  - type: threshold
+  - metric: independent_sources
+  - op: gte
+  - value: 4.0
+
+### brief-exists
+- target: draft
+- blocking: true
+- mode: objective
+- statement: The brief exists and is non-empty.
+- detector:
+  - type: file_exists
+  - path: out/brief.md
+  - non_empty: true
+
+### every-claim-cited
+- target: draft
+- blocking: true
+- mode: objective
+- statement: The citation checker finds no uncited claim.
+- detector:
+  - type: script
+  - command: scripts/check-citations.sh
+
+### countercase-present
+- target: adversarial
+- blocking: true
+- mode: subjective
+- statement: The brief engages the strongest opposing argument rather than a weak version of it.
+- detector:
+  - type: judge
+  - standard: "steelman test: the opposing case is stated so its own advocates would accept the phrasing"
+
+### no-broken-links
+- target: overall
+- blocking: true
+- mode: objective
+- statement: Every cited URL resolves.
+- detector:
+  - type: script
+  - command: scripts/check-links.sh
+
+
+## Gates
+
+- stop:
+  - max_iterations: 6
+  - max_revisions_per_node: 3
+  - max_wall_clock_seconds: 5400
+  - max_tokens: 3000000
+  - max_cost_usd: 8.0
+  - no_progress_iterations: 2
+  - stop_on_overall_success: true
+
+## Limits
+
+- global:
+  - rules: ["Quote at most one sentence per source; paraphrase the rest.","A claim you cannot trace to a source does not go in the brief.","State uncertainty explicitly rather than smoothing it over."]
+  - forbidden_paths: [".git/","state/"]
+  - forbidden_commands: ["rm -rf","git push"]
+  - max_seconds: 900
+  - human_checkpoint: ["publishing the brief anywhere","contacting a source"]
+- per_node:
+  - critic:
+    - rules: ["You are not here to approve. Find the strongest objection that survives scrutiny."]
+
+## Recovery
+
+- transient_error:
+  - action: retry
+  - max_attempts: 3
+  - base_delay_seconds: 2
+  - backoff: exponential
+- invalid_output:
+  - action: revise
+  - max_attempts: 2
+- tool_unavailable:
+  - action: fallback
+- repeated_failure:
+  - action: escalate
+- safety_violation:
+  - action: stop
+- resource_exhaustion:
+  - action: pause
+- corrupted_state:
+  - action: restore_checkpoint
+
+## Protected
+
+- components: ["gates","limits","recovery","protected","approvals","credentials","audit","baselines","retention","environment"]
+
+## Evolution
+
+- enabled: false
+- max_regression: 0.02
+- allowed_kinds: ["new_skill","skill_update","prompt_change","validation_change"]
+- require_sandbox: true
+- require_approval: true
+- keep_rollback: true

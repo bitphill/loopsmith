@@ -1,0 +1,36 @@
+[package]
+name = "loopsmith-wizard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+include = ["/src/**/*", "/README.md"]
+description = "The loopsmith guided wizard: the known-CLI catalog, machine detection, and the terminal interview"
+
+[features]
+default = []
+# The async half of detection: `--version` probes with a timeout, the paid
+# handshake, `ollama list`, and git facts. The browser UI needs it; the
+# terminal wizard does not, and a `--no-default-features` build of the binary
+# must not pull an async runtime in just to scan PATH.
+probe = ["dep:tokio"]
+
+[dependencies]
+loopsmith-util = { workspace = true }
+loopsmith-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+ctrlc = { workspace = true }
+# The wizard refuses a regex that cannot compile where it is typed, using the
+# same engine the gate will run it with.
+regex = { workspace = true }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+loopsmith-util = { workspace = true, features = ["testing"] }

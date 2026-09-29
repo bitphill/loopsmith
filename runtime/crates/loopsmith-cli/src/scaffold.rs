@@ -6,9 +6,11 @@
 //! sled trees.
 
 use loopsmith_core::{
-    AcquisitionSource, Concurrency, ConstraintSet, Constraints, Detector, Goal, GraphSpec,
-    InfoItem, LoopConfig, Mode, NodeSpec, ProviderRouting, Role, SkillPolicy, StopGates,
-    SuccessScenario, Tier, Trigger, Validation, WorkItem, OVERALL,
+    AcquisitionSource, Concurrency, ConstraintSet, Constraints, Detector, Environment, Evolution,
+    Execution, Features, Gates, Goal, GraphSpec, InfoItem, Intent, Isolation, Join, LoopConfig,
+    Mode, NodeSpec, Protected, ProviderRouting, Recovery, Role, Safety, SkillPolicy, StopGates,
+    SuccessScenario, Tier, Trigger, TriggerPolicy, TriggerSpec, TrustLevel, Validation, WorkItem,
+    OVERALL,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -114,13 +116,19 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
         version: "0.1.0".into(),
         description: purpose.to_string(),
 
-        information: vec![InfoItem {
+        // A starter loop is a development loop, and every risky capability is
+        // off. Turning one on should be something the author did on purpose.
+        environment: Environment::Dev,
+        features: Features::default(),
+
+        intent: Intent {
+        background: vec![InfoItem {
             key: "purpose".into(),
             value: purpose.to_string(),
             note: Some("Replace with the durable facts every node should know.".into()),
         }],
 
-        pre_execution: vec![
+        prerequisites: vec![
             WorkItem {
                 step: "Run this task manually end to end at least once".into(),
                 done: false,
@@ -140,7 +148,17 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             priority: Some(1),
         }],
 
-        validations: vec![
+        success: vec![SuccessScenario {
+            target: OVERALL.into(),
+            name: "all-blocking-pass".into(),
+            mode: Mode::Percentage,
+            statement: "Every blocking validation passes.".into(),
+            threshold: Some(1.0),
+        }],
+        },
+
+        safety: Safety {
+        checks: vec![
             Validation {
                 target: "primary".into(),
                 name: "artifact-exists".into(),
@@ -166,34 +184,24 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             },
         ],
 
-        success: vec![SuccessScenario {
-            target: OVERALL.into(),
-            name: "all-blocking-pass".into(),
-            mode: Mode::Percentage,
-            statement: "Every blocking validation passes.".into(),
-            threshold: Some(1.0),
-        }],
-
-        stop_gates: StopGates {
-            max_iterations: 8,
-            max_revisions_per_node: 3,
-            max_wall_clock_seconds: Some(3600),
-            max_tokens: Some(2_000_000),
-            max_cost_usd: Some(5.0),
-            no_progress_iterations: 3,
-            no_progress_iterations_randomness: Some(2),
-            stop_on_overall_success: true,
+        gates: Gates {
+            stop: StopGates {
+                max_iterations: 8,
+                max_revisions_per_node: 3,
+                max_wall_clock_seconds: Some(3600),
+                max_tokens: Some(2_000_000),
+                max_cost_usd: Some(5.0),
+                no_progress_iterations: 3,
+                no_progress_iterations_randomness: Some(2),
+                stop_on_overall_success: true,
+            },
+            // No entry, approval or rollback rules in the starter. Each costs
+            // a detector run, and a loop with nothing built yet has nothing
+            // for them to check.
+            ..Gates::default()
         },
 
-        schedules: vec![Trigger::Manual],
-
-        execution_guidelines: Default::default(),
-
-        // Section J is empty in the starter: a fresh loop should not reach the
-        // network on its first run to fetch something nobody asked for.
-        default_skills: vec![],
-
-        constraints: Constraints {
+        limits: Constraints {
             global: ConstraintSet {
                 rules: ConstraintSet::frozen_git_rules(),
                 forbidden_paths: vec![".git/".into(), "node_modules/".into()],
@@ -209,6 +217,12 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             per_node: BTreeMap::new(),
         },
 
+        recovery: Recovery::default(),
+        protected: Protected::default(),
+        alerts: Vec::new(),
+        },
+
+        execution: Execution {
         graph: GraphSpec {
             nodes: vec![
                 NodeSpec {
@@ -222,7 +236,7 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
                     stage: None,
                     skills: vec![],
                     weight: 3.0,
-                    isolated: true,
+                    isolation: Isolation::Worktree {},
                 },
                 NodeSpec {
                     id: "judge".into(),
@@ -235,13 +249,15 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
                     stage: None,
                     skills: vec![],
                     weight: 1.0,
-                    isolated: false,
+                    isolation: Isolation::None {},
                 },
             ],
             concurrency: Concurrency::Auto {
                 cap: 16,
                 min_marginal_gain: 0.05,
             },
+            join: Join::WaitForAll {},
+            container_image: None,
         },
 
         providers: ProviderRouting {
@@ -249,6 +265,12 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             cascade,
             enforce_judge_independence: true,
         },
+
+        phases: Default::default(),
+
+        // A fresh loop should not reach the network on its first run to fetch
+        // something nobody asked for.
+        default_skills: vec![],
 
         skills: SkillPolicy {
             acquisition_order: vec![
@@ -262,22 +284,24 @@ pub fn starter_config(name: &str, purpose: &str) -> LoopConfig {
             explore: false,
             explore_candidates: vec![],
             min_trials: 3,
+            min_trust_level: TrustLevel::Reviewed,
+            require_checksum: false,
+            allow_external_side_effects: false,
         },
 
-        context: Default::default(),
+        memory: Default::default(),
+
+        triggers: TriggerPolicy {
+            triggers: vec![TriggerSpec::from(Trigger::Manual {})],
+            ..TriggerPolicy::default()
+        },
+        },
+
+        evolution: Evolution::default(),
     }
 }
 
-const GITIGNORE: &str = "\
-# loopsmith run state — regenerable, machine-local, and often large
-state/
-logs/
-out/
-*.log
-
-# Quarantined sub-agents wait for human promotion; they are not source
-generated-skills/
-";
+const GITIGNORE: &str = include_str!("../templates/scaffold/gitignore");
 
 // The harness templates are compiled in rather than read from the install
 // directory. That is what makes a new loop self-contained and makes it
@@ -293,59 +317,60 @@ const PERMISSIONS_TEMPLATE: &str = include_str!("../templates/permissions.templa
 const COMPAT_TEMPLATE: &str = include_str!("../templates/compat.template.sh");
 const MARKETPLACES: &str = include_str!("../templates/marketplaces.json");
 
+// What `loopsmith new` writes into a loop directory, as files rather than Rust
+// string literals, so each reads as the file it becomes. `{{key}}` marks a
+// value filled in at scaffold time. The `.cmd` templates are stored with LF
+// endings and converted by `crlf` on the way out, so an editor or a git
+// setting that rewrites line endings cannot break a launcher.
+const README_TEMPLATE: &str = include_str!("../templates/scaffold/README.md");
+const SH_HEADER: &str = include_str!("../templates/scaffold/launcher-header.sh");
+const RUN_SH: &str = include_str!("../templates/scaffold/run.sh");
+const RESUME_SH: &str = include_str!("../templates/scaffold/resume.sh");
+const CMD_HEADER: &str = include_str!("../templates/scaffold/launcher-header.cmd");
+const CMD_MISSING_BINARY: &str = include_str!("../templates/scaffold/launcher-missing-binary.cmd");
+const RUN_CMD: &str = include_str!("../templates/scaffold/run.cmd");
+const RESUME_CMD: &str = include_str!("../templates/scaffold/resume.cmd");
+
+/// Replace each `{{key}}` in `template` with its value.
+///
+/// One pass over the template, never over the values: a loop whose purpose
+/// happens to contain `{{name}}` gets those characters verbatim rather than a
+/// second substitution. An unknown key is left as written, which a test on
+/// every template turns into a failure.
+fn fill(template: &str, values: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) => {
+                let key = &after[..end];
+                match values.iter().find(|(k, _)| *k == key) {
+                    Some((_, v)) => out.push_str(v),
+                    None => {
+                        out.push_str("{{");
+                        out.push_str(key);
+                        out.push_str("}}");
+                    }
+                }
+                rest = &after[end + 2..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The loop directory's own README.
 fn readme(name: &str, purpose: &str, config_file: &str) -> String {
-    format!(
-        "# {name}\n\n\
-A loopsmith loop.\n\n\
-**Purpose:** {purpose}\n\n\
-## Run it\n\n\
-```bash\n\
-./run.sh          # macOS, Linux, BSD, Git Bash, WSL\n\
-run.cmd           # Windows cmd.exe or PowerShell\n\
-```\n\n\
-That is `loopsmith run {config_file}` with this directory's absolute paths \
-already filled in. If the loop stops before it is done, `./resume.sh <run-id>` \
-(or `resume.cmd <run-id>`) picks up from the last checkpoint — the run id is \
-printed at the end of every run and appears in `logs/`.\n\n\
-Both launchers are written on every platform, so this directory keeps working \
-after it moves to a different kind of machine.\n\n\
-The long way, when you want to see each step:\n\n\
-```bash\n\
-loopsmith validate {config_file}   # the A-J model must be complete\n\
-loopsmith plan     {config_file}   # waves, critical path, predicted speedup\n\
-loopsmith run      {config_file}\n\
-```\n\n\
-## Before the first run\n\n\
-`pre_execution` in `{config_file}` is deliberately unfinished. Run the task by \
-hand once, record what you learned, and set each step to `done: true`. \
-Validation fails until you do, because automating a process you cannot \
-describe produces fast, confident garbage.\n\n\
-## Secrets\n\n\
-Providers name the environment variables they need under `requires_env`. \
-loopsmith checks that those variables **exist** and never reads their values, \
-so a key never reaches a prompt, a log, or the ledger. Export them in your \
-shell:\n\n\
-```bash\n\
-export OPENAI_API_KEY=...   # in your shell, not in this repo\n\
-```\n\n\
-Never paste a key into a chat window, a config file, or an issue. If one is \
-ever pasted somewhere it should not be, rotate it rather than deleting the \
-message.\n\n\
-## Layout\n\n\
-| Path | What it is |\n\
-|---|---|\n\
-| `{config_file}` | The A-J config: goals, validations, success, stop gates, schedules, constraints, phases, default skills |\n\
-| `run.sh` / `resume.sh` | This loop's exact commands, with absolute paths (POSIX `sh`) |\n\
-| `run.cmd` / `resume.cmd` | The same two commands for `cmd.exe` |\n\
-| `scripts/compat.sh` | Source this in a detector: `sed_i`, `stat_size`, `readlink_f`, `sha256`, `require`, `need_bash` |\n\
-| `.mcp.json` | MCP server definition, so an agent can read this loop's memory |\n\
-| `.claude/settings.local.json` | Permission grant this config needs |\n\
-| `marketplaces.json` | Sub-agent index sources |\n\
-| `state/` | sled memory: episodes, goal state, ledger, checkpoints, summaries |\n\
-| `logs/` | Plain-text run logs, one per run |\n\
-| `out/` | Deliverables the nodes produce |\n\
-| `proposals/` | Changes the loop wants to make to itself — review these |\n\
-| `generated-skills/` | Auto-created sub-agents awaiting promotion |\n"
+    fill(
+        README_TEMPLATE,
+        &[("name", name), ("purpose", purpose), ("config_file", config_file)],
     )
 }
 
@@ -462,63 +487,23 @@ fn binary_path() -> String {
 /// not inherit a login shell's `PATH` — so that check comes first and says what
 /// to do about it.
 fn script_header(binary: &str, purpose: &str) -> String {
-    // A raw string, not an escaped one with `\` line continuations: those eat
-    // the leading whitespace of the next line, so the script that reached disk
-    // came out flat and unreadable.
-    format!(
-        r#"#!/bin/sh
-# {purpose}
-#
-# POSIX sh on purpose: macOS ships bash 3.2, so anything needing bash 4 syntax
-# would fail there. Paths are absolute because cron and launchd do not inherit
-# your shell's PATH.
-set -eu
-cd "$(dirname "$0")"
-
-LOOPSMITH="{binary}"
-if [ ! -x "$LOOPSMITH" ]; then
-  if command -v loopsmith >/dev/null 2>&1; then
-    LOOPSMITH=$(command -v loopsmith)
-  else
-    echo "loopsmith is not at $LOOPSMITH and not on PATH" >&2
-    echo "This loop was created against a binary that has since moved." >&2
-    echo "Re-point it by editing this script, or put loopsmith on PATH." >&2
-    exit 127
-  fi
-fi
-"#
-    )
+    fill(SH_HEADER, &[("binary", binary), ("purpose", purpose)])
 }
 
 fn run_script(binary: &str, config_file: &str) -> String {
-    format!(
-        "{}\nexec \"$LOOPSMITH\" run \"{config_file}\" \"$@\"\n",
-        script_header(
-            binary,
-            "Generated by `loopsmith new`. One supervised pass of the loop."
-        )
-    )
+    let header = script_header(
+        binary,
+        "Generated by `loopsmith new`. One supervised pass of the loop.",
+    );
+    fill(RUN_SH, &[("header", &header), ("config_file", config_file)])
 }
 
 fn resume_script(binary: &str, config_file: &str) -> String {
-    format!(
-        r#"{}
-if [ $# -eq 0 ]; then
-  echo "usage: ./resume.sh <run-id>" >&2
-  echo "The run id is printed at the end of every run and names the file in logs/." >&2
-  echo "recent runs:" >&2
-  # `ls -1t` and `sed` behave the same on either userland here. The flag that
-  # differs between GNU and BSD is `-i`, which this does not use.
-  ls -1t logs/ 2>/dev/null | head -5 | sed -e 's/\.log$//' -e 's/^/  /' >&2
-  exit 2
-fi
-exec "$LOOPSMITH" resume "{config_file}" "$1"
-"#,
-        script_header(
-            binary,
-            "Generated by `loopsmith new`. Usage: ./resume.sh <run-id>"
-        )
-    )
+    let header = script_header(
+        binary,
+        "Generated by `loopsmith new`. Usage: ./resume.sh <run-id>",
+    );
+    fill(RESUME_SH, &[("header", &header), ("config_file", config_file)])
 }
 
 /// The header every generated `.cmd` launcher carries.
@@ -550,74 +535,40 @@ exec "$LOOPSMITH" resume "{config_file}" "$1"
 /// parsed as a unit before it runs — `%ERRORLEVEL%` inside one expands to the
 /// value from *before* the block, which is the same class of bug one level down.
 fn cmd_header(binary: &str, purpose: &str) -> String {
-    format!(
-        r#"@echo off
-rem {purpose}
-rem
-rem Paths are absolute because Task Scheduler does not inherit an interactive
-rem shell's PATH. The POSIX `.sh` sibling of this file does the same job under
-rem Git Bash, WSL, macOS, and Linux.
-rem
-rem There is exactly one `exit /b`, on the last line. `setlocal` saves the
-rem errorlevel and the implicit `endlocal` restores it, so an early `exit /b`
-rem reports 0 no matter what code it was given -- and `endlocal & exit /b` does
-rem not help inside a nested block. Every path sets CODE and falls through.
-setlocal enabledelayedexpansion
-cd /d "%~dp0"
-set "CODE=0"
-
-set "LOOPSMITH={binary}"
-if not exist "%LOOPSMITH%" (
-  for /f "delims=" %%i in ('where loopsmith 2^>nul') do set "LOOPSMITH=%%i"
-)
-"#
-    )
+    fill(CMD_HEADER, &[("binary", binary), ("purpose", purpose)])
 }
 
-/// The single exit line every launcher ends with.
-///
-/// `%CODE%` is expanded while this line is parsed, which happens before
-/// `endlocal` runs, so the value survives the scope teardown.
-const CMD_FOOTER: &str = "\r\n:loopsmith_done\r\nendlocal & exit /b %CODE%\r\n";
-
-/// The "binary is gone" branch, shared by both launchers.
-const CMD_NO_BINARY: &str = r#"if not exist "%LOOPSMITH%" (
-  echo loopsmith is not at %LOOPSMITH% and not on PATH 1>&2
-  echo This loop was created against a binary that has since moved. 1>&2
-  echo Re-point it by editing this script, or put loopsmith on PATH. 1>&2
-  set "CODE=127"
-  goto :loopsmith_done
-)
-"#;
+// The single exit line every launcher ends with is written into `run.cmd` and
+// `resume.cmd` themselves. `%CODE%` is expanded while that line is parsed,
+// which happens before `endlocal` runs, so the value survives the teardown.
 
 fn run_cmd(binary: &str, config_file: &str) -> String {
-    format!(
-        "{header}{no_binary}\"%LOOPSMITH%\" run \"{config_file}\" %*\r\nset \"CODE=!ERRORLEVEL!\"{CMD_FOOTER}",
-        header = cmd_header(
-            binary,
-            "Generated by `loopsmith new`. One supervised pass of the loop."
-        ),
-        no_binary = CMD_NO_BINARY,
+    let header = cmd_header(
+        binary,
+        "Generated by `loopsmith new`. One supervised pass of the loop.",
+    );
+    fill(
+        RUN_CMD,
+        &[
+            ("header", &header),
+            ("missing_binary", CMD_MISSING_BINARY),
+            ("config_file", config_file),
+        ],
     )
 }
 
 fn resume_cmd(binary: &str, config_file: &str) -> String {
-    format!(
-        r#"{header}{no_binary}if "%~1"=="" (
-  echo usage: resume.cmd ^<run-id^> 1>&2
-  echo The run id is printed at the end of every run and names the file in logs\. 1>&2
-  echo recent runs: 1>&2
-  for /f "delims=" %%f in ('dir /b /o-d logs\*.log 2^>nul') do @echo   %%~nf 1>&2
-  set "CODE=2"
-  goto :loopsmith_done
-)
-"%LOOPSMITH%" resume "{config_file}" "%~1"
-set "CODE=!ERRORLEVEL!"{CMD_FOOTER}"#,
-        header = cmd_header(
-            binary,
-            "Generated by `loopsmith new`. Usage: resume.cmd <run-id>"
-        ),
-        no_binary = CMD_NO_BINARY,
+    let header = cmd_header(
+        binary,
+        "Generated by `loopsmith new`. Usage: resume.cmd <run-id>",
+    );
+    fill(
+        RESUME_CMD,
+        &[
+            ("header", &header),
+            ("missing_binary", CMD_MISSING_BINARY),
+            ("config_file", config_file),
+        ],
     )
 }
 
@@ -710,9 +661,9 @@ pub fn scaffold(args: &NewLoopArgs) -> std::io::Result<Scaffold> {
         &mut written,
     )?;
 
-    let grant = crate::permissions::required(&cfg);
-    let settings = crate::permissions::merge_into(&root.join(".claude/settings.local.json"), &grant)
-        .unwrap_or_else(|_| crate::permissions::render(&grant));
+    let grant = loopsmith_core::permissions::required(&cfg);
+    let settings = loopsmith_core::permissions::merge_into(&root.join(".claude/settings.local.json"), &grant)
+        .unwrap_or_else(|_| loopsmith_core::permissions::render(&grant));
     write_file(
         root.join(".claude/settings.local.json"),
         &settings,
@@ -799,6 +750,35 @@ pub fn name_from_path(p: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_template_placeholder_is_filled() {
+        // A key the code does not supply stays in the output as `{{key}}`;
+        // this is the test that turns that into a failure instead of a
+        // launcher with a literal brace in it.
+        let b = "/opt/bin/loopsmith";
+        let c = "loop.md";
+        for (name, text) in [
+            ("README.md", readme("demo", "a purpose", c)),
+            ("run.sh", run_script(b, c)),
+            ("resume.sh", resume_script(b, c)),
+            ("run.cmd", run_cmd(b, c)),
+            ("resume.cmd", resume_cmd(b, c)),
+        ] {
+            assert!(!text.contains("{{"), "{name} has an unfilled placeholder:\n{text}");
+        }
+    }
+
+    #[test]
+    fn a_value_is_never_substituted_twice() {
+        assert_eq!(
+            fill("{{a}} {{b}}", &[("a", "{{b}}"), ("b", "x")]),
+            "{{b}} x",
+            "a purpose containing `{{b}}` must come out verbatim"
+        );
+        assert_eq!(fill("keep {{unknown}}", &[]), "keep {{unknown}}");
+        assert_eq!(fill("open {{ended", &[("ended", "x")]), "open {{ended");
+    }
 
     use loopsmith_util::testing::temp_path as tmp;
 
@@ -954,7 +934,7 @@ mod tests {
 
         let run = std::fs::read_to_string(root.join("run.sh")).unwrap();
         assert!(run.contains("cd \"$(dirname \"$0\")\""), "got: {run}");
-        assert!(run.contains(" run \"loop.yaml\""), "got: {run}");
+        assert!(run.contains(" run start \"loop.yaml\""), "got: {run}");
         // Absolute, because cron and launchd do not inherit a shell PATH.
         let binary = binary_path();
         assert!(run.contains(&binary), "run.sh should pin {binary}: {run}");
@@ -1003,7 +983,7 @@ mod tests {
         assert!(!root.join("loop.yaml").exists());
         // run.sh must point at the config that actually exists.
         let run = std::fs::read_to_string(root.join("run.sh")).unwrap();
-        assert!(run.contains(" run \"loop.md\""), "got: {run}");
+        assert!(run.contains(" run start \"loop.md\""), "got: {run}");
         loopsmith_util::testing::cleanup(&root);
     }
 
@@ -1030,7 +1010,7 @@ mod tests {
         let mut cfg = starter_config("demo", "a demo loop");
         // As shipped it must NOT validate: the manual run has not happened.
         assert!(loopsmith_core::validate(&cfg).has_errors());
-        for w in &mut cfg.pre_execution {
+        for w in &mut cfg.intent.prerequisites {
             w.done = true;
         }
         let r = loopsmith_core::validate(&cfg);
@@ -1131,8 +1111,8 @@ mod tests {
         .unwrap();
         let cfg = loopsmith_core::load(root.join("loop.yaml")).expect("reloads");
         assert_eq!(cfg.name, "demo");
-        assert_eq!(cfg.graph.nodes.len(), 2);
-        assert!(cfg.providers.enforce_judge_independence);
+        assert_eq!(cfg.execution.graph.nodes.len(), 2);
+        assert!(cfg.execution.providers.enforce_judge_independence);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1176,3 +1156,4 @@ mod tests {
         assert_eq!(name_from_path(Path::new("/tmp/my-loop")), "my-loop");
     }
 }
+

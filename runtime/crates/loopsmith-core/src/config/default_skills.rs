@@ -19,9 +19,41 @@
 //! config that could smuggle a shell into a setup step would make a loop
 //! directory an unreviewable install script.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// How far a sub-agent from outside this repository is trusted.
+///
+/// A sub-agent is code that runs on the author's machine with the loop's own
+/// permissions. Before this existed, `min_marketplace_stars` was the only thing
+/// standing between a loop and arbitrary third-party code — and stars measure
+/// popularity, not intent. The ladder below measures review instead.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustLevel {
+    /// Nobody has looked at it. The default for anything newly fetched.
+    #[default]
+    Untrusted,
+    /// A human has read what it does and what it may reach.
+    Reviewed,
+    /// Reviewed, and cleared for use where side effects leave the loop
+    /// directory.
+    Approved,
+}
+
+impl TrustLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TrustLevel::Untrusted => "untrusted",
+            TrustLevel::Reviewed => "reviewed",
+            TrustLevel::Approved => "approved",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultSkill {
     /// Directory name the skill is installed under, and the name nodes use in
@@ -39,9 +71,18 @@ pub struct DefaultSkill {
     /// Why this loop needs it. For the human, never sent to a node.
     #[serde(default)]
     pub note: Option<String>,
+    /// How far this particular sub-agent is trusted, overriding the policy
+    /// default. Raising it is an assertion by the author that they read it.
+    #[serde(default)]
+    pub trust_level: TrustLevel,
+    /// Expected SHA-256 of the fetched content. When set, a mismatch refuses
+    /// the skill rather than installing it — which is what turns "we fetched
+    /// the thing we meant to" from a hope into a check.
+    #[serde(default)]
+    pub checksum: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillOrigin {
     /// `claudemarketplaces.com` or the `skills` CLI.
@@ -71,6 +112,15 @@ impl DefaultSkill {
             .as_deref()
             .map(|c| c.split_whitespace().map(str::to_string).collect())
             .unwrap_or_default()
+    }
+
+    /// Whether this skill's origin means its content can change under a name
+    /// that stays the same, and so is worth pinning a checksum to.
+    ///
+    /// `local` is excluded: it is never fetched, so there is nothing to pin —
+    /// the author already controls the bytes.
+    pub fn is_fetched(&self) -> bool {
+        matches!(self.source, SkillOrigin::Marketplace | SkillOrigin::Github)
     }
 }
 
@@ -118,6 +168,8 @@ mod tests {
             url: None,
             init_command: Some("npm install --production".into()),
             note: None,
+            trust_level: TrustLevel::default(),
+            checksum: None,
         };
         assert_eq!(s.init_argv(), vec!["npm", "install", "--production"]);
 
@@ -140,6 +192,8 @@ mod tests {
             url: None,
             init_command: None,
             note: None,
+            trust_level: TrustLevel::default(),
+            checksum: None,
         };
         assert!(s.init_argv().is_empty());
     }

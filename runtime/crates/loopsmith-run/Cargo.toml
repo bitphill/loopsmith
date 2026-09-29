@@ -1,0 +1,28 @@
+[package]
+name = "loopsmith-run"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+include = ["/src/**/*", "/README.md"]
+description = "The loopsmith run engine: the iteration state machine, dispatch, isolation, recovery, and triggers"
+
+[dependencies]
+loopsmith-util = { workspace = true }
+loopsmith-core = { workspace = true }
+loopsmith-memory = { workspace = true }
+loopsmith-graph = { workspace = true }
+loopsmith-gate = { workspace = true }
+loopsmith-provider = { workspace = true }
+loopsmith-skills = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+
+[dev-dependencies]
+loopsmith-util = { workspace = true, features = ["testing"] }

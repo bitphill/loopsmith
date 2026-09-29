@@ -15,20 +15,20 @@ For the concepts behind any of this, see the `loopsmith-reference` skill.
 
 ## Build the config — three front ends
 
-Same A–J config, three ways in. All three converge on the same validator, and
+Same config, three ways in. All three converge on the same validator, and
 none can do anything `loopsmith --help` does not list.
 
 ```bash
-loopsmith new --path ./loops/<purpose> --purpose "…"   # a starter file to edit by hand
+loopsmith loop new --path ./loops/<purpose> --purpose "…"   # a starter file to edit by hand
 loopsmith --guided                                     # a terminal wizard, one field at a time
 loopsmith --web                                        # a local browser UI
 ```
 
-- **`--guided`** (identical: `loopsmith guided [DIR] [--edit FILE]`) walks every
+- **`--guided`** (identical: `loopsmith loop guided [DIR] [--edit FILE]`) walks every
   section one field at a time, each explained in place, defaults shown in
   `[brackets]`. Installed provider CLIs are offered as a numbered menu, prefilled
   with a working argv. `:back`, `:next`, `:help`, and `:quit` work at every
-  prompt, and nothing is written until the config passes `loopsmith validate`.
+  prompt, and nothing is written until the config passes `loopsmith loop validate`.
   `--edit <file>` revises an existing loop instead of starting fresh. It needs no
   browser, so it is the one to reach for over SSH or in a bare terminal.
 - **`--web`** (identical: `loopsmith web [--port N] [--no-open]`) serves a
@@ -49,28 +49,30 @@ loopsmith --web                                        # a local browser UI
 and a quarantine directory, and needs a home of its own.
 
 ```bash
-loopsmith new --path ./loops/<purpose> --purpose "one line on what it is for" --git
+loopsmith loop new --path ./loops/<purpose> --purpose "one line on what it is for" --git
 ```
 
 That writes the config (`loop.yaml`, or Markdown), `run.sh` / `resume.sh` and
 their `.cmd` twins, an MCP definition, a permission template, and the `state/`,
 `out/`, `proposals/`, `logs/`, `generated-skills/` directories. `--git` also
-inits a repository with one commit, which is what lets `isolated: true` nodes
+inits a repository with one commit, which is what lets `isolation: { mode: worktree }` nodes
 have a worktree each — without it they share one directory and say so.
 
-Then edit the config. The sections are **A–J** (information, pre-execution,
-goals, validations, success, stop gates, schedules, constraints, execution
-guidelines, default skills); `LOOP-TEMPLATE.md` documents each one with an
-example and the reason it exists. `loopsmith convert <config>` translates the
+Then edit the config. It has eight top-level keys: `name`, `version`,
+`description`, `environment`, `features`, and the four bundles — `intent` (what
+the loop is for), `execution` (how the work gets done), `safety` (what must not
+happen, and when to stop) and `evolution` (how it may change itself).
+`LOOP-TEMPLATE.md` documents every section with an example and the reason it
+exists. `loopsmith loop convert <config>` translates the
 config between YAML and Markdown — the same model either way.
 
 ## The order that works
 
 ```bash
-loopsmith validate <path>/loop.yaml
-loopsmith plan     <path>/loop.yaml
-loopsmith permissions <path>/loop.yaml --write .claude/settings.local.json
-loopsmith run      <path>/loop.yaml
+loopsmith loop validate <path>/loop.yaml
+loopsmith loop plan     <path>/loop.yaml
+loopsmith loop permissions <path>/loop.yaml --write .claude/settings.local.json
+loopsmith run start <path>/loop.yaml
 ```
 
 `validate` refuses while any `pre_execution` step is unfinished. Do the task by
@@ -91,9 +93,9 @@ as a human checkpoint — those stop regardless of the grant.
 `run` executes once. `watch` is what makes a loop live for weeks:
 
 ```bash
-loopsmith watch <path>/loop.yaml --check      # list triggers, run nothing
-loopsmith watch <path>/loop.yaml              # until interrupted
-loopsmith schedule <path>/loop.yaml --install # survive a reboot
+loopsmith run watch <path>/loop.yaml --check      # list triggers, run nothing
+loopsmith run watch <path>/loop.yaml              # until interrupted
+loopsmith run schedule <path>/loop.yaml --install # survive a reboot
 ```
 
 Triggers: `cron` (UTC), `interval`, `file_change`, `goal_satisfied`. A failed
@@ -109,7 +111,7 @@ loopsmith skills acquire <config> <name>      # one sub-agent into quarantine
 loopsmith skills install <config>             # every section-J default_skill
 loopsmith skills list <config>                # what this loop can see
 loopsmith skills scores <config>              # ranked by gate outcomes
-loopsmith proposals <config> <run-id>         # what it wants changed
+loopsmith run proposals <config> <run-id>         # what it wants changed
 ```
 
 Set `skills.explore: true` with `explore_candidates` and the loop trials
@@ -120,9 +122,9 @@ config.
 ## When a run ends
 
 ```bash
-loopsmith status <path>/loop.yaml <run-id>    # gate rulings per goal
-loopsmith ledger <path>/loop.yaml <run-id>    # everything that happened
-loopsmith resume <path>/loop.yaml <run-id>    # continue from the checkpoint
+loopsmith run status <path>/loop.yaml <run-id>    # gate rulings per goal
+loopsmith run ledger <path>/loop.yaml <run-id>    # everything that happened
+loopsmith run resume <path>/loop.yaml <run-id>    # continue from the checkpoint
 ```
 
 A non-zero exit means the run did not meet the bar. The stop reason says which
@@ -141,7 +143,7 @@ is the thing telling you the truth.
 ## Check the gate on its own
 
 ```bash
-loopsmith gate <path>/loop.yaml --target <goal|overall> --workdir <dir>
+loopsmith run gate <path>/loop.yaml --target <goal|overall> --workdir <dir>
 ```
 
 Useful mid-development: it answers "would this pass right now?" without
@@ -165,8 +167,8 @@ never exits non-zero — reporting a constraint is not the machine being unusabl
 ## Housekeeping
 
 ```bash
-loopsmith convert <config> [--out f] [--to-yaml]   # YAML <-> Markdown, same model
-loopsmith prune   <config>                          # remove the git worktrees this loop created
+loopsmith loop convert <config> [--out f] [--to-yaml]   # YAML <-> Markdown, same model
+loopsmith run prune   <config>                          # remove the git worktrees this loop created
 ```
 
 ## Expose the control plane over MCP

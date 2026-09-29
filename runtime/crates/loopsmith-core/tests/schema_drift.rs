@@ -22,10 +22,6 @@ fn schema_path() -> PathBuf {
         .expect("config/loop.schema.json is reachable from the crate")
 }
 
-fn schema() -> Value {
-    let text = std::fs::read_to_string(schema_path()).expect("schema is readable");
-    serde_json::from_str(&text).expect("schema is valid JSON")
-}
 
 /// Every name the schema declares as an object property, at any depth,
 /// including inside `$defs`.
@@ -235,45 +231,7 @@ skills:
 /// Some fields only exist on one variant of a tagged enum, and a single config
 /// can pick only one variant. These cover the alternates the main fixture
 /// cannot reach.
-const VARIANTS: &[&str] = &[
-    // `max_parallel` lives only on `concurrency.mode: fixed`.
-    r#"
-name: v-fixed
-goals: [{ name: g1, description: a sufficiently long goal description }]
-validations:
-  - target: g1
-    name: v
-    mode: objective
-    statement: it works
-    detector: { type: file_exists, path: out.txt }
-graph:
-  concurrency: { mode: fixed, max_parallel: 4 }
-"#,
-    r#"
-name: v-sequential
-goals: [{ name: g1, description: a sufficiently long goal description }]
-validations:
-  - target: g1
-    name: v
-    mode: objective
-    statement: it works
-    detector: { type: file_exists, path: out.txt }
-graph:
-  concurrency: { mode: sequential }
-"#,
-];
 
-/// Every key name reachable from the main fixture plus every variant fixture.
-fn all_rust_field_names() -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    for (i, text) in std::iter::once(&FULL_COVERAGE).chain(VARIANTS.iter()).enumerate() {
-        let cfg = loopsmith_core::parse_str(text, "fixture")
-            .unwrap_or_else(|e| panic!("fixture {i} must parse:\n{e}"));
-        let serialized = serde_json::to_value(&cfg).expect("config serializes");
-        value_key_names(&serialized, &mut out);
-    }
-    out
-}
 
 #[test]
 fn the_full_coverage_fixture_parses() {
@@ -282,36 +240,61 @@ fn the_full_coverage_fixture_parses() {
     let cfg = loopsmith_core::parse_str(FULL_COVERAGE, "fixture")
         .unwrap_or_else(|e| panic!("full-coverage fixture must parse:\n{e}"));
     assert_eq!(cfg.name, "coverage");
-    assert_eq!(cfg.graph.nodes.len(), 1);
-    assert_eq!(cfg.schedules.len(), 5);
+    assert_eq!(cfg.execution.graph.nodes.len(), 1);
+    assert_eq!(cfg.execution.triggers.triggers.len(), 5);
 }
 
 #[test]
-fn every_schema_property_is_reachable_from_the_rust_model() {
-    let in_rust = all_rust_field_names();
-    let mut in_schema = BTreeSet::new();
-    schema_property_names(&schema(), &mut in_schema);
+fn the_committed_schema_matches_the_one_the_model_generates() {
+    // `config/loop.schema.json` is generated, not written. Regenerating it is
+    //     LOOPSMITH_WRITE_SCHEMA=1 cargo test -p loopsmith-core --test schema_drift
+    // and CI runs this test without that variable, so a model change that
+    // nobody regenerated for fails here rather than shipping a schema that
+    // describes the previous release.
+    let generated = loopsmith_core::json_schema();
+    let rendered = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&generated).expect("schema renders")
+    );
 
-    let missing: Vec<&String> = in_schema.difference(&in_rust).collect();
+    if std::env::var_os("LOOPSMITH_WRITE_SCHEMA").is_some() {
+        std::fs::write(schema_path(), &rendered).expect("schema is writable");
+        return;
+    }
+
+    // Compared as the repository holds it. Git stores the schema with LF, and
+    // a Windows checkout with `core.autocrlf` hands it over as CRLF, which
+    // failed this test on every Windows runner against a schema that was
+    // byte-identical in the repository.
+    let committed = std::fs::read_to_string(schema_path())
+        .expect("schema is readable")
+        .replace("\r\n", "\n");
     assert!(
-        missing.is_empty(),
-        "these fields are documented in config/loop.schema.json but never appear \
-         in a serialized LoopConfig — either implement them or delete them from \
-         the schema: {missing:?}"
+        committed == rendered,
+        "config/loop.schema.json is stale. Regenerate it with:\n  \
+         LOOPSMITH_WRITE_SCHEMA=1 cargo test -p loopsmith-core --test schema_drift"
     );
 }
 
 #[test]
-fn every_rust_field_is_documented_in_the_schema() {
-    let in_rust = all_rust_field_names();
-    let mut in_schema = BTreeSet::new();
-    schema_property_names(&schema(), &mut in_schema);
+fn the_generated_schema_covers_every_field_the_fixture_exercises() {
+    // Generation guarantees the schema matches the *model*. This checks the
+    // other direction that used to be hand-maintained: that the fixture below,
+    // which is the closest thing to a complete config, names nothing the
+    // schema has never heard of. It is what would catch a field serialised
+    // through a `flatten` or a custom impl that schemars cannot see.
+    let cfg = loopsmith_core::parse_str(FULL_COVERAGE, "fixture").expect("fixture parses");
+    let serialized = serde_json::to_value(&cfg).expect("config serialises");
 
-    let undocumented: Vec<&String> = in_rust.difference(&in_schema).collect();
+    let mut in_fixture = BTreeSet::new();
+    value_key_names(&serialized, &mut in_fixture);
+    let mut in_schema = BTreeSet::new();
+    schema_property_names(&loopsmith_core::json_schema(), &mut in_schema);
+
+    let undocumented: Vec<&String> = in_fixture.difference(&in_schema).collect();
     assert!(
         undocumented.is_empty(),
-        "these fields exist in the Rust model but are absent from \
-         config/loop.schema.json, so nobody authoring a config can discover \
-         them: {undocumented:?}"
+        "these fields appear in a serialized config but not in the generated \
+         schema, so schemars cannot see them: {undocumented:?}"
     );
 }

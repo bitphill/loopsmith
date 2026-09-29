@@ -1,0 +1,5 @@
+# The project site. Everything here is meant to be found.
+User-agent: *
+Allow: /
+
+Sitemap: __SITE_URL__/sitemap.xml

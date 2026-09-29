@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+
+    <title>loopsmith — build and run agent loops</title>
+    <meta
+      name="description"
+      content="loopsmith runs a job you describe once, over and over, on its own — and stops when a deterministic check you wrote says it is done, or a limit you set says enough."
+    />
+
+    <!--
+      This page is served from 127.0.0.1 and is never crawled: `loopsmith web`
+      binds to loopback and has no public mode, by decision rather than by
+      omission. The tags are here anyway because this file is the app's one
+      HTML document, and the same markup is what anyone sees who opens a saved
+      copy, embeds it, or shares a screenshot of it — and because a page whose
+      metadata is right only on the public copy is a page with two versions of
+      the truth. The canonical URL points at the project site, which is where
+      the public version of this actually lives.
+    -->
+    <link rel="canonical" href="https://bitphill.github.io/loopsmith/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="loopsmith" />
+    <meta property="og:title" content="loopsmith — build and run agent loops" />
+    <meta
+      property="og:description"
+      content="Describe a job once. loopsmith runs it until a deterministic check says it is done — the model never gets to say so itself."
+    />
+    <meta property="og:url" content="https://bitphill.github.io/loopsmith/" />
+    <meta
+      property="og:image"
+      content="https://raw.githubusercontent.com/bitphill/loopsmith/main/assets/loopsmith-logo-512.png"
+    />
+    <meta property="og:image:alt" content="The loopsmith mark: a hammer struck through a loop." />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="loopsmith — build and run agent loops" />
+    <meta
+      name="twitter:description"
+      content="Describe a job once. loopsmith runs it until a deterministic check says it is done."
+    />
+    <meta
+      name="twitter:image"
+      content="https://raw.githubusercontent.com/bitphill/loopsmith/main/assets/loopsmith-logo-512.png"
+    />
+
+    <!-- Served straight from the binary; see src/assets.rs. -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Google Fonts is a progressive enhancement: this UI runs on machines
+         with no network, and the fallback stacks in styles.css are chosen so
+         the layout does not move when the request fails. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!--
+      What this is, in the vocabulary a machine reads. `SoftwareApplication`
+      rather than `WebApplication`: the thing being described is the CLI, and
+      this page is one of its three front ends rather than the product itself.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "loopsmith",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "description": "Runs agent loops: a config describes goals, checks and stop gates, and a deterministic gate — never a model — decides whether a goal is satisfied, and can revoke that decision.",
+        "url": "https://bitphill.github.io/loopsmith/",
+        "downloadUrl": "https://github.com/bitphill/loopsmith/releases",
+        "codeRepository": "https://github.com/bitphill/loopsmith",
+        "license": "https://opensource.org/licenses/MIT",
+        "programmingLanguage": "Rust",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!--
+      The app needs JavaScript, and a blank page is the worst way to say so.
+      This is also the only thing a reader without it ever sees, so it says
+      where the same work can be done instead.
+    -->
+    <noscript>
+      <main>
+        <h1>loopsmith</h1>
+        <p>
+          This page builds and runs agent loops, and it needs JavaScript. Everything it does can
+          also be done from the terminal: <code>loopsmith --guided</code> asks the same questions
+          one at a time, and <code>loopsmith loop new</code> writes a config to edit by hand.
+        </p>
+      </main>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

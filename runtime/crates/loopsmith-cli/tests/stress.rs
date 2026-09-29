@@ -13,14 +13,14 @@
 
 mod harness;
 
-use harness::{all_examples, Fixture, Stubs};
+use harness::{all_examples, point_at_cmd_stubs, Fixture, Stubs};
 use loopsmith_core::Detector;
 use loopsmith_memory::{LedgerKind, Store};
 
 /// Force every validation on a target to fail, so a run keeps iterating instead
 /// of succeeding on its first pass.
 fn starve(cfg: &mut loopsmith_core::LoopConfig, target: &str) {
-    for v in cfg.validations.iter_mut().filter(|v| v.target == target) {
+    for v in cfg.safety.checks.iter_mut().filter(|v| v.target == target) {
         v.detector = Detector::Script {
             command: "false".into(),
             args: vec![],
@@ -32,14 +32,50 @@ fn starve(cfg: &mut loopsmith_core::LoopConfig, target: &str) {
 /// Cap the run so a stress scenario cannot sit in a long example's default
 /// ceiling of ten iterations and three hours.
 fn cap(cfg: &mut loopsmith_core::LoopConfig, iterations: u32) {
-    cfg.stop_gates.max_iterations = iterations;
-    cfg.stop_gates.no_progress_iterations = 0;
-    cfg.stop_gates.no_progress_iterations_randomness = None;
+    cfg.safety.gates.stop.max_iterations = iterations;
+    cfg.safety.gates.stop.no_progress_iterations = 0;
+    cfg.safety.gates.stop.no_progress_iterations_randomness = None;
 }
 
 // ---------------------------------------------------------------------------
 // The whole set, once each
 // ---------------------------------------------------------------------------
+
+/// On Windows every stubbed `.sh` detector is repointed at its `.cmd` stub —
+/// the gates' as well as the checks'.
+///
+/// The Windows half of stubbing is the only part of this harness no developer
+/// runs locally, and it went wrong there without a trace anywhere else: stubs
+/// were written for gate scripts, but only the checks were repointed at them, so
+/// `container-refactor-loop`'s entry gate kept naming a `.sh` and the run
+/// stopped before it opened its ledger. The repoint is a plain function of the
+/// config, so this runs on every OS and fails here first.
+#[test]
+fn the_windows_stubs_are_named_by_every_detector_they_replace() {
+    let mut gate_scripts = 0;
+    for (i, name) in all_examples().iter().enumerate() {
+        let mut f = Fixture::example(name, &format!("cmd-{i}"));
+        let gates = &f.cfg.safety.gates;
+        gate_scripts += gates
+            .entry
+            .iter()
+            .chain(&gates.approval)
+            .chain(&gates.rollback)
+            .filter(|r| matches!(&r.detector, Detector::Script { command, .. } if command.contains('/')))
+            .count();
+
+        let before = f.script_detectors();
+        point_at_cmd_stubs(&mut f.cfg);
+        let after = f.script_detectors();
+
+        let missed: Vec<_> = after.iter().filter(|c| c.ends_with(".sh")).collect();
+        assert!(missed.is_empty(), "{name}: still names {missed:?} on Windows");
+        assert_eq!(before.len(), after.len(), "{name}: the repoint merged or dropped a detector");
+    }
+    // Without a gate that runs a script, this would pass while proving nothing
+    // about the half of the list that broke.
+    assert!(gate_scripts > 0, "no example puts a script in a gate rule any more");
+}
 
 /// Every example must survive one supervised iteration with its detectors
 /// satisfiable. This is the broadest thing the harness asserts and the cheapest
@@ -339,10 +375,11 @@ fn isolation_is_real_inside_a_repository() {
 
     let isolated: Vec<String> = f
         .cfg
+        .execution
         .graph
         .nodes
         .iter()
-        .filter(|n| n.isolated)
+        .filter(|n| n.isolation.needs_worktree())
         .map(|n| n.id.clone())
         .collect();
     assert!(!isolated.is_empty(), "the example must have an isolated node");
@@ -418,8 +455,8 @@ fn an_isolated_builders_output_reaches_the_gate() {
     cap(&mut f.cfg, 2);
     // `from_yaml` rewrites providers to the deterministic judge block; this
     // config needs a provider that writes a file instead.
-    f.cfg.providers.providers[0].command = "sh".into();
-    f.cfg.providers.providers[0].args = vec![
+    f.cfg.execution.providers.providers[0].command = "sh".into();
+    f.cfg.execution.providers.providers[0].args = vec![
         "-c".into(),
         "mkdir -p out && echo produced > out/thing.txt".into(),
     ];
@@ -506,13 +543,13 @@ providers:
 fn an_isolated_node_can_read_what_its_isolated_upstream_produced() {
     let mut f = Fixture::from_yaml(ISOLATED_CHAIN, "iso-chain");
     cap(&mut f.cfg, 2);
-    f.cfg.providers.providers[0].command = "sh".into();
-    f.cfg.providers.providers[0].args = vec![
+    f.cfg.execution.providers.providers[0].command = "sh".into();
+    f.cfg.execution.providers.providers[0].args = vec![
         "-c".into(),
         "mkdir -p out && echo upstream-was-here > out/upstream.txt".into(),
     ];
-    f.cfg.providers.providers[1].command = "sh".into();
-    f.cfg.providers.providers[1].args = vec![
+    f.cfg.execution.providers.providers[1].command = "sh".into();
+    f.cfg.execution.providers.providers[1].args = vec![
         "-c".into(),
         "mkdir -p out && cat out/upstream.txt > out/downstream.txt".into(),
     ];
@@ -565,9 +602,9 @@ fn an_isolated_node_can_read_what_its_isolated_upstream_produced() {
 #[test]
 fn a_run_with_no_moving_verdicts_halts_on_no_progress() {
     let mut f = Fixture::example("research-loop", "noprogress");
-    f.cfg.stop_gates.max_iterations = 20;
-    f.cfg.stop_gates.no_progress_iterations = 2;
-    f.cfg.stop_gates.no_progress_iterations_randomness = None;
+    f.cfg.safety.gates.stop.max_iterations = 20;
+    f.cfg.safety.gates.stop.no_progress_iterations = 2;
+    f.cfg.safety.gates.stop.no_progress_iterations_randomness = None;
     f.write_config();
     let f = f.stub_scripts(Stubs::Fail);
 
@@ -603,9 +640,9 @@ fn a_run_with_no_moving_verdicts_halts_on_no_progress() {
 #[test]
 fn a_stalled_run_is_perturbed_before_it_is_abandoned() {
     let mut f = Fixture::example("blogger-loop", "perturb");
-    f.cfg.stop_gates.max_iterations = 8;
-    f.cfg.stop_gates.no_progress_iterations = 3;
-    f.cfg.stop_gates.no_progress_iterations_randomness = Some(1);
+    f.cfg.safety.gates.stop.max_iterations = 8;
+    f.cfg.safety.gates.stop.no_progress_iterations = 3;
+    f.cfg.safety.gates.stop.no_progress_iterations_randomness = Some(1);
     f.write_config();
     let f = f.stub_scripts(Stubs::Fail);
 
@@ -638,10 +675,10 @@ fn a_stalled_run_is_perturbed_before_it_is_abandoned() {
 #[test]
 fn the_randomness_agent_chooses_when_a_cheap_provider_answers() {
     let mut f = Fixture::from_yaml(NEVER_SATISFIED, "perturb-agent");
-    f.cfg.stop_gates.max_iterations = 4;
-    f.cfg.stop_gates.no_progress_iterations = 3;
-    f.cfg.stop_gates.no_progress_iterations_randomness = Some(1);
-    f.cfg.providers.providers.push(loopsmith_core::ProviderSpec {
+    f.cfg.safety.gates.stop.max_iterations = 4;
+    f.cfg.safety.gates.stop.no_progress_iterations = 3;
+    f.cfg.safety.gates.stop.no_progress_iterations_randomness = Some(1);
+    f.cfg.execution.providers.providers.push(loopsmith_core::ProviderSpec {
         id: "chooser".into(),
         kind: loopsmith_core::ProviderKind::Byok,
         tiers: vec![loopsmith_core::Tier::Cheap],
@@ -659,6 +696,7 @@ fn the_randomness_agent_chooses_when_a_cheap_provider_answers() {
         cost_per_1k_tokens: None,
     });
     f.cfg
+        .execution
         .providers
         .cascade
         .insert("cheap".into(), vec!["chooser".into()]);
@@ -696,10 +734,10 @@ fn the_randomness_agent_chooses_when_a_cheap_provider_answers() {
 #[test]
 fn an_answer_off_the_menu_falls_back_rather_than_being_guessed_at() {
     let mut f = Fixture::from_yaml(NEVER_SATISFIED, "perturb-offmenu");
-    f.cfg.stop_gates.max_iterations = 4;
-    f.cfg.stop_gates.no_progress_iterations = 3;
-    f.cfg.stop_gates.no_progress_iterations_randomness = Some(1);
-    f.cfg.providers.providers.push(loopsmith_core::ProviderSpec {
+    f.cfg.safety.gates.stop.max_iterations = 4;
+    f.cfg.safety.gates.stop.no_progress_iterations = 3;
+    f.cfg.safety.gates.stop.no_progress_iterations_randomness = Some(1);
+    f.cfg.execution.providers.providers.push(loopsmith_core::ProviderSpec {
         id: "chooser".into(),
         kind: loopsmith_core::ProviderKind::Byok,
         tiers: vec![loopsmith_core::Tier::Cheap],
@@ -716,6 +754,7 @@ fn an_answer_off_the_menu_falls_back_rather_than_being_guessed_at() {
         cost_per_1k_tokens: None,
     });
     f.cfg
+        .execution
         .providers
         .cascade
         .insert("cheap".into(), vec!["chooser".into()]);
@@ -755,10 +794,10 @@ fn an_answer_off_the_menu_falls_back_rather_than_being_guessed_at() {
 #[test]
 fn a_stuck_node_stops_being_dispatched_while_the_run_continues() {
     let mut f = Fixture::example("landing-page-loop", "revisions");
-    f.cfg.stop_gates.max_iterations = 6;
-    f.cfg.stop_gates.max_revisions_per_node = 2;
-    f.cfg.stop_gates.no_progress_iterations = 0;
-    f.cfg.stop_gates.no_progress_iterations_randomness = None;
+    f.cfg.safety.gates.stop.max_iterations = 6;
+    f.cfg.safety.gates.stop.max_revisions_per_node = 2;
+    f.cfg.safety.gates.stop.no_progress_iterations = 0;
+    f.cfg.safety.gates.stop.no_progress_iterations_randomness = None;
     f.write_config();
     let f = f.stub_scripts(Stubs::Fail);
 
@@ -775,6 +814,7 @@ fn a_stuck_node_stops_being_dispatched_while_the_run_continues() {
     let episodes = store.episodes(run_id).unwrap();
     let first_stage_node = f
         .cfg
+        .execution
         .graph
         .nodes
         .iter()
@@ -865,7 +905,7 @@ fn a_resume_does_not_hand_a_stuck_node_its_revision_budget_back() {
 
     // Room to run again, if the ceiling were forgotten.
     let mut f = f;
-    f.cfg.stop_gates.max_iterations = 6;
+    f.cfg.safety.gates.stop.max_iterations = 6;
     f.write_config();
     f.run_with_env(&["resume", "loop.yaml", run_id], &[]);
 
@@ -900,9 +940,9 @@ fn a_resume_does_not_hand_a_stuck_node_its_revision_budget_back() {
 #[test]
 fn a_resume_does_not_reset_the_no_progress_counter() {
     let mut f = Fixture::from_yaml(NEVER_SATISFIED, "resume-stale");
-    f.cfg.stop_gates.max_iterations = 2;
-    f.cfg.stop_gates.max_revisions_per_node = 99;
-    f.cfg.stop_gates.no_progress_iterations = 3;
+    f.cfg.safety.gates.stop.max_iterations = 2;
+    f.cfg.safety.gates.stop.max_revisions_per_node = 99;
+    f.cfg.safety.gates.stop.no_progress_iterations = 3;
     f.write_config();
     let run_id = "stale";
 
@@ -921,7 +961,7 @@ fn a_resume_does_not_reset_the_no_progress_counter() {
     };
     assert!(carried > 0, "two flat iterations must leave a stale count");
 
-    f.cfg.stop_gates.max_iterations = 20;
+    f.cfg.safety.gates.stop.max_iterations = 20;
     f.write_config();
     f.run_with_env(&["resume", "loop.yaml", run_id], &[]);
 
@@ -997,8 +1037,8 @@ fn a_certified_success_exports_a_reusable_package() {
 #[test]
 fn a_node_that_exhausts_its_revisions_asks_for_the_graph_to_be_reshaped() {
     let mut f = Fixture::from_yaml(NEVER_SATISFIED, "propose-reshape");
-    f.cfg.stop_gates.max_iterations = 4;
-    f.cfg.stop_gates.max_revisions_per_node = 2;
+    f.cfg.safety.gates.stop.max_iterations = 4;
+    f.cfg.safety.gates.stop.max_revisions_per_node = 2;
     f.write_config();
 
     let run_id = "reshape";
@@ -1035,7 +1075,7 @@ fn a_node_that_exhausts_its_revisions_asks_for_the_graph_to_be_reshaped() {
 fn a_detector_that_cannot_run_asks_for_the_criteria_to_change() {
     let mut f = Fixture::from_yaml(NEVER_SATISFIED, "propose-criteria");
     cap(&mut f.cfg, 2);
-    f.cfg.validations[0].detector = Detector::Script {
+    f.cfg.safety.checks[0].detector = Detector::Script {
         // Nothing generates this stub, so the detector errors rather than fails.
         command: "scripts/does-not-exist.sh".into(),
         args: vec![],
@@ -1070,8 +1110,8 @@ fn a_detector_that_cannot_run_asks_for_the_criteria_to_change() {
 fn unexplored_candidates_are_proposed_rather_than_spent_on_unasked() {
     let mut f = Fixture::from_yaml(NEVER_SATISFIED, "propose-try");
     cap(&mut f.cfg, 1);
-    f.cfg.skills.explore = false;
-    f.cfg.skills.explore_candidates = vec!["some-helper".into()];
+    f.cfg.execution.skills.explore = false;
+    f.cfg.execution.skills.explore_candidates = vec!["some-helper".into()];
     f.write_config();
 
     let run_id = "try";
@@ -1110,7 +1150,7 @@ fn unexplored_candidates_are_proposed_rather_than_spent_on_unasked() {
 fn a_summary_provider_adds_prose_that_cannot_decide_anything() {
     let mut f = Fixture::from_yaml(NEVER_SATISFIED, "narrative");
     cap(&mut f.cfg, 1);
-    f.cfg.providers.providers.push(loopsmith_core::ProviderSpec {
+    f.cfg.execution.providers.providers.push(loopsmith_core::ProviderSpec {
         id: "summariser".into(),
         kind: loopsmith_core::ProviderKind::Byok,
         tiers: vec![],
@@ -1127,7 +1167,7 @@ fn a_summary_provider_adds_prose_that_cannot_decide_anything() {
         usage_regex: None,
         cost_per_1k_tokens: None,
     });
-    f.cfg.context.summary_provider = Some("summariser".into());
+    f.cfg.execution.memory.summary_provider = Some("summariser".into());
     f.write_config();
 
     let run_id = "prose";
@@ -1171,7 +1211,7 @@ fn a_skill_trial_records_what_the_node_that_used_it_cost() {
 
     let mut f = f;
     cap(&mut f.cfg, 1);
-    f.cfg.graph.nodes[0].skills = vec!["helper".into()];
+    f.cfg.execution.graph.nodes[0].skills = vec!["helper".into()];
     f.write_config();
 
     let run_id = "tokens";
@@ -1201,9 +1241,9 @@ fn a_skill_trial_records_what_the_node_that_used_it_cost() {
 #[test]
 fn perturbation_and_phases_do_not_dispatch_a_shut_phase() {
     let mut f = Fixture::example("traffic-loop", "perturb-phases");
-    f.cfg.stop_gates.max_iterations = 5;
-    f.cfg.stop_gates.no_progress_iterations = 4;
-    f.cfg.stop_gates.no_progress_iterations_randomness = Some(1);
+    f.cfg.safety.gates.stop.max_iterations = 5;
+    f.cfg.safety.gates.stop.no_progress_iterations = 4;
+    f.cfg.safety.gates.stop.no_progress_iterations_randomness = Some(1);
     f.write_config();
     // Nothing is satisfiable, so nothing ever leaves the first phase and every
     // iteration after the first is a stall.

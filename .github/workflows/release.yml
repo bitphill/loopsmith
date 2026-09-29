@@ -151,8 +151,27 @@ jobs:
   #
   # Configure once at crates.io → each crate → Settings → Trusted Publishing:
   # repository `bitphill/loopsmith`, workflow `release.yml`.
+  #
+  # Off unless the repository variable `PUBLISH_CRATES` is `true` (Settings →
+  # Secrets and variables → Actions → Variables).
+  #
+  # 1.0.0 could not be published by this job. It introduced three crates —
+  # `loopsmith-run`, `-wizard`, `-web` — and a Trusted Publishing token cannot
+  # create a crate, while the nine that already existed accept nothing but
+  # Trusted Publishing. So all twelve went to crates.io by hand on 2026-09-26:
+  # unlocked, published in dependency order, the three new ones given a
+  # publisher config, every one locked again. The tag came four days later and
+  # this job was left off for it, so the tag could not touch crates.io at all.
+  #
+  # Every crate now exists and has a publisher config, so from 1.0.1 on this job
+  # does the whole crates.io release by itself. **Set the variable before the
+  # next tag**, or that release skips crates.io without saying so.
+  #
+  # Nothing depends on this job; `pypi`, `npm` and `homebrew` all hang off
+  # `publish`. Skipping it skips crates.io and nothing else.
   crates:
     name: crates.io
+    if: vars.PUBLISH_CRATES == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -173,16 +192,51 @@ jobs:
       # verification build. It published on the second attempt, unchanged.
       #
       # Already-published is a success, not a failure: a re-run of this workflow
-      # must not fall over on the crates that got through the first time.
+      # must not fall over on the crates that got through the first time. The
+      # string to match is the server's, quoted from
+      # `rust-lang/crates.io:src/controllers/krate/publish.rs` — "crate version
+      # `X` is already uploaded", which cargo passes through verbatim. This guard
+      # used to look for "already exists", which crates.io does not say, so a
+      # re-run took three attempts and two thirty-second sleeps per crate and
+      # then failed the job. Both spellings are matched now; a registry that says
+      # something else entirely would have to be found the same way this was.
       - name: Publish in dependency order
         working-directory: runtime
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -u
+          version="$(awk '/^\[workspace\.package\]/{f=1} f && /^version = /{gsub(/[",]/,"",$3); print $3; exit}' Cargo.toml)"
+          [ -n "$version" ] || { echo "::error::could not read the workspace version"; exit 1; }
+          echo "publishing $version"
+
+          # `cargo publish` packages and runs a full verification build *before*
+          # it uploads and finds out the version is already there, so the
+          # already-uploaded path below is free in upload terms and costs a
+          # complete compile every time. That matters because the Trusted
+          # Publishing token expires thirty minutes after the job starts: a
+          # re-run that has to skip eleven crates would spend the whole window
+          # rebuilding them and could lose the token before reaching the twelfth.
+          # Asking the index first turns each skip into one HTTP request.
+          #
+          # Only 200 counts as present. A 404, a rate limit, or a dropped
+          # connection all fall through to publishing, because the upload is the
+          # authority and this is an optimisation, not a gate.
+          on_index() {
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: loopsmith release workflow (github.com/bitphill/loopsmith)' \
+              "https://crates.io/api/v1/crates/$1/$version" || echo 000)
+            [ "$code" = 200 ]
+          }
+
           for crate in loopsmith-util loopsmith-core loopsmith-memory \
                        loopsmith-graph loopsmith-provider loopsmith-gate \
-                       loopsmith-skills loopsmith-mcp loopsmith; do
+                       loopsmith-skills loopsmith-mcp loopsmith-run \
+                       loopsmith-wizard loopsmith-web loopsmith; do
+            if on_index "$crate"; then
+              echo "$crate $version is already on the index — not rebuilding it"
+              continue
+            fi
             for attempt in 1 2 3; do
               echo "::group::$crate (attempt $attempt)"
               out=$(cargo publish -p "$crate" 2>&1) && status=0 || status=$?
@@ -191,7 +245,7 @@ jobs:
               if [ "$status" -eq 0 ]; then
                 echo "published $crate"; break
               fi
-              if echo "$out" | grep -q "already exists"; then
+              if echo "$out" | grep -qE "already (uploaded|exists)"; then
                 echo "$crate is already on the index at this version — continuing"; break
               fi
               if [ "$attempt" -eq 3 ]; then
@@ -344,14 +398,24 @@ jobs:
           # not a failure: git commit exits non-zero when there is nothing to do.
           if git diff --quiet; then
             echo "tap already carries ${{ steps.render.outputs.tag }}"
-            exit 0
-          fi
-
-          git config user.name "loopsmith release"
-          git config user.email "bitphill@duck.com"
-          git commit -aqm "loopsmith ${{ steps.render.outputs.version }}
+          else
+            git config user.name "loopsmith release"
+            git config user.email "bitphill@duck.com"
+            git commit -aqm "loopsmith ${{ steps.render.outputs.version }}
 
           Digest verified against the real tarball: valid gzip, plausible size,
           and distinct from the previous release's."
-          git push origin HEAD
-          echo "tap updated to ${{ steps.render.outputs.tag }}"
+            git push origin HEAD
+            echo "tap updated to ${{ steps.render.outputs.tag }}"
+          fi
+
+          # The README's Homebrew badge reads the tap's newest tag, so the tag is
+          # what makes that badge a fact rather than a claim: it exists only once
+          # this job has pushed the formula, and a release whose Homebrew step
+          # failed — 0.3.0's did — leaves the badge on the previous version
+          # instead of announcing one nobody can install. Pushed on the re-run
+          # path too, so a tap updated by hand still gets its tag. Forced, so a
+          # re-run lands it on the same commit rather than failing because it
+          # already exists.
+          git tag -f "${{ steps.render.outputs.tag }}"
+          git push -f origin "refs/tags/${{ steps.render.outputs.tag }}"

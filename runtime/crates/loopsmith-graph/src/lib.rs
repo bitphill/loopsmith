@@ -73,7 +73,7 @@ pub fn speedup_ceiling(p: f64) -> f64 {
 /// what it waits for, and what it costs.
 ///
 /// This exists so the scheduler is not welded to `NodeSpec`. The execution
-/// graph (section G) and the execution-guideline phase graph (section I) are
+/// graph (`execution.graph`) and the phase graph (`execution.phases`) are
 /// different types with different fields, but they are the same DAG problem,
 /// and a second copy of Kahn's algorithm is a second place for a cycle bug to
 /// hide.
@@ -97,7 +97,7 @@ impl DagNode for NodeSpec {
     }
 }
 
-/// Execution guidelines (section I) are a second DAG over the same scheduler.
+/// Execution phases (`execution.phases`) are a second DAG over the same scheduler.
 /// Phases carry no cost of their own — the work is in the nodes assigned to
 /// them — so every phase weighs the same and the critical path through the
 /// phase graph is simply its longest chain.
@@ -240,7 +240,7 @@ pub fn choose_concurrency(
 ) -> (usize, f64) {
     let widest = waves.iter().map(|w| w.nodes.len()).max().unwrap_or(1).max(1);
     match concurrency {
-        Concurrency::Sequential => (1, amdahl(p, 1)),
+        Concurrency::Sequential {} => (1, amdahl(p, 1)),
         Concurrency::Fixed { max_parallel } => {
             let n = (*max_parallel).max(1).min(widest);
             (n, amdahl(p, n))
@@ -295,7 +295,7 @@ pub fn unisolated_parallel_writers(spec: &GraphSpec, waves: &[Wave]) -> Vec<Stri
             .nodes
             .iter()
             .filter_map(|id| by_id.get(id.as_str()).copied())
-            .filter(|n| n.role == Role::Builder && !n.isolated)
+            .filter(|n| n.role == Role::Builder && !n.isolation.needs_worktree())
             .map(|n| n.id.as_str())
             .collect();
         if writers.len() > 1 {
@@ -322,7 +322,7 @@ mod tests {
             stage: None,
             skills: vec![],
             weight,
-            isolated: false,
+            isolation: Default::default(),
         }
     }
 
@@ -405,6 +405,7 @@ mod tests {
                 cap: 16,
                 min_marginal_gain: 0.5,
             },
+            ..Default::default()
         };
         let p = plan(&spec).unwrap();
         // 16 independent nodes: one wave, high p, but a large min gain should
@@ -417,7 +418,8 @@ mod tests {
     fn sequential_mode_pins_one_worker() {
         let spec = GraphSpec {
             nodes: vec![node("a", &[], 1.0), node("b", &[], 1.0)],
-            concurrency: Concurrency::Sequential,
+            concurrency: Concurrency::Sequential {},
+            ..Default::default()
         };
         let p = plan(&spec).unwrap();
         assert_eq!(p.concurrency, 1);
@@ -428,6 +430,7 @@ mod tests {
         let spec = GraphSpec {
             nodes: vec![node("a", &[], 1.0), node("b", &[], 1.0)],
             concurrency: Concurrency::Fixed { max_parallel: 32 },
+            ..Default::default()
         };
         let p = plan(&spec).unwrap();
         assert_eq!(p.concurrency, 2);
@@ -438,6 +441,7 @@ mod tests {
         let spec = GraphSpec {
             nodes: vec![node("a", &[], 1.0), node("b", &[], 1.0)],
             concurrency: Concurrency::default(),
+            ..Default::default()
         };
         let w = waves(&spec.nodes).unwrap();
         let flagged = unisolated_parallel_writers(&spec, &w);

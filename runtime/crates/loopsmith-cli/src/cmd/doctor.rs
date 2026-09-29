@@ -57,6 +57,16 @@ pub fn execute(config: Option<&Path>) -> Result<ExitCode, String> {
     for tool in ["git", "sh", "sed", "awk", "curl"] {
         report_tool(tool);
     }
+    let docker = loopsmith_run::container::probe();
+    match &docker {
+        Ok(rt) => println!(
+            "  {:<13} {} (server {}; container isolation available)",
+            "containers",
+            rt.bin.display(),
+            rt.version
+        ),
+        Err(why) => println!("  {:<13} unavailable: {why}", "containers"),
+    }
 
     let mut notes: Vec<String> = Vec::new();
     if let Some(note) = p.portability_note() {
@@ -78,21 +88,29 @@ pub fn execute(config: Option<&Path>) -> Result<ExitCode, String> {
     }
     if p.scheduler().is_none() {
         notes.push(
-            "no scheduler installed, so `loopsmith schedule` has nothing to hand the loop to. \
-             `loopsmith watch` still works under any process supervisor."
+            "no scheduler installed, so `loopsmith run schedule` has nothing to hand the \
+             loop to. `loopsmith run watch` still works under any process supervisor."
                 .into(),
         );
     }
     if loopsmith_util::which("git").is_none() {
         notes.push(
             "git is not on PATH: `isolated: true` nodes will run in the shared working \
-             directory and say so, and section J `github` sub-agents cannot be fetched"
+             directory and say so, and `github` sub-agents cannot be fetched"
                 .into(),
         );
     }
 
     if let Some(path) = config {
         notes.extend(config_notes(path));
+        if docker.is_err() && uses_containers(path) {
+            notes.push(
+                "this loop has `isolation: container` nodes and no container runtime answered; \
+                 they will run in a git worktree instead, and the ledger will say so. Set \
+                 LOOPSMITH_DOCKER to use podman or another Docker-compatible runtime."
+                    .into(),
+            );
+        }
     }
 
     if notes.is_empty() {
@@ -128,7 +146,7 @@ fn config_notes(path: &Path) -> Vec<String> {
     let root = super::config_dir(path);
     let mut out = Vec::new();
 
-    for v in &cfg.validations {
+    for v in &cfg.safety.checks {
         let loopsmith_core::Detector::Script { command, .. } = &v.detector else {
             continue;
         };
@@ -164,11 +182,24 @@ fn config_notes(path: &Path) -> Vec<String> {
         }
     }
 
-    if !cfg.default_skills.is_empty() && loopsmith_util::which("git").is_none() {
+    if !cfg.execution.default_skills.is_empty() && loopsmith_util::which("git").is_none() {
         out.push(format!(
-            "{} section J sub-agent(s) declared, and git is not on PATH to fetch them",
-            cfg.default_skills.len()
+            "{} declared sub-agent(s), and git is not on PATH to fetch them",
+            cfg.execution.default_skills.len()
         ));
     }
     out
+}
+
+/// Whether the config at `path` asks for container isolation anywhere.
+fn uses_containers(path: &Path) -> bool {
+    loopsmith_core::load(path)
+        .map(|cfg| {
+            cfg.execution
+                .graph
+                .nodes
+                .iter()
+                .any(|n| n.isolation.is_container())
+        })
+        .unwrap_or(false)
 }

@@ -11,10 +11,22 @@
 # machine nobody chose.
 set -euo pipefail
 
-REPO_URL="${LOOPSMITH_REPO_URL:-https://github.com/bitphill/loopsmith.git}"
-INSTALL_DIR="${LOOPSMITH_HOME:-$HOME/.loopsmith}"
-BIN_LINK_DIR="${LOOPSMITH_BIN_DIR:-/usr/local/bin}"
-BRANCH="${LOOPSMITH_BRANCH:-main}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Every fact this shares with install.ps1 comes from one file. Three copies of
+# a repository URL is three chances to move the repository and fix two of them,
+# and the one nobody fixes is the script for the OS they are not on.
+MANIFEST="$SCRIPT_DIR/installers/manifest.json"
+# shellcheck source=installers/manifest.sh
+. "$SCRIPT_DIR/installers/manifest.sh"
+
+BINARY="$(m_str binary)"
+REPO_URL="${LOOPSMITH_REPO_URL:-$(m_str repo_url)}"
+INSTALL_DIR="${LOOPSMITH_HOME:-$HOME/$(m_str install_dir_name)}"
+BIN_LINK_DIR="${LOOPSMITH_BIN_DIR:-$(m_str unix_link_dir)}"
+BRANCH="${LOOPSMITH_BRANCH:-$(m_str branch)}"
+BUILD_DIR="$(m_str build_dir)"
+BUILT="$(m_str built_unix)"
 LOG="$INSTALL_DIR/install.log"
 
 log()  { printf '\033[1;36m[loopsmith]\033[0m %s\n' "$*" | tee -a "$LOG" >&2; }
@@ -42,7 +54,6 @@ if [ "$OS" = windows ]; then
   warn "continuing, since a POSIX layer is present."
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPS_SCRIPT="$SCRIPT_DIR/installers/deps.sh"
 
 if [ -f "$DEPS_SCRIPT" ]; then
@@ -60,13 +71,18 @@ fi
 # rustup writes its PATH line to ~/.profile, which zsh never reads, so a shell
 # that has cargo installed can still not see it. Add it for this process.
 [ -d "$HOME/.cargo/bin" ] && export PATH="$HOME/.cargo/bin:$PATH"
+m_list requires | while read -r tool; do
+  command -v "$tool" >/dev/null 2>&1 || err "$tool is required and is not on PATH after the dependency step"
+done
+# The loop above runs in a subshell, so its `err` cannot exit this one. Check
+# the two that matter again here rather than pretending the loop was the guard.
 command -v cargo >/dev/null 2>&1 || err "cargo is still not on PATH after dependency install"
 command -v git   >/dev/null 2>&1 || err "git is required"
 
 # A checkout beside this script is the source of truth when there is one; that is
 # what makes `git clone && ./install.sh` install the code you just cloned rather
 # than whatever main happens to be.
-if [ -d "$SCRIPT_DIR/runtime" ]; then
+if [ -d "$SCRIPT_DIR/$BUILD_DIR" ]; then
   log "building from the checkout at $SCRIPT_DIR"
   SRC_DIR="$SCRIPT_DIR"
 else
@@ -77,24 +93,30 @@ else
 fi
 
 log "building release binary — a few minutes on a cold cache"
-( cd "$SRC_DIR/runtime" && cargo build --release --bin loopsmith ) 2>&1 | tee -a "$LOG"
+# `m_list` one per line into "$@", so an argument with a space stays one
+# argument. `cargo build --release --bin loopsmith` is the manifest's business,
+# not this script's.
+set --
+while IFS= read -r arg; do set -- "$@" "$arg"; done <<EOF
+$(m_list build_args)
+EOF
+( cd "$SRC_DIR/$BUILD_DIR" && cargo "$@" ) 2>&1 | tee -a "$LOG"
 
-BIN_SRC="$SRC_DIR/runtime/target/release/loopsmith"
-BIN_DST="$INSTALL_DIR/bin/loopsmith"
+BIN_SRC="$SRC_DIR/$BUILT"
+BIN_DST="$INSTALL_DIR/$(m_str bin_subdir)/$BINARY"
 [ -x "$BIN_SRC" ] || err "the build reported success but $BIN_SRC is not there"
-mkdir -p "$INSTALL_DIR/bin"
+mkdir -p "$(dirname "$BIN_DST")"
 install -m 0755 "$BIN_SRC" "$BIN_DST"
 log "installed $BIN_DST"
 
 if [ -w "$BIN_LINK_DIR" ] || [ "$(id -u)" -eq 0 ]; then
-  ln -sf "$BIN_DST" "$BIN_LINK_DIR/loopsmith"
-  log "linked $BIN_LINK_DIR/loopsmith"
+  ln -sf "$BIN_DST" "$BIN_LINK_DIR/$BINARY"
+  log "linked $BIN_LINK_DIR/$BINARY"
 else
   warn "cannot write to $BIN_LINK_DIR, so nothing was linked."
   warn "add this to your shell profile:"
-  warn "  export PATH=\"$INSTALL_DIR/bin:\$PATH\""
+  warn "  export PATH=\"$(dirname "$BIN_DST"):\$PATH\""
 fi
 
 log "done. next:"
-log "  loopsmith doctor          # what this machine is, and what that stops you doing"
-log "  loopsmith new --path ~/loops/my-loop --purpose \"...\""
+m_list next_steps | while IFS= read -r step; do log "  $step"; done

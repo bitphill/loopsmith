@@ -8,7 +8,7 @@
 //! cron is a instruction that silently does nothing.
 
 use super::config_dir;
-use crate::schedule;
+use loopsmith_run::schedule;
 use loopsmith_util::platform::Platform;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -38,7 +38,7 @@ pub fn execute(config: &Path, install: bool) -> Result<ExitCode, String> {
         }
         None => Err(format!(
             "no scheduler on this machine (looked for {}). \n\
-             The loop can still be driven by `loopsmith watch`, which needs a process \n\
+             The loop can still be driven by `loopsmith run watch`, which needs a process \n\
              supervisor of some kind — a systemd unit, a container restart policy, or a \n\
              terminal you leave open.",
             preferred_names(&platform).join(", ")
@@ -66,7 +66,7 @@ fn launchd(
     if !install {
         println!("{plist}");
         println!(
-            "# write it with: loopsmith schedule {} --install",
+            "# write it with: loopsmith run schedule {} --install",
             config.display()
         );
         return Ok(ExitCode::SUCCESS);
@@ -88,11 +88,11 @@ fn launchd(
 /// than writing anything. Creating a scheduled task is a persistent change to
 /// the user's machine, the same reason `launchctl load` is left to them.
 fn schtasks(label: &str, exe: &Path, abs: &Path, install: bool) {
-    println!("{}", crate::schedule::schtasks_command(label, exe, abs));
+    println!("{}", loopsmith_run::schedule::schtasks_command(label, exe, abs));
     println!();
     println!("# Run that in an elevated-or-not shell to register the task.");
-    println!("# It keeps `loopsmith watch` alive; the watcher evaluates the triggers in");
-    println!("# section G itself, so Task Scheduler only has to restart one process.");
+    println!("# It keeps `loopsmith run watch` alive; the watcher evaluates");
+    println!("# `execution.triggers` itself, so Task Scheduler only has to restart one process.");
     println!("# Remove it later with: schtasks /Delete /TN \"{label}\" /F");
     if install {
         nothing_to_install(
@@ -110,9 +110,11 @@ fn crontab(
     install: bool,
 ) {
     let expr = cfg
-        .schedules
+        .execution
+        .triggers
+        .triggers
         .iter()
-        .find_map(|t| match t {
+        .find_map(|t| match &t.trigger {
             loopsmith_core::Trigger::Cron { expr } => Some(expr.clone()),
             _ => None,
         })

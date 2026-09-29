@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 pub fn execute(config: &Path) -> Result<ExitCode, String> {
     let cfg = loopsmith_core::load(config).map_err(|e| e.to_string())?;
-    let plan = loopsmith_graph::plan(&cfg.graph).map_err(|e| e.to_string())?;
+    let plan = loopsmith_graph::plan(&cfg.execution.graph).map_err(|e| e.to_string())?;
     println!("loop: {}", cfg.name);
     println!("\nWaves ({} total):", plan.waves.len());
     for w in &plan.waves {
@@ -24,7 +24,7 @@ pub fn execute(config: &Path) -> Result<ExitCode, String> {
         plan.predicted_speedup, plan.speedup_ceiling
     );
 
-    let risky = loopsmith_graph::unisolated_parallel_writers(&cfg.graph, &plan.waves);
+    let risky = loopsmith_graph::unisolated_parallel_writers(&cfg.execution.graph, &plan.waves);
     if !risky.is_empty() {
         println!(
             "\nwarning: builder nodes may run in parallel without worktree isolation: {}",

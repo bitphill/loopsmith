@@ -76,8 +76,47 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # `--no-default-features` drops the browser UI and with it the whole async
+      # tree. That promise now crosses a crate seam — the wizard's `probe`
+      # feature is what keeps tokio out — so a workspace build, which unifies
+      # features, cannot see it break. This build can.
+      #
+      # `shell: bash` because this is bash, and on Windows the default is
+      # PowerShell, which refuses `if cargo tree …; then` at parse time — so
+      # the step failed before clippy ran, and hid every later step on that leg.
+      # The tree is captured before it is searched: explicit `shell: bash` runs
+      # under `pipefail`, and `cargo tree | grep -q` can then read as "no tokio"
+      # precisely when there is one, because grep exits on the first match and
+      # cargo tree takes SIGPIPE. The Homebrew tarball guard died of the same
+      # thing at 0.3.0.
+      - name: Clippy, minimal build (no web, no async runtime)
+        shell: bash
+        run: |
+          cargo clippy -p loopsmith --no-default-features --all-targets -- -D warnings
+          tree="$(cargo tree -p loopsmith --no-default-features -e normal)"
+          if grep -q ' tokio ' <<<"$tree"; then
+            echo "::error::a --no-default-features build pulls in tokio"; exit 1
+          fi
+
+      # `--no-fail-fast`: cargo otherwise stops at the first test binary that
+      # fails, and every binary after it goes unrun and unreported. The first
+      # time 1.0 reached Windows, three of thirty-five binaries ran; a second
+      # failure was sitting behind the first, and it took another full cycle to
+      # learn that. The matrix already refuses to let one OS hide another — this
+      # is the same rule inside a leg.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
+
+      # The README's tests badge is the one number in its badge row that
+      # shields.io does not read live, and it said 415 while the suite grew to
+      # 620. macOS only, because that is where every test in the suite exists:
+      # one is macOS-only and one Unix-only, so Linux lists one fewer and Windows
+      # fewer still. The test binaries are already built by the step above, so
+      # listing them costs seconds.
+      - name: The tests badge matches the suite
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: ./tools/sync-test-count.sh --check
 
       - name: Release build
         run: cargo build --release
@@ -99,8 +138,10 @@ jobs:
             bin="runtime/target/release/loopsmith"
           fi
           bad=0
+          seen=0
           for cfg in config/examples/*.yaml config/examples/*.md; do
-            out=$("$bin" validate "$cfg" 2>&1 || true)
+            seen=$((seen+1))
+            out=$("$bin" loop validate "$cfg" 2>&1 || true)
             summary=$(printf '%s\n' "$out" | grep -E '[0-9]+ error\(s\), [0-9]+ warning\(s\)' | tail -1)
             errors=$(printf '%s' "$summary" | sed -E 's/^([0-9]+) error.*/\1/')
             warnings=$(printf '%s' "$summary" | sed -E 's/.*, ([0-9]+) warning.*/\1/')
@@ -110,8 +151,20 @@ jobs:
               bad=$((bad+1))
             fi
           done
-          echo "26 examples checked, $bad off-spec"
+          # A glob that matched nothing would leave `seen` at 0 and this check
+          # passing without having read a single file.
+          [ "$seen" -ge 30 ] || { echo "::error::only $seen example files found"; exit 1; }
+          echo "$seen examples checked, $bad off-spec"
           [ "$bad" -eq 0 ]
+
+      # The .md twin of each example is generated from the .yaml, so an edit to
+      # either one that was not regenerated is drift nobody would see: both
+      # files still parse, and they describe different loops.
+      - name: Every example's two formats are in step
+        if: runner.os == 'Linux'
+        working-directory: .
+        shell: bash
+        run: ./tools/sync-examples.sh --check
 
       # A generated loop has to be startable on the host that generated it. On
       # Windows that means the `.cmd` launcher, which no POSIX host can execute —
@@ -127,7 +180,7 @@ jobs:
           fi
           scratch="${RUNNER_TEMP}/ci-loop"
           rm -rf "$scratch"
-          "$bin" new --path "$scratch" --purpose "prove the launchers work"
+          "$bin" loop new --path "$scratch" --purpose "prove the launchers work"
           cd "$scratch"
           for f in run.sh resume.sh run.cmd resume.cmd scripts/compat.sh; do
             test -f "$f" || { echo "::error::$f was not generated"; exit 1; }
@@ -149,8 +202,136 @@ jobs:
           [ "$code" -eq 2 ] || { echo "::error::the resume launcher exited $code, expected 2"; exit 1; }
           echo "both launchers present; resume exited 2 as designed"
 
+      # The installer, on the OS it is for. `install.sh` and `install.ps1` are
+      # the first thing most people run and the last thing anyone tests: they
+      # are not built by cargo, so nothing else in this workflow touches them,
+      # and a typo in either is invisible until someone installs.
+      #
+      # Both read `installers/manifest.json`, so this also proves the two
+      # readers — sed on POSIX, ConvertFrom-Json on Windows — agree about what
+      # is in it. The cargo build inside is a no-op here: the release binary is
+      # already built above and the target directory is shared.
+      - name: The installer for this OS installs a working binary
+        working-directory: .
+        shell: bash
+        env:
+          LOOPSMITH_HOME: ${{ runner.temp }}/ls-home
+          LOOPSMITH_BIN_DIR: ${{ runner.temp }}/ls-bin
+        run: |
+          mkdir -p "$LOOPSMITH_BIN_DIR"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            cmd //c install.bat
+            installed="$LOOPSMITH_HOME/bin/loopsmith.exe"
+          else
+            ./install.sh
+            installed="$LOOPSMITH_HOME/bin/loopsmith"
+          fi
+          test -x "$installed" || { echo "::error::$installed is not there"; exit 1; }
+          # Not `--version`: a binary that prints its version has linked, but
+          # has not necessarily been installed with everything it needs.
+          "$installed" doctor >/dev/null
+          echo "installed and ran: $("$installed" --version)"
+
+          # Re-running is how you upgrade, so it has to be safe to do twice.
+          if [ "${RUNNER_OS}" = "Windows" ]; then cmd //c install.bat; else ./install.sh; fi
+          test -x "$installed"
+          echo "second run left a working install"
+
+  # Linux on ARM. The matrix above is three x86 runners, so every claim about
+  # aarch64 — that the build works, that the installer's detection is right,
+  # that nothing depends on x86 tooling — has been a claim with no evidence.
+  # This is the cheapest way to make it one with evidence.
+  arm:
+    name: linux on arm
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version && cargo --version && uname -m
+
+      - name: Build and test
+        run: cargo test --workspace
+
+      - name: The installer works here too
+        working-directory: .
+        env:
+          LOOPSMITH_HOME: ${{ runner.temp }}/ls-home
+          LOOPSMITH_BIN_DIR: ${{ runner.temp }}/ls-bin
+        run: |
+          mkdir -p "$LOOPSMITH_BIN_DIR"
+          ./install.sh
+          "$LOOPSMITH_HOME/bin/loopsmith" doctor >/dev/null
+          echo "aarch64: $("$LOOPSMITH_HOME/bin/loopsmith" --version)"
+
+  # The minimum supported Rust version, which has been a claim in the README
+  # and in four package manifests with nothing behind it. `rust-version` in
+  # Cargo.toml makes cargo refuse an older toolchain; it does not make anything
+  # notice when a 1.82 API lands in the code and the claim quietly becomes
+  # false. This is what notices.
+  #
+  # `--all-targets` so the tests are checked too: a test using a newer API
+  # compiles for the author and not for the person following the README.
+  msrv:
+    name: rust 1.85, the version the README promises
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install 1.85
+        shell: bash
+        run: |
+          rustup toolchain install 1.85 --profile minimal --no-self-update
+          rustup default 1.85
+          rustc --version
+
+      # `cargo check`, not `cargo test`: this asks whether the code compiles on
+      # the oldest toolchain the project claims. Whether it *behaves* is the
+      # matrix's question, and running the suite three more times to re-answer
+      # it would double the workflow for nothing.
+      - name: It still compiles
+        run: cargo check --workspace --all-targets --locked
+
+  # Container isolation, against a real daemon.
+  #
+  # `isolation: container` runs a node's provider inside `docker run --rm`.
+  # The decision — which image, network or not, degrade or not — has unit
+  # tests; the argv has unit tests; and until this job, nothing had ever handed
+  # that argv to a daemon. The dev machine this was written on has no Docker,
+  # which is exactly why the code degrades gracefully and exactly why the path
+  # went untested for two phases.
+  docker:
+    name: a container node really runs in a container
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: What runtime is here
+        shell: bash
+        run: docker version --format '{{.Server.Version}}'
+
+      - name: Install the toolchain
+        shell: bash
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+
+      # Pulled explicitly so a registry hiccup fails here, with a clear message,
+      # rather than inside the test as an assertion about the mount.
+      - name: Pull the image the test uses
+        run: docker pull alpine:3
+
+      - name: Run it
+        env:
+          LOOPSMITH_STRESS_DOCKER: "1"
+        run: cargo test -p loopsmith --test opt_in a_container_node -- --nocapture
+
   # The web UI is compiled into the binary with `include_str!` from a committed
-  # `src/web/dist/`. That is what makes `loopsmith --web` work with no Node on
+  # `src/dist/`. That is what makes `loopsmith --web` work with no Node on
   # the machine, and it is also a trap: a frontend change that is not rebuilt
   # leaves `dist/` holding the previous UI, the binary serves it, and nothing
   # anywhere fails. The only way that gets caught is by rebuilding it here and
@@ -160,7 +341,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: runtime/crates/loopsmith-cli/web
+        working-directory: runtime/crates/loopsmith-web/web
     steps:
       - uses: actions/checkout@v4
 
@@ -176,19 +357,143 @@ jobs:
         run: npm ci
 
       # Typechecks first (`npm run build` runs `tsc --noEmit` before vite), then
-      # writes into ../src/web/dist.
+      # writes into ../src/dist.
       - name: Build
         run: npm run build
 
       - name: The committed dist matches the sources
         working-directory: .
         run: |
-          if ! git diff --quiet -- runtime/crates/loopsmith-cli/src/web/dist; then
-            echo "::error::src/web/dist is stale — run 'npm run build' in runtime/crates/loopsmith-cli/web and commit the result"
-            git diff --stat -- runtime/crates/loopsmith-cli/src/web/dist
+          if ! git diff --quiet -- runtime/crates/loopsmith-web/src/dist; then
+            echo "::error::src/dist is stale — run 'npm run build' in runtime/crates/loopsmith-web/web and commit the result"
+            git diff --stat -- runtime/crates/loopsmith-web/src/dist
             exit 1
           fi
           echo "dist is current"
+
+  # README-FOR-DUMMIES.md is named for the person it is for, and that promise is
+  # the kind a document loses one clause at a time. A grade level is a crude
+  # instrument, but the failure it catches is the one this document actually
+  # has: sentences that grew until nobody could follow them.
+  #
+  # Nothing here needs a toolchain, so it is its own job and finishes in
+  # seconds rather than waiting behind a build.
+  docs:
+    name: the plain-English README is still plain English
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Flesch-Kincaid grade 6 or below
+        run: ./tools/check-readability.sh
+
+      # The three package pages are one body, and they are the first thing
+      # anyone sees on npm, PyPI and crates.io. A looser ceiling than the
+      # plain-English guide, on purpose: this page may say `requires_env` and
+      # name a tier, where that one may not. Ten is about two grades above where
+      # the body sits today, so ordinary editing does not trip it and a slide
+      # into release-note prose does.
+      - name: The package pages stay readable too
+        run: ./tools/check-readability.sh packaging/README.body.md 10
+
+      # `assets/architecture.mmd` is the source; the PNG and the text form are
+      # rendered from it. The text is compared byte for byte, because the same
+      # input gives the same bytes on every machine. The PNG is compared by the
+      # hash of the source it was drawn from — a headless browser's output
+      # differs between hosts over font hinting alone, so comparing the image
+      # would fail for reasons that have nothing to do with the diagram.
+      - name: The rendered diagrams match their source
+        run: ./tools/render-diagrams.sh --check
+
+      # npm, PyPI and crates.io all get the same body with their own header.
+      # Three near-copies maintained by hand is what they were, and each one
+      # had drifted somewhere different.
+      - name: The package READMEs match their source
+        run: ./tools/sync-package-readmes.sh --check
+
+      # The worst sentences, whether or not the ceiling held. On a failure this
+      # is the fix list; on a pass it is what the next edit should avoid.
+      - name: The longest sentences in it
+        if: always()
+        run: ./tools/check-readability.sh --report README-FOR-DUMMIES.md
+
+  # The landing page at the root of gh-pages. It is the first thing anyone sees
+  # and the only page of this project a search engine has ever indexed, so the
+  # things that decide both — does it load fast, is it readable, does it say
+  # what it is in a form a machine can read — are checked here rather than
+  # discovered months later in a console nobody opens.
+  #
+  # Blocking, unlike the audit below, because every input is in this repository:
+  # a failure here is something that was changed in `site/`, not somebody else's
+  # disclosure.
+  site:
+    name: the landing page is fast and legible
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: What is this machine
+        run: node --version && npm --version
+
+      - name: Assemble the site
+        run: ./tools/build-site.sh build/site
+
+      # Cheap structural checks first. Lighthouse will not tell you that the
+      # canonical URL is missing or that the sitemap does not parse, and both
+      # are the kind of thing that stays broken for a year.
+      - name: The page says what it is
+        run: |
+          set -eu
+          page=build/site/index.html
+          for tag in \
+            'rel="canonical"' \
+            'name="description"' \
+            'property="og:title"' \
+            'property="og:image"' \
+            'name="twitter:card"' \
+            '"@type": "SoftwareApplication"'
+          do
+            grep -qF "$tag" "$page" || { echo "::error::$page is missing $tag"; exit 1; }
+          done
+          python3 -c 'import xml.dom.minidom; xml.dom.minidom.parse("build/site/sitemap.xml")'
+          grep -q "^Sitemap: " build/site/robots.txt
+          # Every image needs alt text, including the empty alt that marks one
+          # as decorative. A missing attribute is the one a screen reader reads
+          # the filename for.
+          python3 -c 'import re,sys; h=open("build/site/index.html").read(); bad=[t for t in re.findall(r"<img\b[^>]*>", h) if "alt=" not in t]; sys.exit("::error::img without alt: " + "; ".join(bad)) if bad else None'
+          echo "the page is complete"
+
+      # Category scores only, and no preset. A preset asserts a hundred
+      # individual audits, most of which have nothing to say about a static
+      # page, and a check that fails for reasons nobody acts on is a check
+      # that gets switched off.
+      #
+      # SEO and accessibility block, because both are decided entirely by what
+      # is in `site/index.html`. Performance and best practices warn: they
+      # move with whatever a shared runner is doing at the time, and a red
+      # build caused by a busy machine teaches the wrong lesson.
+      - name: Lighthouse
+        run: |
+          set -eu
+          # Not `-s`: that is SPA mode, which would serve index.html for
+          # /sitemap.xml and /robots.txt.
+          npx --yes serve build/site --listen 8099 --no-clipboard &
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:8099/ >/dev/null && break
+            sleep 1
+          done
+          npx --yes @lhci/cli@0.14.x collect --url=http://localhost:8099/ --numberOfRuns=1
+          npx --yes @lhci/cli@0.14.x assert \
+            --assertions.categories:seo=error:0.95 \
+            --assertions.categories:accessibility=error:0.95 \
+            --assertions.categories:best-practices=warn:0.9 \
+            --assertions.categories:performance=warn:0.9
 
   # Deliberately separate and non-blocking. An advisory audit that can fail the
   # merge queue on somebody else's CVE disclosure teaches people to ignore it.

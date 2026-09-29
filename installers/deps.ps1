@@ -11,7 +11,7 @@ function Die        { param($m) Write-Host "[deps] $m" -ForegroundColor Red; exi
 function Test-Have { param($c) $null -ne (Get-Command $c -ErrorAction SilentlyContinue) }
 
 # winget ships with Windows 11 and recent 10; choco is the common alternative.
-# Neither is installed here — a host with no package manager is a decision
+# Neither is installed here - a host with no package manager is a decision
 # somebody made, and this reports it instead of working around it.
 function Install-Pkg {
     param([string]$WingetId, [string]$ChocoId, [string]$Label)

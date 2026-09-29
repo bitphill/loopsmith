@@ -1,318 +1,113 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/v0.3.1/assets/loopsmith-logo-256.png" alt="loopsmith" width="180" />
+  <img src="https://raw.githubusercontent.com/bitphill/loopsmith/main/assets/loopsmith-logo-256.png" alt="loopsmith" width="180" />
   <h1>loopsmith</h1>
-  <p><em>Self-evolving agent loops. The gate is code, so "done" cannot be argued.</em></p>
+  <p><em>Hand a repeating job to an AI. A checker you wrote — not the AI — decides when it is done.</em></p>
 </div>
 
-[![PyPI](https://img.shields.io/pypi/v/loopsmith-cli?logo=python&logoColor=white&label=PyPI&color=3775a9)](https://pypi.org/project/loopsmith-cli/)
+[![PyPI](https://img.shields.io/pypi/v/loopsmith-cli?logo=pypi&logoColor=white&label=PyPI&color=3775A9)](https://pypi.org/project/loopsmith-cli/)
 [![license](https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
 ![platforms](https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A)
-![python](https://img.shields.io/badge/python-%E2%89%A53.8-3775a9?logo=python&logoColor=white)
+![python](https://img.shields.io/badge/python-%E2%89%A53.8-3776AB?logo=python&logoColor=white)
 
 ```bash
-pip install loopsmith-cli
+pipx install loopsmith-cli      # or: pip install loopsmith-cli
 loopsmith doctor
 ```
 
-> **This distribution is a Rust binary, not a Python library.** There is nothing to
-> `import`. It installs a `loopsmith` command. To drive loops from Python, use
-> `subprocess` — its exit codes are its API.
+> **The distribution is `loopsmith-cli`; the command is `loopsmith`.** The
+> shorter name was taken on PyPI. This package is a Rust binary with a thin
+> Python launcher — there is nothing to `import`. The binary for your platform
+> is downloaded on first run, so there is no Rust toolchain involved.
 
-## TL;DR:
-
-You have a job you redo every week and are fussy about — a competitor roundup, a
-lead list, a landing page, a research brief. Write down **what you want** and
-**how anyone would tell it's good**, in one plain text file. loopsmith puts an AI
-to work on it, checks the result, sends it back when it falls short, and stops
-when it passes. It can run on a schedule for weeks without you.
-
-The rule that makes it safe to walk away: **the AI never gets to say "done".** A
-deterministic checker reads the actual files and decides — and it can revoke, so
-a goal that stops being true stops being satisfied.
-
-**Not a developer?** Marketing, sales, research, ops — if you can edit a text
-file, you can run a loop. And if you would rather not open a text file at all,
-two guided front ends build one *for* you by asking questions, one at a time,
-with every answer explained as you go:
-
-- **`loopsmith --web`** — in your browser. It asks whether you are new to this
-  first; say yes and it walks you through the whole thing, starting from a
-  ready-made loop if you want one.
-- **`loopsmith --guided`** — the same questions in the terminal, for a machine
-  with no browser.
-
-Neither one runs anything or spends anything while you answer. You are writing a
-description; nothing happens until you press a button.
-
-### ➜ [START-HERE — README-FOR-DUMMIES.md](https://github.com/bitphill/loopsmith/blob/v0.3.1/README-FOR-DUMMIES.md)
-
-A plain-English guide: one install line, thirteen ready-made loops to copy, the
-six settings you actually edit, and how to leave it running on a schedule.
-
-There is also a generated **code wiki** mapping the crates, the execution engine,
-the gate, and the provider layer — the same pages on two surfaces, whichever you
-prefer to read in:
-
-- [Browsable viewer](https://bitphill.github.io/loopsmith/wiki/#overview) — searchable, with the module map
-- [GitHub Wiki](https://github.com/bitphill/loopsmith/wiki) — the same pages in the repository's Wiki tab
+---
 
 ## What it is
 
-You describe a purpose in a config — goals, how each is checked, what counts as
-success, when to stop, what the loop may never do. loopsmith handles scheduling,
-provider routing, memory, verification, and termination, and can run for weeks
-without you.
+You have a job you redo every week and are fussy about — a competitor roundup,
+a lead list, a landing page, a research brief. You describe it once. loopsmith
+runs it over and over on its own, and stops when a check **you** wrote says it
+is done, or a limit **you** set says enough.
 
-One rule holds the whole design up:
+The part that makes it worth running unattended: whether a goal is done is
+decided by compiled Rust, never by a model. The model does the work; a gate
+that cannot be argued with decides whether the work counts. That gate can also
+take "done" back — delete a required file and a satisfied goal flips straight
+back to unsatisfied.
 
-> **A model must not be the thing that certifies its own completion.**
-
-`goal_satisfied` is written by a deterministic Rust gate and by nothing else, and
-the gate can **revoke**: delete a required artifact and a satisfied goal flips
-back. A system that can only promote is a burndown chart with extra steps.
-
-## Guided setup, in the terminal
+## Sixty seconds
 
 ```bash
-loopsmith --guided        # or: loopsmith guided
+loopsmith doctor                    # what this machine can and cannot do
+loopsmith --web                     # build a loop in your browser
 ```
 
-The same config the browser paints, built by answering one question at a time —
-no browser needed, so it works over SSH and in any bare terminal. Each field
-explains itself and shows its default in `[brackets]`, so pressing Enter all the
-way through gives you something that works. Choices are numbered: you type the
-number, or the name. The agent CLIs already installed on your machine are offered
-as a menu, pre-filled, so a provider is one keystroke rather than a remembered
-command line.
+Not a browser person? `loopsmith --guided` asks the same questions in the
+terminal. Either way, nothing runs and nothing is spent while you answer.
 
-Four commands work at every prompt: `:back` to change the last answer, `:next` to
-keep the default, `:help` to explain the field again, and `:quit` to leave with a
-draft you can resume. Nothing is written until the finished config passes the same
-check `loopsmith validate` runs on a hand-written file, and
-`loopsmith guided --edit <file>` walks through changing a loop you already have.
-
-## The browser UI
+To go straight to a file instead:
 
 ```bash
-loopsmith --web        # or: loopsmith web
+loopsmith loop new --path ~/loops/my-loop --purpose "keep the roundup current"
+loopsmith loop validate ~/loops/my-loop/loop.yaml     # refuses, on purpose
+loopsmith loop plan     ~/loops/my-loop/loop.yaml     # what it would do, and how fast
+loopsmith run start     ~/loops/my-loop/loop.yaml
 ```
 
-Serves `http://127.0.0.1:3000` and opens a tab. Everything the CLI does, done by
-clicking — with every field explained in place, for people who would rather not
-learn a schema before they learn whether the tool is useful.
+**That refusal is the point.** A fresh loop will not run until you tick the
+steps saying you have done the job by hand at least once. Automating a process
+nobody has performed produces the wrong answer faster, and at a scale that is
+harder to undo.
 
-Six steps rather than one long form — Place, Power, Intent, Proof, Work, Ship —
-carrying only the actions that make sense on each, and `⌘K` to reach any step,
-section, action, or example directly.
+## Fifteen worked loops to start from
 
-### Two ways in
+Research, refactoring, traffic, trend tracking, landing pages, lead lists,
+marketing, blogging, cold outreach, agent payments, a small game, idea
+discovery, account watching, a container-isolated refactor, and one that
+proposes improvements to itself. All fifteen are compiled into the binary and
+load with one click in `--web`, or copy one from
+[`config/examples/`](https://github.com/bitphill/loopsmith/tree/main/config/examples).
 
-The first thing `--web` asks is which kind of smith you are, and it remembers the
-answer:
+## Bring your own model
 
-- **an experienced smith** goes straight to the six-step editor above;
-- **a new smith** gets the explanation, then the working examples to start from —
-  or an empty config — and then the **same one-question-at-a-time walk-through
-  `--guided` runs in the terminal**, drawn as cards.
+Every provider is a command template, so anything you can run from a shell can
+serve a loop: Claude Code, Ollama, a Grok CLI, an OpenAI-compatible endpoint
+driven by `curl`, an MCP server over stdio. Adding one is a config edit, never
+a rebuild. Keys are named, never read — `requires_env` says a key must be
+present, and the value goes from your environment to the command without
+passing through loopsmith or its ledger.
 
-The walk-through asks the sections in the order `--guided` asks them: identity,
-providers, goals, validations, stop gates, then each advanced section (A–J)
-behind its own opt-in card. One field per card, with that field's explanation in
-place. A repeating section — goals, validations, nodes — collects entries in a
-single card with a `+`, and stays there until you say **This part is done**. A
-choice is a row of options you can see all of at once rather than a numbered
-list. Loading an example fills the answers in without skipping the questions.
+Cheap models carry the mechanical work; strong models carry judgment. And a
+judge is refused outright if it would run on the same provider as the work it
+is grading, because a model marking its own homework is not a check.
 
-Both modes are two views of one draft: **Expert editor** on any card hands the
-half-filled config to the six-step form, `⌘K` switches back, and the review panel
-watches either way. Nothing is created until the real validator reports no
-errors.
-
-It probes the machine first, so nothing has to be typed from memory: agent CLIs
-on `PATH`, the Ollama models actually pulled, MCP servers already configured by
-your editor, which API keys are set, and which sub-agents are installed. Found
-CLIs become one-click provider cards prefilling a working argv, and a **Test**
-button puts one real prompt through a provider so a wrong flag surfaces now
-rather than in iteration four of an unattended run. The folder button opens your
-operating system's own folder chooser, so no path has to be typed at all.
-
-The right-hand panel re-checks the draft on every keystroke — the same validator,
-planner, and permission derivation the CLI uses, in-process: every problem with
-the field it belongs to, what a run could cost at the ceilings currently set (or
-**unbounded** if none is), the wave schedule and the speedup ceiling no worker
-count beats, and parallel builders that would overwrite each other.
-
-All thirteen examples are compiled into the binary and load with one click. The
-buttons spawn the real `loopsmith` binary and stream its output live, so the
-browser can never drift from the CLI and can never do anything `loopsmith --help`
-does not list. A run belongs to the server, not the page: close the tab and it
-keeps going, reopen and the log picks up from the start.
-
-Binds loopback only, and refuses any request not addressed to it. API keys go to
-your shell profile or your OS secret store — only the variable *name* is ever
-written into a config.
-
-## Five minutes
+## Keeping it alive
 
 ```bash
-pip install loopsmith-cli
-
-# --path must be outside any repo you care about: a loop edits files and writes
-# state, so it does not get pointed at the tool that runs it.
-loopsmith new --path ~/loops/nightly-refactor --purpose "keep the module simple"
-
-cd ~/loops/nightly-refactor
-$EDITOR loop.yaml           # your goals, and how each one is checked
-loopsmith validate loop.yaml
-loopsmith plan     loop.yaml
-./run.sh                    # run.cmd on Windows
+loopsmith run watch     loop.yaml            # stay resident, run on every trigger
+loopsmith run schedule  loop.yaml --install  # hand it to launchd, cron, or Task Scheduler
+loopsmith run status    loop.yaml <run-id>   # what the gate has ruled so far
+loopsmith run ledger    loop.yaml <run-id>   # everything that happened, including why it stopped
 ```
 
-### `validate` fails on purpose
+A run survives a crash: state is a real store on disk, and `loopsmith run
+resume` picks up from the last checkpoint.
 
-```
-error  pre_execution: 2 step(s) not marked done: Run this task manually end to
-       end at least once; Write down what 'done' means in checkable terms.
-       Automating before understanding produces fast, confident garbage
-```
+## Where the rest of it is
 
-That refusal is the most valuable thing the tool does. Do the task by hand once —
-the manual run *is* the spec. Mark each `pre_execution` step `done: true` once you
-actually have.
+- [**README-FOR-DUMMIES.md**](https://github.com/bitphill/loopsmith/blob/main/README-FOR-DUMMIES.md)
+  — the same thing with no jargon, if this page assumed too much
+- [**README.md**](https://github.com/bitphill/loopsmith/blob/main/README.md)
+  — the full version
+- [**HOW-TO-USE.md**](https://github.com/bitphill/loopsmith/blob/main/HOW-TO-USE.md)
+  — every config section, one at a time, with what goes wrong if you skip it
+- [**LOOP-TEMPLATE.md**](https://github.com/bitphill/loopsmith/blob/main/LOOP-TEMPLATE.md)
+  — a blank loop with a note on every field
+- [**Concepts**](https://github.com/bitphill/loopsmith/wiki/Concepts)
+  — every word the config and the error messages use, defined once
+- [**Architecture**](https://github.com/bitphill/loopsmith/wiki/Architecture)
+  · [**Commands**](https://github.com/bitphill/loopsmith/wiki/Commands)
+  · [**Migration 0.3 → 1.0**](https://github.com/bitphill/loopsmith/wiki/Migration-0-3-To-1-0)
+- [**Code wiki**](https://bitphill.github.io/loopsmith/wiki/#overview)
+  — a page per subsystem, generated from the code
 
-## What a config looks like
-
-Ten sections, **A** to **J**: information, the manual work list, goals,
-validations, success criteria, stop gates, schedules, constraints, execution
-guidelines, default skills. YAML or Markdown — the same model either way.
-
-```yaml
-name: nightly-refactor
-description: keep the payments module simple without breaking it
-
-pre_execution:
-  - step: Ran the refactor by hand on one file and kept the diff
-    done: true
-
-goals:
-  - name: simpler
-    description: Cyclomatic complexity down, behaviour unchanged.
-
-validations:
-  - target: simpler
-    name: tests-still-pass
-    mode: objective
-    statement: The suite exits clean.
-    detector:
-      type: script
-      command: ./scripts/check-tests.sh
-      expect_exit: 0
-    blocking: true
-
-success:
-  - target: overall
-    name: all-blocking-pass
-    mode: percentage
-    statement: Every blocking validation passes.
-    threshold: 1.0
-
-stop_gates:
-  max_iterations: 8
-  max_revisions_per_node: 3
-  max_cost_usd: 5.0
-  no_progress_iterations: 3
-
-graph:
-  nodes:
-    - id: refactor
-      role: builder
-      instruction: Simplify one function. State any assumption you had to make.
-      goals: [simpler]
-      isolated: true          # its own git worktree
-    - id: review
-      role: judge
-      instruction: Check the diff against the brief. Pass or fail per check, with evidence.
-      depends_on: [refactor]
-      goals: [simpler]
-      tier: strong
-```
-
-Detectors are `file_exists`, `regex`, `script`, and composites. Only a detector
-can satisfy a goal — a model's opinion of its own work never does.
-
-## While it runs
-
-| Question | Command |
-|---|---|
-| What does the gate say? | `loopsmith status <config> <run-id>` |
-| What happened? | `loopsmith ledger <config> <run-id>` |
-| Why did it stop? | the last line of `logs/<run-id>.log` |
-| What does it want changed about itself? | `loopsmith proposals <config> <run-id>` |
-| Which providers can it reach? | `loopsmith providers <config>` |
-| Will this machine get in the way? | `loopsmith doctor <config>` |
-
-**The loop never edits its own config.** Changes to goals, validations, success
-criteria, and sub-agent adoption are written as *proposals* for a human to apply.
-
-## Providers and BYOK
-
-Every provider is a command template, which is what makes bring-your-own-key
-free: Claude Code, Ollama, a Grok CLI, an OpenAI-compatible endpoint driven by
-`curl`, an MCP server over stdio — all of them are "a program you run with a
-prompt". Adding one is a config edit, never a rebuild.
-
-`requires_env` names variables that must **exist**. loopsmith never reads their
-values, so a key cannot reach a prompt, a log, or the ledger.
-
-> ⚠ Never paste an API key into a chat window, a config file, or an issue. If one
-> ends up somewhere it should not be, rotate it — deleting the message is not
-> enough.
-
-## How this distribution installs the binary
-
-The binary is fetched **on first run**, not during `pip install`, and cached under
-`~/.loopsmith/bin/<version>/` (override with `LOOPSMITH_HOME`).
-
-That is deliberate. A wheel that downloads at install time breaks in every
-environment that installs without a network and runs with one — CI images, Docker
-build stages, locked-down build hosts — and the failure surfaces as an install
-error for a package the user has not tried to use yet.
-
-Every download is **verified against the release's published `SHA256SUMS` before it
-is executed**. Fetching a binary and running it unverified is a supply-chain hole
-with a progress bar.
-
-Prebuilt for:
-
-| Platform | Target |
-|---|---|
-| Linux x86_64 (glibc) | `x86_64-unknown-linux-gnu` |
-| Linux x86_64 (musl, auto-detected) | `x86_64-unknown-linux-musl` |
-| Linux arm64 | `aarch64-unknown-linux-gnu` |
-| macOS Intel | `x86_64-apple-darwin` |
-| macOS Apple silicon | `aarch64-apple-darwin` |
-| Windows x86_64 | `x86_64-pc-windows-msvc` |
-
-Anywhere else, build from source — it is the same program:
-
-```bash
-cargo install loopsmith
-```
-
-## The distribution name
-
-`loopsmith` on PyPI was already registered by an unrelated project, so this
-distribution is `loopsmith-cli`. The installed command is `loopsmith` either way.
-Elsewhere: [`loopsmith`](https://crates.io/crates/loopsmith) on crates.io,
-[`@bitphill/loopsmith`](https://www.npmjs.com/package/@bitphill/loopsmith) on npm,
-and the `bitphill/loopsmith` Homebrew tap.
-
-## Documentation
-
-- [Full README](https://github.com/bitphill/loopsmith#readme)
-- [Section-by-section config reference](https://github.com/bitphill/loopsmith/blob/main/HOW-TO-USE.md)
-- [Architecture and the reasoning behind it](https://github.com/bitphill/loopsmith/blob/main/README-DETAIL.md)
-- [Thirteen worked examples](https://github.com/bitphill/loopsmith/tree/main/config/examples)
-- [Changelog](https://github.com/bitphill/loopsmith/blob/main/CHANGELOG.md)
-
-MIT licensed. © bitphill
+Runs on Linux, macOS, and Windows. MIT licensed.

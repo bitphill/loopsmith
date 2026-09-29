@@ -2,6 +2,7 @@
 
 use super::graph::Tier;
 use super::yes;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -9,7 +10,7 @@ use std::collections::BTreeMap;
 /// and `{tier}` are substituted before spawn. This keeps BYOK support out of
 /// the Rust build entirely: if you can invoke it from a shell, loopsmith can
 /// route to it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderSpec {
     pub id: String,
@@ -43,7 +44,7 @@ pub struct ProviderSpec {
 /// Provider families. Each variant accepts the spellings people actually
 /// write, because a config that rejects `openai` in favour of `open_ai` is a
 /// config that wastes the author's afternoon.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderKind {
     #[serde(
@@ -78,7 +79,7 @@ pub enum ProviderKind {
     Mcp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderRouting {
     #[serde(default)]
