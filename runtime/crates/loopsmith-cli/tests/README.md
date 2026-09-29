@@ -24,7 +24,7 @@ cargo test -p loopsmith --test opt_in     # skips everything gated by default
 The shipped examples cannot be run as they stand, and both reasons are
 deliberate:
 
-1. **Every example refuses.** `pre_execution` steps ship as `done: false`, so
+1. **Every example refuses.** `intent.prerequisites` steps ship as `done: false`, so
    `validate` and `run` both stop. That is the teaching mechanism.
 2. **No detector scripts exist.** The examples name 29 distinct `scripts/…`
    detectors between them and the repository ships none. A missing script

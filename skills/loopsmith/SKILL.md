@@ -1,7 +1,7 @@
 ---
 name: loopsmith
-description: Create and run self-evolving agent loops. Use when the user wants to build a loop — by hand, with the `--guided` terminal wizard, or the `--web` browser UI — scaffold a new purpose-specific loop, run or resume one, check why a loop stopped, or inspect its gate rulings and ledger.
-argument-hint: "--guided | --web | new --path <dir> | run <config> | plan <config> | status <config> <run-id>"
+description: Create and run self-evolving agent loops with loopsmith 1.0. Use when the user wants to build a loop — by hand, with the `--guided` terminal wizard, or the `--web` browser UI — scaffold a new purpose-specific loop, move a 0.3 config to 1.0, run or resume one, check why a loop stopped, answer an escalation, promote what a loop has learned, or inspect its gate rulings and ledger.
+argument-hint: "--guided | --web | loop new --path <dir> | loop migrate <config> | run start <config> | run status <config> <run-id>"
 allowed-tools: Bash Read Write Edit Glob Grep
 disable-model-invocation: true
 ---
@@ -11,7 +11,14 @@ disable-model-invocation: true
 The runner. You type it; it does not fire on its own — a loop is a durable,
 budget-spending thing and starting one should be a decision, not an inference.
 
-For the concepts behind any of this, see the `loopsmith-reference` skill.
+For the concepts behind any of this, see the `loopsmith-reference` skill. For
+every word the config and the error messages use, the wiki's Concepts page
+defines each one once, with the dotted path it lives at.
+
+This describes **1.0**. The commands sit under four nouns — `loop`, `run`,
+`memory`, `skills` — plus `doctor`, `providers`, `web` and `mcp`. A 0.3 spelling
+— a bare `validate` where 1.0 says `loop validate` — still works and prints the
+new one; write the new one.
 
 ## Build the config — three front ends
 
@@ -20,8 +27,8 @@ none can do anything `loopsmith --help` does not list.
 
 ```bash
 loopsmith loop new --path ./loops/<purpose> --purpose "…"   # a starter file to edit by hand
-loopsmith --guided                                     # a terminal wizard, one field at a time
-loopsmith --web                                        # a local browser UI
+loopsmith --guided                                          # a terminal wizard, one field at a time
+loopsmith --web                                             # a local browser UI
 ```
 
 - **`--guided`** (identical: `loopsmith loop guided [DIR] [--edit FILE]`) walks every
@@ -37,11 +44,10 @@ loopsmith --web                                        # a local browser UI
   asking which kind of smith you are: an experienced one lands in the six-step
   editor, a new one gets the explanation, the examples to start from, and then
   the **same one-field-at-a-time walk-through `--guided` runs**, drawn as cards
-  and asked in the same `stages()` order. Both are two views of one draft —
-  "Expert editor" on any card, or `⌘K`, switches between them without losing
-  anything.
-- **`new`** scaffolds the directory and a starter config to edit yourself — the
-  path below.
+  and asked in the same order. Both are two views of one draft — "Expert
+  editor" on any card, or `⌘K`, switches between them without losing anything.
+- **`loop new`** scaffolds the directory and a starter config to edit yourself —
+  the path below.
 
 ## Create a loop
 
@@ -52,33 +58,51 @@ and a quarantine directory, and needs a home of its own.
 loopsmith loop new --path ./loops/<purpose> --purpose "one line on what it is for" --git
 ```
 
-That writes the config (`loop.yaml`, or Markdown), `run.sh` / `resume.sh` and
-their `.cmd` twins, an MCP definition, a permission template, and the `state/`,
-`out/`, `proposals/`, `logs/`, `generated-skills/` directories. `--git` also
-inits a repository with one commit, which is what lets `isolation: { mode: worktree }` nodes
-have a worktree each — without it they share one directory and say so.
+That writes the config (`loop.yaml`, or Markdown with `--markdown`), `run.sh` /
+`resume.sh` and their `.cmd` twins, an MCP definition, a permission template,
+and the `state/`, `out/`, `proposals/`, `logs/`, `generated-skills/`
+directories. `--git` also inits a repository with one commit, which is what
+lets `isolation: { mode: worktree }` nodes have a worktree each — without it
+they share one directory and say so.
 
-Then edit the config. It has eight top-level keys: `name`, `version`,
+Then edit the config. It has nine top-level keys: `name`, `version`,
 `description`, `environment`, `features`, and the four bundles — `intent` (what
 the loop is for), `execution` (how the work gets done), `safety` (what must not
-happen, and when to stop) and `evolution` (how it may change itself).
+happen, and when to stop) and `evolution` (what it may change about itself).
 `LOOP-TEMPLATE.md` documents every section with an example and the reason it
-exists. `loopsmith loop convert <config>` translates the
-config between YAML and Markdown — the same model either way.
+exists. `loopsmith loop convert <config>` translates the config between YAML and
+Markdown — the same model either way.
+
+## Coming from 0.3
+
+A 0.3 config still loads: the loader moves each old top-level key to its 1.0
+home and names every move. To rewrite the file itself:
+
+```bash
+loopsmith loop migrate <config>            # print the 1.0 version; writes nothing
+loopsmith loop migrate <config> --check    # exit non-zero if anything would move
+loopsmith loop migrate <config> --write    # replace the file
+```
+
+`--write` is the only form that edits anything. The migration goes through the
+parsed config, so **comments do not survive it** — for a file whose comments
+matter, read the printed version and move the keys by hand. The mapping, key by
+key, is on the wiki's Migration 0.3 → 1.0 page.
 
 ## The order that works
 
 ```bash
-loopsmith loop validate <path>/loop.yaml
-loopsmith loop plan     <path>/loop.yaml
+loopsmith loop validate    <path>/loop.yaml
+loopsmith loop plan        <path>/loop.yaml
 loopsmith loop permissions <path>/loop.yaml --write .claude/settings.local.json
-loopsmith run start <path>/loop.yaml
+loopsmith run start        <path>/loop.yaml --dry-run     # plan and log, call no provider
+loopsmith run start        <path>/loop.yaml
 ```
 
-`validate` refuses while any `pre_execution` step is unfinished. Do the task by
-hand first and record what you learned — that refusal is the most valuable
-thing this tool does, because a loop wrapped around a process nobody has
-performed produces confident garbage at scale.
+`validate` refuses while any `intent.prerequisites` step is not marked `done`.
+Do the task by hand first and record what you learned — that refusal is the most
+valuable thing this tool does, because a loop wrapped around a process nobody
+has performed produces confident garbage at scale.
 
 `plan` prints waves, the critical path, the parallel fraction, the chosen
 concurrency, and the predicted speedup with its ceiling. Read it before
@@ -90,52 +114,78 @@ as a human checkpoint — those stop regardless of the grant.
 
 ## Keep it running
 
-`run` executes once. `watch` is what makes a loop live for weeks:
+`run start` executes once. `run watch` is what makes a loop live for weeks:
 
 ```bash
-loopsmith run watch <path>/loop.yaml --check      # list triggers, run nothing
-loopsmith run watch <path>/loop.yaml              # until interrupted
-loopsmith run schedule <path>/loop.yaml --install # survive a reboot
+loopsmith run watch    <path>/loop.yaml --check      # list triggers, run nothing
+loopsmith run watch    <path>/loop.yaml              # until interrupted
+loopsmith run schedule <path>/loop.yaml --install    # survive a reboot
 ```
 
-Triggers: `cron` (UTC), `interval`, `file_change`, `goal_satisfied`. A failed
-run logs and the watcher continues — that is the difference between a
+Triggers live under `execution.triggers`: `cron` (UTC), `interval`,
+`file_change`, `goal_satisfied`, and `manual`, which never fires on its own. A
+failed run logs and the watcher continues — that is the difference between a
 scheduler and a one-shot. `watch` refuses a manual-only config rather than
-sleeping forever.
+sleeping forever, and a trigger the loop's own output can fire is capped by
+depth, so a loop cannot drive itself by writing the file it watches.
 
 ## Let it find what works
 
 ```bash
-loopsmith skills search <terms...>            # claudemarketplaces.com + skills.sh
+loopsmith skills search <terms...>            # claudemarketplaces.com + the skills CLI
 loopsmith skills acquire <config> <name>      # one sub-agent into quarantine
-loopsmith skills install <config>             # every section-J default_skill
-loopsmith skills list <config>                # what this loop can see
-loopsmith skills scores <config>              # ranked by gate outcomes
-loopsmith run proposals <config> <run-id>         # what it wants changed
+loopsmith skills install <config>             # everything under execution.default_skills
+loopsmith skills list    <config>             # what this loop can see
+loopsmith skills scores  <config>             # ranked by the gate outcomes that followed
+loopsmith run proposals  <config> <run-id>    # what it wants changed about itself
 ```
 
-Set `skills.explore: true` with `explore_candidates` and the loop trials
-sub-agents it was not told to use, then proposes the ones that correlate with
-satisfied goals. It cannot adopt them itself — apply a proposal by editing the
-config.
+Set `execution.skills.explore: true` with `explore_candidates` and the loop
+trials sub-agents it was not told to use, then proposes the ones that correlate
+with satisfied goals. It cannot adopt them itself — a proposal goes through the
+`evolution` bundle's gates, and adopting one is an edit to the config.
+
+## What it remembers
+
+```bash
+loopsmith memory list    <config> [--namespace semantic|procedural|failure]
+loopsmith memory promote <config> <namespace> <key>
+loopsmith memory forget  <config> <namespace> <key>
+```
+
+Memory outlives a run, in namespaces under `execution.memory`, and a record is
+not reused until its namespace's promotion rule says so: `never`, `automatic`,
+after enough independent corroborations (`repeated_validation`), or only once a
+person says so (`human_approval`). For a `human_approval` namespace,
+`memory promote` is the only way anything is ever reused — which is the point.
+Read a record before promoting it; a loop that promotes what it merely observed
+learns superstition.
 
 ## When a run ends
 
 ```bash
-loopsmith run status <path>/loop.yaml <run-id>    # gate rulings per goal
-loopsmith run ledger <path>/loop.yaml <run-id>    # everything that happened
-loopsmith run resume <path>/loop.yaml <run-id>    # continue from the checkpoint
+loopsmith run status <path>/loop.yaml <run-id>             # gate rulings per goal
+loopsmith run ledger <path>/loop.yaml <run-id>             # everything that happened
+loopsmith run resume <path>/loop.yaml <run-id>             # continue from the checkpoint
+loopsmith run resume <path>/loop.yaml <run-id> --answer    # …having dealt with its escalations
 ```
 
-A non-zero exit means the run did not meet the bar. The stop reason says which
-gate fired:
+A non-zero exit means the run did not meet the bar. The stop reason says why,
+and the state it ended in says whether a plain resume will help:
 
-| Stop reason | What it means | What to do |
+| It ended | State | What to do |
 |---|---|---|
-| all overall success scenarios met | Success | Nothing |
-| iteration cap reached | Ran out of attempts | Read the ledger; usually the verifier or the instruction is wrong, not the cap |
-| no measurable change for N iterations | Spinning | The loop cannot affect what it is being judged on |
-| token / cost / wall-clock budget exhausted | Too expensive | Route mechanical nodes to a cheaper tier before raising the ceiling |
+| all overall success scenarios met | Succeeded | Nothing |
+| iteration cap reached, or a token / cost / wall-clock budget exhausted | Paused, by default | Read the ledger first: usually the verifier or the instruction is wrong, not the ceiling. Route mechanical nodes to a cheaper tier before raising one. Then resume |
+| no measurable change for N iterations | Blocked | The loop cannot affect what it is judged on. Change the config; resuming unchanged stalls the same way |
+| a node or a gate needs a person | Escalated | Answer what it asked, then `run resume --answer`. A plain resume leaves escalations open and their nodes held |
+| an approval gate has not passed | AwaitingApproval | Satisfy the approval rule, then resume |
+| a rollback gate failed | RolledBack | That iteration's progress was discarded; its spend was not. The ledger says which rule |
+| a safety violation, an entry gate, an unschedulable graph | Failed | Fix the cause. It is never retried, and a resume will not help |
+
+A run that stopped on a ceiling or went quiet reports **Escalated** instead
+whenever it has questions open — that is what it is actually waiting on. What
+each failure class does is set per class under `safety.recovery`.
 
 Raising a ceiling to make a run pass is almost always the wrong fix. The gate
 is the thing telling you the truth.
@@ -168,7 +218,7 @@ never exits non-zero — reporting a constraint is not the machine being unusabl
 
 ```bash
 loopsmith loop convert <config> [--out f] [--to-yaml]   # YAML <-> Markdown, same model
-loopsmith run prune   <config>                          # remove the git worktrees this loop created
+loopsmith run prune    <config>                         # remove the git worktrees this loop created
 ```
 
 ## Expose the control plane over MCP
@@ -183,9 +233,12 @@ There is deliberately no tool for marking a goal satisfied.
 ## Sanity rules worth keeping
 
 - Pin judge nodes to a different provider family than the builder they judge.
-  A shared model shares its blind spots, and the gate refuses a self-judgment
-  outright.
-- Mark parallel builders `isolated: true` or they clobber each other's files.
-- Set a budget ceiling. Every one of them.
+  A shared model shares its blind spots, and with
+  `execution.providers.enforce_judge_independence` on, the gate refuses a
+  self-judgment outright.
+- Give parallel builders `isolation: { mode: worktree }` — or `container`, which
+  degrades to a worktree where Docker is absent — or they clobber each other's
+  files.
+- Set a budget ceiling under `safety.gates.stop`. Every one of them.
 - Read `proposals/` after a run. That is where the loop asks to change its own
   goals, and it cannot apply those itself.

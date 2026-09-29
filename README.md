@@ -8,7 +8,7 @@
     <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" /></a>
     <img alt="rust" src="https://img.shields.io/badge/rust-1.85%2B-C1272D?logo=rust&logoColor=white" />
     <img alt="platforms" src="https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A" />
-    <img alt="tests" src="https://img.shields.io/badge/tests-622%20passing-2A5A8A" />
+    <img alt="tests" src="https://img.shields.io/badge/tests-623%20passing-2A5A8A" />
   </p>
   <p>
     <a href="https://crates.io/crates/loopsmith"><img alt="crates.io" src="https://img.shields.io/crates/v/loopsmith?logo=rust&logoColor=white&label=crates.io&color=e6522c" /></a>
@@ -273,11 +273,11 @@ loopsmith loop validate loop.yaml && loopsmith loop plan loop.yaml && ./run.sh  
 absolute paths filled in. Both script flavours are written on every platform, so
 the directory still starts after it moves to a different kind of machine.
 
-`validate` **fails on purpose** until every `pre_execution` step says
+`validate` **fails on purpose** until every `intent.prerequisites` step says
 `done: true`:
 
 ```
-error  pre_execution: 2 step(s) not marked done: Run this task manually end to
+error  intent.prerequisites: 2 step(s) not marked done: Run this task manually end to
        end at least once; Write down what 'done' means in checkable terms.
        Automating before understanding produces fast, confident garbage
 ```
@@ -300,9 +300,10 @@ configuration that converged, the gate's evidence, and the artifacts.
 
 ## Configs
 
-Ten sections, **A** to **J** — information, the manual work list, goals,
-validations, success, stop gates, schedules, constraints, execution guidelines,
-default skills. Write YAML or Markdown; they are the same model, and
+Four bundles — `intent` (what the loop is for and the manual steps done first),
+`execution` (goals, providers, triggers, memory, skills), `safety` (checks, gates,
+recovery, what must not change) and `evolution` (what it may change about
+itself). Write YAML or Markdown; they are the same model, and
 `loopsmith loop convert` translates either way.
 
 [Section reference](HOW-TO-USE.md) · [Template](LOOP-TEMPLATE.md) ·
@@ -314,7 +315,7 @@ default skills. Write YAML or Markdown; they are the same model, and
 ## Examples
 
 Fifteen worked loops in [`config/examples/`](config/examples/), each as a `.yaml`
-and an equivalent `.md`, all shipping with `pre_execution` unfinished. Annotated
+and an equivalent `.md`, all shipping with `intent.prerequisites` unfinished. Annotated
 index in [the wiki](https://github.com/bitphill/loopsmith/wiki/Examples).
 
 **Build** [`refactor`](config/examples/refactor-loop.yaml) ·
@@ -347,7 +348,7 @@ loopsmith run watch    ~/loops/nightly-refactor/loop.yaml            # stay resi
 loopsmith run schedule ~/loops/nightly-refactor/loop.yaml --install  # hand it to the OS
 ```
 
-Triggers are declared in section **G**: `cron`, `interval`, `file_change`,
+Triggers are declared under `execution.triggers`: `cron`, `interval`, `file_change`,
 `goal_satisfied`, or `manual`. Cron is evaluated in UTC. `schedule` uses whichever
 scheduler this machine actually has, not whichever its OS is famous for. Every run
 writes a plain-text log to `logs/run-<id>.log` beside the queryable ledger, so

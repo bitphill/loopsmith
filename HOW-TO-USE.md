@@ -120,7 +120,7 @@ nightly-refactor/
 └── generated-skills/    auto-acquired sub-agents awaiting promotion
 ```
 
-The scaffolded config ships with `pre_execution` steps set to `done: false`, so
+The scaffolded config ships with `intent.prerequisites` steps set to `done: false`, so
 `loopsmith loop validate` **fails on purpose** until you have done the manual run.
 
 ---
@@ -867,7 +867,7 @@ episodes are rejected rather than stored.
 | `NodeFailed: no provider available` | Cascade exhausted | `loopsmith providers` — usually a missing binary or env key |
 | `judgment refused: judge and builder both ran on X` | Judge was not independent | Pin the judge to another provider |
 | `no blocking validation targets X` | Target can never be satisfied | Add a blocking validation |
-| Validation error on `pre_execution` | Manual run not done | Do it. This is the point |
+| Validation error on `intent.prerequisites` | Manual run not done | Do it. This is the point |
 
 A run that stops without success exits non-zero and leaves the full history in
 the ledger.

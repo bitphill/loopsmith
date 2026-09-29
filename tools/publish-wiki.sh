@@ -33,6 +33,13 @@
 # cross-reference in it 404s — which is the failure mode worth automating away,
 # because it looks like success until someone clicks.
 #
+# The project's front door is the site, not the Wiki tab. GitHub offers no way
+# to point that tab elsewhere — no setting, and a wiki page cannot redirect,
+# because the renderer strips scripts and meta tags. So the tab stays, as a
+# signpost: every page carries a `_Header.md` banner to the site, and Home
+# opens with it. The pages themselves stay too, because links to them already
+# exist in the READMEs, the crates, and the release notes.
+#
 # Neither surface is versioned with the release tags. Both always show the
 # newest content. That is why the READMEs link to them rather than duplicating
 # them: a README is pinned per version and must not disagree with itself.
@@ -42,7 +49,8 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT="$PWD"
 SRC="$ROOT/.gitnexus/wiki"
 HAND="$ROOT/wiki"
-VIEWER="https://bitphill.github.io/loopsmith/wiki/"
+SITE="https://bitphill.github.io/loopsmith/"
+VIEWER="${SITE}wiki/"
 WIKI_REMOTE="https://github.com/bitphill/loopsmith.wiki.git"
 
 DRY=0; DO_PAGES=1; DO_WIKI=1
@@ -138,10 +146,11 @@ it overwrites that page on the first push."
 
   find "$TMP/wiki" -maxdepth 1 -name '*.md' -delete
 
-  SRC="$SRC" HAND="$HAND" DST="$TMP/wiki" VIEWER="$VIEWER" python3 - <<'PY'
+  SRC="$SRC" HAND="$HAND" DST="$TMP/wiki" VIEWER="$VIEWER" SITE="$SITE" python3 - <<'PY'
 import os, re
 
 src, dst, viewer = os.environ['SRC'], os.environ['DST'], os.environ['VIEWER']
+site = os.environ['SITE']
 hand = os.environ['HAND']
 
 # Two sources, one set of pages. A generated page is named after the subsystem
@@ -198,13 +207,22 @@ index = "\n".join(f"- [{titles[p]}]({p})" for p in pages)
 home = os.path.join(dst, 'Home.md')
 body = open(home).read()
 open(home, 'w').write(
-    f"> **Prefer the rendered viewer?** [{viewer}]({viewer}) has the same pages with\n"
-    "> search and a navigation tree. This wiki is the same content, page per page.\n\n"
-    + body + "\n\n## All pages\n\n" + index + "\n")
+    f"# [loopsmith's documentation lives at {site.split('//')[1].rstrip('/')} →]({site})\n\n"
+    f"**[Open the site]({site})** for the introduction, installation, and the\n"
+    f"[code wiki with search]({viewer}). The pages below are the same content, kept\n"
+    "here so that links already pointing at them still work.\n\n"
+    "## All pages\n\n" + index + "\n\n---\n\n" + body + "\n")
+
+# Shown above every page, including ones reached by a deep link that never
+# passes through Home.
+open(os.path.join(dst, '_Header.md'), 'w').write(
+    f"> 📖 **loopsmith's documentation lives at [{site.split('//')[1].rstrip('/')}]({site}) →** "
+    "This wiki mirrors it so existing links keep working.\n")
 
 open(os.path.join(dst, '_Sidebar.md'), 'w').write(
-    f"**[loopsmith]({viewer})**\n\n"
-    f"[Repository](https://github.com/bitphill/loopsmith) · [Rendered viewer]({viewer})\n\n"
+    f"**[loopsmith]({site})**\n\n"
+    f"[Documentation site]({site}) · [Code wiki]({viewer}) · "
+    "[Repository](https://github.com/bitphill/loopsmith)\n\n"
     "---\n\n[Home](Home)\n\n" + index + "\n")
 
 open(os.path.join(dst, '_Footer.md'), 'w').write(
