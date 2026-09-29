@@ -34,6 +34,28 @@ function Write-Log  { param($m) Write-Host "[loopsmith] $m" -ForegroundColor Cya
 function Write-Warn { param($m) Write-Host "[loopsmith] $m" -ForegroundColor Yellow; Add-Content $LogFile "[warn] $m" }
 function Die        { param($m) Write-Host "[loopsmith] $m" -ForegroundColor Red;    Add-Content $LogFile "[error] $m"; exit 1 }
 
+# Run a native command with everything it prints copied to the log, and die if
+# it exits non-zero. The exit code is the verdict; stderr is just more output.
+#
+# Windows PowerShell 5.1 turns each line a native command writes to stderr into
+# an error record once stderr is redirected, and under 'Stop' the first of those
+# ends the script. cargo and git both report progress on stderr, so a build that
+# had succeeded died on cargo's own "Finished" line. 'Continue' for the length
+# of the call, and each record back to plain text so the log reads as output
+# rather than as a wall of NativeCommandError.
+function Invoke-Logged {
+    param([string]$What, [string]$Exe, [string[]]$Arguments)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Exe @Arguments 2>&1 | ForEach-Object { "$_" } | Tee-Object -Append -FilePath $LogFile
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    if ($code -ne 0) { Die "$What failed with exit code $code" }
+}
+
 Write-Log "host: windows $env:PROCESSOR_ARCHITECTURE"
 
 $Deps = Join-Path $ScriptDir 'installers\deps.ps1'
@@ -62,14 +84,13 @@ if (Test-Path (Join-Path $RepoRoot $Manifest.build_dir)) {
     $SrcDir = Join-Path $InstallDir 'src'
     Write-Log "cloning $RepoUrl ($Branch)"
     if (Test-Path $SrcDir) { Remove-Item $SrcDir -Recurse -Force }
-    git clone --depth 1 --branch $Branch $RepoUrl $SrcDir 2>&1 | Tee-Object -Append -FilePath $LogFile
+    Invoke-Logged -What 'git clone' -Exe 'git' -Arguments @('clone', '--depth', '1', '--branch', $Branch, $RepoUrl, $SrcDir)
 }
 
 Write-Log 'building release binary - a few minutes on a cold cache'
 Push-Location (Join-Path $SrcDir $Manifest.build_dir)
 try {
-    & cargo @($Manifest.build_args) 2>&1 | Tee-Object -Append -FilePath $LogFile
-    if ($LASTEXITCODE -ne 0) { Die "cargo build failed with exit code $LASTEXITCODE" }
+    Invoke-Logged -What 'cargo build' -Exe 'cargo' -Arguments $Manifest.build_args
 } finally {
     Pop-Location
 }
