@@ -98,8 +98,14 @@ jobs:
             echo "::error::a --no-default-features build pulls in tokio"; exit 1
           fi
 
+      # `--no-fail-fast`: cargo otherwise stops at the first test binary that
+      # fails, and every binary after it goes unrun and unreported. The first
+      # time 1.0 reached Windows, three of thirty-five binaries ran; a second
+      # failure was sitting behind the first, and it took another full cycle to
+      # learn that. The matrix already refuses to let one OS hide another — this
+      # is the same rule inside a leg.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
       # The README's tests badge is the one number in its badge row that
       # shields.io does not read live, and it said 415 while the suite grew to

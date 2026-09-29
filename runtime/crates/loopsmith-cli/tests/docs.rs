@@ -69,6 +69,12 @@ fn every_yaml_block_a_reader_might_copy_is_parseable() {
     assert!(checked > 10, "only {checked} blocks checked");
 }
 
+/// Text as the repository holds it: line endings are a property of the
+/// checkout, not of what was committed.
+fn lf(text: String) -> String {
+    text.replace("\r\n", "\n")
+}
+
 /// Every document that draws the architecture draws the same one.
 ///
 /// `assets/architecture.mmd` is the source and `tools/render-diagrams.sh`
@@ -82,13 +88,16 @@ fn every_yaml_block_a_reader_might_copy_is_parseable() {
 #[test]
 fn the_architecture_diagram_is_the_same_one_everywhere() {
     let root = repo_root();
-    let canonical = std::fs::read_to_string(root.join("assets/architecture.txt"))
-        .expect("assets/architecture.txt — run ./tools/render-diagrams.sh");
+    // Both sides go through `lf`: git stores these files with LF, and a Windows
+    // checkout with `core.autocrlf` hands them over as CRLF, which made every
+    // copy look stale there while being byte-identical in the repository.
+    let canonical = lf(std::fs::read_to_string(root.join("assets/architecture.txt"))
+        .expect("assets/architecture.txt — run ./tools/render-diagrams.sh"));
     let canonical = canonical.trim_end();
 
     let mut drawn = 0;
     for doc in ["HOW-TO-USE.md", "wiki/Architecture.md"] {
-        let text = std::fs::read_to_string(root.join(doc)).unwrap_or_else(|e| panic!("{doc}: {e}"));
+        let text = lf(std::fs::read_to_string(root.join(doc)).unwrap_or_else(|e| panic!("{doc}: {e}")));
         let block = yaml_blocks_of(&text, "```text")
             .into_iter()
             .find(|(_, body)| body.starts_with("INVOCATION"))

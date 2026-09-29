@@ -262,7 +262,13 @@ fn the_committed_schema_matches_the_one_the_model_generates() {
         return;
     }
 
-    let committed = std::fs::read_to_string(schema_path()).expect("schema is readable");
+    // Compared as the repository holds it. Git stores the schema with LF, and
+    // a Windows checkout with `core.autocrlf` hands it over as CRLF, which
+    // failed this test on every Windows runner against a schema that was
+    // byte-identical in the repository.
+    let committed = std::fs::read_to_string(schema_path())
+        .expect("schema is readable")
+        .replace("\r\n", "\n");
     assert!(
         committed == rendered,
         "config/loop.schema.json is stale. Regenerate it with:\n  \
