@@ -90,6 +90,17 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # The README's tests badge is the one number in its badge row that
+      # shields.io does not read live, and it said 415 while the suite grew to
+      # 620. macOS only, because that is where every test in the suite exists:
+      # one is macOS-only and one Unix-only, so Linux lists one fewer and Windows
+      # fewer still. The test binaries are already built by the step above, so
+      # listing them costs seconds.
+      - name: The tests badge matches the suite
+        if: runner.os == 'macOS'
+        working-directory: .
+        run: ./tools/sync-test-count.sh --check
+
       - name: Release build
         run: cargo build --release
 
