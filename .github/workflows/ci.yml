@@ -80,10 +80,21 @@ jobs:
       # tree. That promise now crosses a crate seam — the wizard's `probe`
       # feature is what keeps tokio out — so a workspace build, which unifies
       # features, cannot see it break. This build can.
+      #
+      # `shell: bash` because this is bash, and on Windows the default is
+      # PowerShell, which refuses `if cargo tree …; then` at parse time — so
+      # the step failed before clippy ran, and hid every later step on that leg.
+      # The tree is captured before it is searched: explicit `shell: bash` runs
+      # under `pipefail`, and `cargo tree | grep -q` can then read as "no tokio"
+      # precisely when there is one, because grep exits on the first match and
+      # cargo tree takes SIGPIPE. The Homebrew tarball guard died of the same
+      # thing at 0.3.0.
       - name: Clippy, minimal build (no web, no async runtime)
+        shell: bash
         run: |
           cargo clippy -p loopsmith --no-default-features --all-targets -- -D warnings
-          if cargo tree -p loopsmith --no-default-features -e normal | grep -q ' tokio '; then
+          tree="$(cargo tree -p loopsmith --no-default-features -e normal)"
+          if grep -q ' tokio ' <<<"$tree"; then
             echo "::error::a --no-default-features build pulls in tokio"; exit 1
           fi
 
