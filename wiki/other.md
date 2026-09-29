@@ -1,236 +1,226 @@
 # Other
 
-# The `loopsmith-cli` Integration Suite
+# The Stress Harness (`loopsmith-cli/tests`)
 
-`runtime/crates/loopsmith-cli/tests/` is the only place in the workspace where the shipped configs are executed by the real binary. Every crate underneath it has unit tests that prove a component in isolation; this suite proves the components work *together*, under a real iteration loop, against the same `config/examples/*.yaml` files users are handed.
+Integration tests for the `loopsmith` binary. Every crate in the runtime has unit tests; this directory covers what unit tests structurally cannot — whether the pieces work *together*, under a real iteration loop, driven through the real binary, against the configs users are actually handed.
 
 ```sh
-cargo test -p loopsmith --test stress    # the iteration loop
-cargo test -p loopsmith --test surface   # subcommands
-cargo test -p loopsmith --test compat    # portability of generated scripts
-cargo test -p loopsmith --test opt_in    # network / money — skips by default
+cargo test -p loopsmith --test stress     # the iteration loop
+cargo test -p loopsmith --test surface    # subcommands
+cargo test -p loopsmith --test compat     # portability of generated loops
+cargo test -p loopsmith --test opt_in     # gated: network and money
 ```
 
-| File | Role |
+| File | Covers |
 |---|---|
 | `harness/mod.rs` | The `Fixture` builder. No tests of its own. |
 | `stress.rs` | Phases, isolation, stop gates, proposals, resume, export |
-| `surface.rs` | `new --config-stdin`, `convert`, `watch`, `schedule`, `skills install`, report commands |
+| `surface.rs` | Subcommands that were implemented and never executed |
 | `compat.rs` | What a generated loop assumes about the machine it lands on |
-| `opt_in.rs` | Anything that clones, calls a model, or needs a container daemon |
+| `opt_in.rs` | Anything that reaches the network or spends money |
 
-## Why a fixture layer exists
+---
 
-The shipped examples deliberately cannot be run as they stand, and both reasons are load-bearing features rather than defects:
+## Why a fixture exists
 
-1. **Every example refuses.** `pre_execution` steps ship with `done: false`, so `validate` and `run` both stop. That is the teaching mechanism — the user is meant to read the prerequisites and tick them off.
-2. **No detector scripts exist.** The examples name 29 distinct `scripts/…` detectors between them and the repository ships none. A missing script becomes a detector *error*, which the gate converts to a failed check — correct behaviour, and useless for exercising anything past the first gate.
+The shipped examples under `config/examples/` **cannot be run as they stand**, and both reasons are deliberate design rather than defects:
 
-`Fixture` therefore rewrites a **copy** in a scratch directory. Nothing under `config/examples/` is ever mutated.
+1. **Every example refuses.** `pre_execution` steps ship as `done: false`, so `validate` and `run` both stop. That refusal is the teaching mechanism.
+2. **No detector scripts exist.** The examples name 29 distinct `scripts/…` detectors between them; the repository ships none. A missing script becomes a detector *error*, which the gate converts to a failed check — correct behaviour, and useless for exercising anything past the first gate.
 
-## `Fixture`: the builder
-
-```rust
-pub struct Fixture {
-    pub dir: PathBuf,      // scratch loop root
-    pub config: PathBuf,   // <dir>/loop.yaml
-    pub cfg: LoopConfig,   // the rewritten config, in memory
-}
-```
-
-Two constructors:
-
-- `Fixture::example(name, tag)` — loads `config/examples/<name>.yaml`
-- `Fixture::from_yaml(text, tag)` — inline config for shapes no example has
-
-Both route through `from_yaml`, which parses with `loopsmith_core::parse_str`, then applies two non-negotiable rewrites before anything reaches disk:
-
-- **`unblock`** marks every `cfg.intent.prerequisites` step `done: true`.
-- **`deterministic_providers`** replaces every provider with `printf "%s" <judge payload>` — `ProviderKind::Byok`, no model, `requires_env` cleared, `usage_regex` dropped.
-
-The rest is opt-in, chained fluently. Each stage returns `Self`:
+`Fixture` therefore rewrites a **copy** in a scratch directory. Nothing under `config/examples/` is ever touched.
 
 ```mermaid
 graph LR
-  A["from_yaml / example<br/>unblock + deterministic_providers"] --> B["stub_scripts(Stubs)"]
-  B --> C["satisfy_files / write_artifacts"]
-  C --> D["satisfy_metrics / metrics"]
-  D --> E["git_init"]
-  E --> F["run_loop(run_id)"]
-  F --> G["store() · log_text() · export_dir()"]
+  E["config/examples/*.yaml"] -->|read| P["parse_str"]
+  P --> U["unblock<br/>steps done"]
+  U --> D["deterministic_providers<br/>printf + judge block"]
+  D --> W["scratch dir<br/>loop.yaml"]
+  W --> S["stub_scripts<br/>satisfy_files<br/>satisfy_metrics<br/>git_init"]
+  S --> R["run_loop → real binary"]
+  R --> A["ledger · run log · summaries · export"]
 ```
 
-`cfg` is public and mutable. Anything changed in place needs `write_config()` afterwards — nothing else notices the change, because the binary reads the file, not the struct.
+### The builder
 
-### `stub_scripts(Stubs)`
+`Fixture::example(name, tag)` loads a shipped example; `Fixture::from_yaml(text, tag)` takes config text directly, for shapes no example has. Both funnel through `from_yaml`, which parses, applies `unblock` and `deterministic_providers`, and writes `loop.yaml` into a temp directory named from `tag`.
 
-Generates one executable stub for every path `script_detectors()` returns. `Stubs` is the axis that reaches the interesting states:
+The remaining methods are chained opt-ins, each returning `Self`:
 
-| Variant | Behaviour | Reaches |
-|---|---|---|
-| `Pass` | `exit ${STUB_EXIT:-0}` | success path, export |
-| `Fail` | `exit ${STUB_EXIT:-1}` | `no_progress_iterations`, randomness gate, `max_revisions_per_node` |
-| `PassFrom(n)` | fails, then passes from iteration `n` | progress that actually moves |
+- **`stub_scripts(Stubs)`** — writes an executable stub for every `scripts/…` path the config names. `Stubs::Pass` exercises the success path and the export; `Stubs::Fail` reaches `no_progress_iterations`, the randomness gate, and `max_revisions_per_node`. `Stubs::PassFrom(n)` fails until iteration `n` using a `.stub-count` file in the loop root, because the loop cannot change its own environment between iterations.
+- **`satisfy_files()` / `write_artifacts(body)`** — creates every path a `file_exists` detector points at. `satisfy_files` uses `ARTIFACT_BODY`, which carries a URL and a `post_id:` line; see the trap below.
+- **`satisfy_metrics()` / `metrics(&[(name, value)])`** — writes `metrics.json`, where threshold detectors read from. The no-argument form derives a satisfying value per `CompareOp` via `satisfying_value`.
+- **`git_init()`** — makes the loop directory a repository *with a commit*, so `isolated: true` produces a real worktree. A repository with no `HEAD` makes `git worktree add` refuse to branch from nothing.
 
-`PassFrom` uses a `.stub-count` file in the loop root rather than an environment variable, because the loop cannot change its own environment between iterations while the gate re-runs every detector.
-
-On Windows the same stubs are written as `.cmd` (there is no shebang handling) **and** the config's detector commands are repointed from `foo.sh` to `foo.cmd`. That rewrite is honest: it is exactly what a user has to do there, which is why `compat.sh` says so.
-
-`script_detectors()` collects from `safety.checks` **and** from `safety.gates.{entry,approval,rollback}`. A gate is a detector too, and an entry gate whose script is missing stops the run while it is still validating — before `RunStarted` reaches the ledger, so the failure surfaces as "a run must open the ledger" and says nothing about the missing file.
-
-### Artifacts and metrics
-
-`satisfy_files()` delegates to `write_artifacts(ARTIFACT_BODY)`. The body is not arbitrary:
-
-```
-written by the stress harness
-source: https://example.invalid/reference
-post_id: 1
-```
-
-The files a `file_exists` detector names are the same files a `regex_match` detector reads — evidence collection registers them under their stem — so the default body carries a URL and a `post_id:` line, the tokens the shipped examples look for. Use `write_artifacts(body)` when a scenario needs something specific; `a_regex_detector_reads_the_file_the_loop_produced` uses `write_artifacts("no links in here at all\n")` for the negative half.
-
-`satisfy_metrics()` writes `metrics.json` covering every `Detector::Threshold` in the config, choosing a value with `satisfying_value(op, want)` per `CompareOp`. `metrics(&[(name, value)])` writes exact values when a threshold should fail on purpose.
-
-### `git_init()`
-
-Makes the loop directory a repository so `isolated: true` produces a real worktree instead of degrading to the shared directory. It sets a local identity, disables `commit.gpgsign`, writes a `.gitignore` for `state/` and `logs/`, and makes one commit — `git worktree add` refuses to branch from a repository with no `HEAD`.
-
-Worth doing deliberately in both directions: `isolation_degrades_to_shared_outside_a_repository` and `isolation_is_real_inside_a_repository` are the same example with and without this call.
+Mutating `cfg` in place is the normal way to reshape a scenario (`cap`, `starve`, pushing a provider), but **nothing notices until you call `write_config()`**.
 
 ### Running and reading back
 
-`LOOPSMITH` is `env!("CARGO_BIN_EXE_loopsmith")` — Cargo builds the binary for the integration test and hands over the path, so there is no `cargo run` anywhere and no chance of driving a stale build.
+`run(args)` and `run_with_env(args, env)` invoke `LOOPSMITH` — the path Cargo hands over in `CARGO_BIN_EXE_loopsmith`, so there is no `cargo run` here and no chance of driving a stale build. `run_loop(run_id, env)` is the common case: `run loop.yaml --run-id <id> --no-acquire`.
 
-- `run(args)` / `run_with_env(args, env)` — arbitrary subcommand in `dir`
-- `run_loop(run_id, env)` — `run loop.yaml --run-id <id> --no-acquire`
-- `store()` — opens the sled ledger via `loopsmith_memory::open(dir/state)`
-- `log_text(run_id)` — `logs/<run-id>.log`
-- `export_dir()` — `<cfg.name>-success/`
+Assertions then read the **record**, not stdout:
 
-## Assertions read artifacts, not stdout
+| Accessor | Reads |
+|---|---|
+| `store()` | the sled ledger, episodes, goal states, summaries, proposals, checkpoint, skill trials |
+| `log_text(run_id)` | `logs/<run-id>.log` |
+| `export_dir()` | `<config name>-success/` |
 
-Stdout is a report. The record is the sled ledger, the run log, `store.summaries()`, `store.goal_states()`, `store.checkpoint()`, `store.proposals()`, `store.skill_trials()`, and the presence or absence of the export directory.
+Stdout is a report. One invariant recurs and is worth keeping: the run log and the ledger are written through a single call, so they must always hold the same number of events. A divergence means one of the two write paths grew a branch the other did not — `every_example_completes_an_iteration_and_leaves_a_consistent_record` asserts exactly that.
 
-One assertion recurs and earns its place:
+---
 
-```rust
-assert_eq!(log.lines().count(), ledger.len(),
-    "{name}: the run log and the ledger disagree about what happened");
+## Harness-authoring traps
+
+These are not stylistic preferences. Each one has produced a failure that reads like a bug somewhere else.
+
+**Give every fixture a distinct tag.** Temp directories are named from it and the suite runs threaded, so two concurrent tests sharing a tag collide on the sled lock — with nothing in the error pointing at the tag. Loops over `all_examples()` use `&format!("all-{i}")` for this reason.
+
+**The store cannot be opened while the binary under test is running**, and the handle must be `drop`ped before its directory is removed. A store opened around a `Command` call reports a lock error that reads like a backend bug. Every test in `stress.rs` ends `drop(store); f.cleanup();`.
+
+**Providers keep their ids when they are swapped for stubs.** `deterministic_providers` rewrites `kind`, `command`, `args`, and clears `requires_env`, but leaves `id` alone — `enforce_judge_independence` compares ids to require that a judge sits on a different provider from the builder it reviewed. Rewriting the ids would quietly switch that check off.
+
+**A judge PASS with no evidence is demoted to FAIL.** `judge_payload` emits `VERDICT/STANDARD/EVIDENCE/SCORE` for every `Detector::Judge` in the config; the `EVIDENCE:` line is mandatory or every subjective validation becomes permanently unsatisfiable. `failing_judge_payload` is the inverse, and `set_provider_output` points one id at a different payload so a judge can disagree while builders carry on.
+
+**`satisfy_files` writes a body, not a placeholder.** The files a `file_exists` detector names are the same files a `regex_match` detector reads — evidence collection registers them under their stem — so the default body carries the tokens the shipped examples look for. Without them the file exists, `file_exists` passes, and the regex on the same file fails.
+
+**A detector script runs with no shell and no timeout.** `command` is argv[0] and `args` are literal, so a stub needs a shebang and must not hang.
+
+---
+
+## Windows stubbing
+
+Windows has no shebang handling, so a `#!/bin/sh` stub is unrunnable and every stubbed detector fails to spawn. `stub_scripts` writes a `.cmd` instead and `point_at_cmd_stubs` repoints the config's detector commands at it. Rewriting rather than skipping keeps the iteration loop covered there, and the rewrite is honest — it is exactly what a user has to do.
+
+The subtlety is *which* detectors get repointed. `detectors` and `detectors_mut` walk checks **and** every entry, approval, and rollback gate rule. These were two separate lists once, and only the first learned about gates: on Windows an entry gate went on naming the `.sh` whose `.cmd` replacement had been written, the run failed while still validating, and the only symptom was `a run must open the ledger` — because `RunStarted` had not reached the ledger yet. Keep `detectors` and `detectors_mut` side by side; they must have the same order and the same members.
+
+`point_at_cmd_stubs` is a plain function of the config rather than a Windows-gated branch, so `the_windows_stubs_are_named_by_every_detector_they_replace` runs on **every** OS and fails locally first. It also asserts `gate_scripts > 0`, so the test cannot pass while proving nothing about the half of the list that broke.
+
+---
+
+## What `stress.rs` pins
+
+Two scenario shapers sit at the top and appear throughout:
+
+- `cap(cfg, n)` — sets `max_iterations`, zeroes `no_progress_iterations`, clears the randomness threshold. Without it a scenario sits in a long example's default ceiling of ten iterations and three hours.
+- `starve(cfg, target)` — rewrites every validation on a target to `command: "false"`, so a run keeps iterating instead of succeeding on its first pass. Starving `overall` while leaving the per-goal checks satisfiable is how the phase-ordering tests keep a run alive long enough to observe.
+
+Two inline configs carry the rest: `NEVER_SATISFIED` (one node, nothing satisfiable — the base for proposals, resume, and perturbation), plus `ISOLATED_WRITER` and `ISOLATED_CHAIN` for the worktree tests.
+
+The scenarios group into six areas.
+
+**The whole set, twice.** `every_example_completes_an_iteration_and_leaves_a_consistent_record` runs all 13 examples with everything satisfiable; `every_example_survives_a_run_where_nothing_passes` runs them with no stubs, no artifacts, no metrics. A detector that fails closed is correct; a runtime that panics on one is not. This pair is the cheapest signal that a config change broke the runtime rather than the schema.
+
+**Phases.** `phases.rs` is unit-tested against synthetic verdicts. `phases_open_one_at_a_time_across_a_real_run` is the first time the ordering is asserted against verdicts the gate actually produced, walking `traffic-loop`'s four linear phases and checking that each node's *first* iteration strictly follows its predecessor's. `a_phase_that_never_satisfies_its_goals_never_opens_the_next_one` covers the negative: no timeout, no eventual give-up that lets later work start anyway.
+
+**Isolation.** Outside a repository, `isolated: true` degrades to the shared directory — silently, by design — and `isolation_degrades_to_shared_outside_a_repository` asserts the degradation is *reported* rather than hidden. Inside one, `isolation_is_real_inside_a_repository` requires `state/worktrees/<node>/` per isolated node. The two harder cases concern visibility: a worktree branches from `HEAD`, so an isolated node starts blind to everything the run has produced since. `an_isolated_builders_output_reaches_the_gate` covers publishing back to the loop root (before it existed, a `file_exists` detector on an isolated builder's output could never pass — the work was real, on disk, and invisible to the only thing allowed to rule on it), and `an_isolated_node_can_read_what_its_isolated_upstream_produced` covers the seeding that publishing did not fix, for the node reading its own tree.
+
+**Stop gates and the randomness agent.** `a_run_with_no_moving_verdicts_halts_on_no_progress` checks the halt fires long before the iteration cap. The randomness gate has three tests because only its *seeded fallback* had ever run — no cheap provider is reachable in a test environment, so `ask_agent` returned `None` every time and `parse_choice` saw only strings. A deterministic cheap provider on the `cheap` cascade closes that: `the_randomness_agent_chooses_when_a_cheap_provider_answers` proves the directive survives the round trip, and `an_answer_off_the_menu_falls_back_rather_than_being_guessed_at` proves an off-menu `CHOICE:` is discarded in favour of the seed and does not leak into the recorded choice.
+
+**Resume.** Everything the stop gates count used to be declared inside the iteration loop, so it was rebuilt from nothing whenever a run resumed — a long-lived loop resuming on a schedule could never reach the ceilings that exist to stop it. Two tests pin the fix: `a_resume_does_not_hand_a_stuck_node_its_revision_budget_back` (checks `checkpoint.revisions`) and `a_resume_does_not_reset_the_no_progress_counter` (checks `stale_iterations` **and** that `last_signature` is non-empty, or the first iteration after a resume always looks like progress).
+
+**Proposals.** The loop is not allowed to reshape itself, so evidence about the graph has to surface as a proposal. One test per kind — `ReshapeGraph` from an exhausted revision budget, `ChangeCriteria` from a detector that *cannot run* as distinct from one that fails, `TrySkill` for unexplored candidates when `explore` is off. Each asserts exactly one proposal (not one per iteration) and that the proposal is not self-applying: the config on disk stays untouched, and no ledger entry shows the skill being acquired.
+
+Two smaller ones close gaps nothing else reaches: `a_summary_provider_adds_prose_that_cannot_decide_anything` (a configured `summary_provider` claims everything is complete; the gate disagrees and the gate is the only thing that counts) and `a_skill_trial_records_what_the_node_that_used_it_cost` — without `SkillTrial.tokens` the ranking cannot tell a skill that lifts the pass rate for free from one that does it by tripling the bill.
+
+Finally, two combinations no single unit test covers: `perturbation_and_phases_do_not_dispatch_a_shut_phase` (a shuffle that assumed every node in the wave was eligible would dispatch work whose phase is shut) and `a_phased_loop_that_succeeds_still_exports` (phases gate dispatch; they must not gate the certificate).
+
+---
+
+## What `compat.rs` pins
+
+A loop directory outlives the checkout that produced it and gets copied to build boxes, containers, and colleagues' laptops. Three differences break it every time, and all three are invisible on the machine that wrote it: **bash 3.2** (macOS still ships it, because 4.0 changed licence), **BSD versus GNU `sed`/`stat`/`readlink`**, and **whichever scheduler is installed**, which is not implied by the OS.
+
+These tests *run* the generated scripts rather than reading them. `new_loop(tag)` scaffolds into a scratch directory via `loopsmith new --path . --name portable --force` — never in-tree, because `new` refuses a path inside the loopsmith checkout.
+
+`the_compatibility_helpers_work_under_posix_sh` sources `scripts/compat.sh` under `sh` and exercises **every** helper (`compat_report`, `sed_i`, `stat_size`, `stat_mtime`, `readlink_f`, `sha256`, `require`), because a helper that is never called is a helper nobody has checked. It also asserts the in-place edit leaves no `sample.txt.bak` behind — the litter a wrong `sed -i` spelling produces on BSD.
+
+`need_bash` and `require` must exit **2, not 1**. A detector's exit code is its verdict; "this machine cannot run the check" is a different fact from "the check failed", and a gate that cannot tell them apart reports missing tooling as unfinished work.
+
+`the_generated_scripts_parse_under_posix_sh` uses `sh -n` to parse without executing, then scans for bashisms (`[[`, `declare -A`, `mapfile`, `readarray`, `${!`, `&>>`) — through `strip_comments`, because these files *document* the constructs they must not use and a check that reads prose flags its own explanation. `strip_comments` drops everything after the first `#` on a line and blanks any line starting `rem ` (case-insensitive), the same trap in the `.cmd` dialect.
+
+### The `.cmd` launcher
+
+`the_generated_cmd_launchers_are_crlf_and_shaped_for_cmd_exe` encodes several `cmd.exe` traps that Windows CI walked into:
+
+- **CRLF is required.** With LF only, the trailing newline becomes part of the last token on a line, so `exit /b 2` turns into an unknown command with no useful message attached. The test counts lone-LF endings and requires zero.
+- **Exactly one exit, on the last line, `endlocal & exit /b %CODE%`.** `setlocal` saves the errorlevel and the implicit `endlocal` restores it, so an early `exit /b 127` reports 0 — a loop whose binary had moved printed its diagnostic and then exited *successfully*. Writing `endlocal & exit /b 127` fixes that on a top-level line but **not** inside a nested `if ( … )` block, which is where the broken one was. A single exit point plus a `:loopsmith_done` label needs no reasoning about block parsing.
+- **Delayed expansion.** A parenthesised block is parsed before it runs, so `%ERRORLEVEL%` inside one expands to the value from *before* the block. The test requires `setlocal enabledelayedexpansion` and forbids `set "CODE=%ERRORLEVEL%"`.
+- `cd /d "%~dp0"`, so the launcher runs from its own directory.
+
+### Cross-platform launcher selection
+
+`launcher(dir, stem)` returns a runnable `Command` for whichever launcher *this* host can execute — `cmd /c run.cmd` on Windows, `./run.sh` otherwise. Windows cannot run a `#!` script and no POSIX shell will run a `.cmd`, which is exactly why both are generated; a test hardcoding `./run.sh` would test nothing on Windows, and `#[cfg(unix)]` would leave the `.cmd` unexercised on the only platform that runs it.
+
+`with_system_path(dir)` builds a `PATH` containing only `dir` — plus `%SystemRoot%\System32` on Windows, because the `.cmd` launcher searches with `where.exe`, which lives there. On unix the `.sh` launcher uses `command -v`, a shell builtin that needs nothing on `PATH`. Without the addition, the fallback test would stop measuring the fallback and start measuring whether `where` exists.
+
+Those two feed `a_generated_script_falls_back_to_path_when_the_pinned_binary_has_moved`: the script pins an absolute path (cron and launchd do not inherit a login shell's `PATH`), but a moved binary must produce exit 127 with a message naming `not on PATH` and telling the user to `Re-point it` — then be found again when the real binary is on `PATH`. `the_export_script_is_posix_and_does_not_pin_a_binary` is the inverse for exports, which travel furthest and must assume least.
+
+`the_generated_scripts_keep_the_indentation_they_were_written_with` pins a Rust-side trap: a `\` line continuation inside a **non-raw** `format!` eats the leading whitespace of the next line, and the generated `run.sh` reached disk flat and unindented because of it. Nothing about that fails a build or a parse, so the only way it stays fixed is a test that reads the layout back.
+
+### `doctor`
+
+`doctor` must report `os`, `userland`, `bash`, `scheduler`, and `git`, quote the in-place `sed -i` spelling for this userland, and **stay advisory** — reporting a constraint is not the machine being unusable, and a non-zero exit would fail a CI step that was working. Pointed at a config it also names detector scripts that do not exist, and (unix only) ones that exist but are not executable, with `chmod +x` in the message. That gate is on the whole test, not just the `chmod`: there is no executable bit off unix, so `loopsmith_util::is_executable` degrades to a file check and `doctor` is *right* not to report anything — a `#[cfg]` around only the chmod would leave a test asserting the wrong thing on Windows.
+
+---
+
+## `opt_in.rs`
+
+Every test here returns without asserting unless its environment variable is set, via the `gated!` macro, which accepts `1` or `true` and otherwise prints why it is skipping. So `cargo test --workspace` never clones a repository, never calls a model, and never costs anything.
+
+```sh
+LOOPSMITH_STRESS_NETWORK=1  cargo test -p loopsmith --test opt_in
+LOOPSMITH_STRESS_PROVIDER=1 cargo test -p loopsmith --test opt_in -- --nocapture
+LOOPSMITH_STRESS_DOCKER=1   cargo test -p loopsmith --test opt_in
 ```
-
-The two are written through a single call, so a divergence means one of the write paths grew a branch the other did not.
-
-## Judge payloads
-
-`judge_payload(cfg)` emits one block per `Detector::Judge`:
-
-```
-VERDICT: <name> PASS
-STANDARD: <standard>
-EVIDENCE: asserted deterministically by the stress harness
-SCORE: 10
-```
-
-Three constraints are encoded here and each one silently breaks the suite if violated:
-
-- **`EVIDENCE:` is mandatory.** A judge PASS with no evidence is demoted to FAIL by the parser, which makes every subjective validation permanently unsatisfiable.
-- **`SCORE: 10`** clears any `min_score`.
-- **Provider *ids* are preserved** by `deterministic_providers`. `enforce_judge_independence` compares them: a judge must sit on a different id from the builder it reviewed. Rewriting the ids would quietly switch that check off.
-
-Every provider emits the block, not just the ones a judge lands on — judge output is only harvested from nodes whose role is `Judge`, so a builder emitting the same text is inert, and this avoids re-deriving the cascade. `failing_judge_payload`, `set_provider_output(cfg, id, payload)` and `judge_provider_ids(cfg)` (which follows `cfg.cascade_for(tier)` when a node names no provider) exist for scenarios that need a judge to disagree while the builders carry on.
-
-## `stress.rs`: what the loop is held to
-
-Two local helpers shape most scenarios:
-
-- `cap(cfg, n)` — pins `max_iterations`, zeroes `no_progress_iterations`, clears the randomness threshold, so a scenario cannot sit in a long example's default ceiling of ten iterations and three hours.
-- `starve(cfg, target)` — rewrites every validation on `target` to `Detector::Script { command: "false" }`. Starving `overall` keeps a run alive so phases keep opening; starving a goal keeps its phase shut.
-
-The two broadest tests iterate `all_examples()`:
-
-- `every_example_completes_an_iteration_and_leaves_a_consistent_record` — one supervised iteration, everything satisfiable, `RunStarted` present, a stop recorded, log and ledger in agreement, exactly one summary.
-- `every_example_survives_a_run_where_nothing_passes` — no stubs, no artifacts, no metrics. A detector that fails closed is correct; a runtime that panics on it is not. Exit must be non-zero and no export may appear.
-
-Beyond that, the file is organised by the property under test rather than by example. Notable areas:
-
-**Phases.** `traffic-loop` has four strictly linear phases with one node each. `phases_open_one_at_a_time_across_a_real_run` reads `store.episodes()`, takes each node's minimum iteration, and asserts the order `find-venues → write-posts → publish → measure` strictly increases — the first time `phases.rs` ordering is checked against verdicts the gate actually produced rather than synthetic ones. `a_phase_that_never_satisfies_its_goals_never_opens_the_next_one` starves the first phase and asserts the later three never appear in the episode log at all: no timeout, no eventual give-up.
-
-**Worktree isolation.** Two inline configs, `ISOLATED_WRITER` and `ISOLATED_CHAIN`, cover the two bugs a naive worktree implementation has. An isolated builder writes into `state/worktrees/<node>/`, but evidence is collected from the loop root — so `an_isolated_builders_output_reaches_the_gate` pins the publish step. A worktree branches from `HEAD`, so an isolated node starts blind to what its isolated upstream produced — `an_isolated_node_can_read_what_its_isolated_upstream_produced` pins the seeding, and asserts the ledger says `"was seeded with"` rather than doing it silently.
-
-**Stop gates and the randomness gate.** `a_run_with_no_moving_verdicts_halts_on_no_progress` sets a cap of 20 and asserts the actual iteration count is far below it. Three tests cover the perturbation menu: the seeded fallback (`a_stalled_run_is_perturbed_before_it_is_abandoned`, which requires `"seed "` in the ledger so the choice replays), the agent path with a deterministic cheap provider on the `cheap` cascade, and the off-menu answer — `an_answer_off_the_menu_falls_back_rather_than_being_guessed_at` feeds `CHOICE: rewrite-the-gate` and asserts both that the fallback chose *and* that the refused string never leaks into the recorded choice.
-
-**Resume.** Everything the stop gates count used to be declared inside the iteration loop, so it was rebuilt from nothing on resume: a long-lived loop resuming on a schedule could never reach the ceilings that exist to stop it. `a_resume_does_not_hand_a_stuck_node_its_revision_budget_back` runs `NEVER_SATISFIED` to its ceiling, raises `max_iterations`, resumes, and asserts the dispatch count is still 2 and `checkpoint.revisions["build"] == 2`. Its companion asserts `checkpoint.stale_iterations` and a non-empty `last_signature` survive — without the signature, the first iteration after a resume always looks like progress.
-
-**Proposals.** The loop may not reshape itself, so it has to say what it wants. One test per `ProposalKind`: `ReshapeGraph` from an exhausted revision budget (exactly one proposal, not one per iteration, with a `patch`), `ChangeCriteria` from a detector that *cannot run* as opposed to one that fails, and `TrySkill` for unexplored candidates when `skills.explore` is false. Each also asserts the counter-property — the config on disk is untouched, and no ledger entry says the proposal was self-applied.
-
-**Precedence of the gate.** `a_summary_provider_adds_prose_that_cannot_decide_anything` wires a `memory.summary_provider` that claims everything is complete, then asserts the prose landed in `summaries[0].narrative` *and* that `goal_states["g1"].satisfied` is still false. A model's prose must not be able to satisfy a goal.
-
-## `compat.rs`: the machine a loop lands on
-
-A loop directory outlives the checkout that produced it. Three differences break it every time and all three are invisible on the machine that wrote it: **bash 3.2** (macOS still ships it, because 4.0 changed licence), **BSD versus GNU `sed`/`stat`/`readlink`**, and **whichever scheduler is installed**, which is not implied by the OS.
-
-These tests *run* the generated scripts. `new_loop(tag)` scaffolds into a scratch directory — `loopsmith new` refuses a path inside the loopsmith checkout, which is why this is never done in-tree.
-
-`the_compatibility_helpers_work_under_posix_sh` sources `scripts/compat.sh` under `sh` and exercises every helper — `compat_report`, `sed_i`, `stat_size`, `stat_mtime`, `readlink_f`, `sha256`, `require` — because a helper that is never called is a helper nobody has checked. It then scans the directory for `sample.txt*` strays, which is what a wrong `sed -i` spelling leaves behind on BSD.
-
-`need_bash` and `require` must **exit 2, not 1**. A detector's exit code is its verdict; "this machine cannot run the check" is a different fact from "the check failed", and a gate that cannot tell them apart reports missing tooling as unfinished work. `need_bash 99` asks for the impossible on every machine, so the assertion holds wherever the suite runs.
-
-Bashism scanning runs over `strip_comments(&text)`, not the raw file. These scripts document the very constructs they must not use, so a check that reads prose flags its own explanation — and `rem POSIX sh, so no [[ … ]]` is a comment in the `.cmd` dialect, which is why `strip_comments` blanks `rem ` lines too.
-
-`the_generated_cmd_launchers_are_crlf_and_shaped_for_cmd_exe` encodes two `cmd.exe` traps Windows CI walked into:
-
-- `setlocal` saves the errorlevel and the implicit `endlocal` restores it, so an early `exit /b 127` reports 0. Writing `endlocal & exit /b 127` fixes that on a top-level line but **not** inside a nested `if ( … )` block. The test therefore requires **exactly one** `exit /b`, spelled `endlocal & exit /b %CODE%`, plus a `:loopsmith_done` label the early paths jump to — a single exit point needs no reasoning about block parsing.
-- A parenthesised block is parsed before it runs, so `%ERRORLEVEL%` inside one expands to the value from before the block. `setlocal enabledelayedexpansion` is required and `set "CODE=%ERRORLEVEL%"` is banned outright.
-
-`launcher(dir, stem)` and `launcher_file(stem)` pick `.sh` or `.cmd` per host. Gating these tests with `#[cfg(unix)]` would leave the `.cmd` launcher unexercised on the only platform that runs it; picking the right one keeps a single test meaningful on both. `with_system_path` builds a deliberately minimal `PATH` — on Windows it must retain `System32`, or the test stops measuring the `where` fallback and starts measuring whether `where` exists.
-
-`a_generated_script_falls_back_to_path_when_the_pinned_binary_has_moved` rewrites the pinned absolute path to a nonexistent one and asserts exit 127 plus a message containing both `"not on PATH"` and `"Re-point it"` — the fix has to be in the message. `the_export_script_is_posix_and_does_not_pin_a_binary` asserts the opposite for an export, which travels further than anything else a loop produces and must assume least of all.
-
-`doctor` is covered in three tests, all asserting it **stays advisory**: reporting a constraint is not the machine being unusable, and a non-zero exit would fail a CI step that was working. It must name `os`, `userland`, `bash`, `scheduler`, `git`, and quote the literal `sed -i` spelling for this userland. Pointed at a config it names missing detector scripts and says `"does not exist"`; run again after `stub_scripts(Stubs::Pass)` it must stop complaining. The non-executable case is `#[cfg(unix)]` — not merely because `set_permissions` needs `PermissionsExt`, but because there is no executable bit off unix, `loopsmith_util::is_executable` degrades to a file check, and `doctor` is *right* not to report anything there.
-
-## `opt_in.rs`: gated tests
-
-Every test here begins with `gated!("VAR")`, a macro that prints why it is skipping and returns unless the variable is `1` or `true`. `cargo test --workspace` therefore never clones a repository, never calls a model, and never costs anything.
 
 | Variable | Covers |
 |---|---|
-| `LOOPSMITH_STRESS_NETWORK` | `install_default`'s `git clone --depth 1` into `generated-skills/`, and a post-clone `init_command` running inside the installed directory |
+| `LOOPSMITH_STRESS_NETWORK` | `git clone --depth 1` into quarantine; the post-clone `init_command` running *inside* the installed directory |
 | `LOOPSMITH_STRESS_PROVIDER` | one real-provider run of `research-loop`; the randomness agent keeping to its four-item menu with a real model |
-| `LOOPSMITH_STRESS_DOCKER` | `loopsmith_provider::container_argv` handed to a real daemon |
+| `LOOPSMITH_STRESS_DOCKER` | a container node actually running in a container |
 
 `an_unsafe_repo_url_is_refused_before_git_is_reached` is deliberately **not** gated — refusing `file:///etc` takes no network, and it is the half of the clone path that matters most.
 
-`the_simplest_example_runs_against_a_real_provider` reads `research-loop.yaml` directly rather than through `Fixture::example`, precisely because the fixture would swap the providers out. It caps iterations at 1 and sets `max_cost_usd`, then asserts non-empty `store.episodes()` with a non-empty `provider_id` and a `LedgerKind::GateEvaluated` entry.
+The provider tests read the example directly rather than through `Fixture::example`, since the whole point is keeping the real providers. They cap iterations and set `max_cost_usd`, then assert against episodes' `provider_id` and a `GateEvaluated` entry in the ledger. Point `LOOPSMITH_STRESS_PROVIDER` at the cheapest model you have; the aim is to prove the plumbing reaches a real provider, not to get a good answer.
 
-`a_container_node_really_runs_in_a_container` is the only test that touches `loopsmith_run::container::probe` and `loopsmith_provider::{Container, InvokeRequest, container_argv}`. The decision logic and the argv construction are both unit-tested; neither had ever handed that argv to a daemon, so three invisible things were untested: that the mount spelling is one a real runtime accepts, that `-w /work` puts the command where the node's files are, and that `--network none` is *applied* rather than merely appended. The image is `alpine:3` and the command is `cat` — a provider's CLI has to exist inside the image, which is the whole point of the isolation.
+`a_container_node_really_runs_in_a_container` is the only test that calls library APIs rather than the binary. `loopsmith_run::container` has unit tests for the *decision* (which image, network or not, degrade or not) and `loopsmith_provider::container_argv` has unit tests for the *argv*, but neither had ever handed that argv to a daemon — so three things nobody could see were untested: that the mount spelling is one a real runtime accepts, that `-w /work` puts the command where the node's files are, and that `--network none` is *applied* rather than merely appended. It probes via `rt::probe()` and skips gracefully if no runtime is present. The image is `alpine:3` and the command is `cat`, because a provider's CLI has to exist *inside* the image — the host's copy is not visible in there, which is the whole point of the isolation.
 
-`the_harness_still_builds_a_runnable_fixture` is ungated and deliberately dull: it proves a failure above is about the network or the provider rather than about the scaffolding.
+`the_harness_still_builds_a_runnable_fixture` is ungated, so a failure above is about the network or the provider rather than the scaffolding around it.
 
-## `surface.rs`: the command surface
+---
 
-Several subcommands were implemented and never executed by a test: they parsed, they compiled, and nobody had found out whether they worked. Each test here is cheap, needs no provider, and touches only a scratch directory.
+## Deliberately not covered
 
-`new_from_stdin` spawns the binary with a piped stdin, which is the path an agent setting a loop up would use. Both the YAML and `--markdown` forms are covered, and each asserts two things: that the *supplied* config landed rather than the starter, and that what landed passes `validate` with `0 error(s)`. The Markdown case generates its input by running `convert` on `STDIN_YAML` rather than hand-writing the grammar, so the test measures the stdin path and not the author's typing.
+- **Actually loading a launch agent.** `--install` writes the plist and stops; `launchctl load -w` stays the user's call. The write itself is covered because `LOOPSMITH_LAUNCH_AGENTS_DIR` redirects the destination. Same reasoning for `schtasks /Create`: `schedule` prints the command rather than running it.
+- **Executing a `.cmd` launcher.** No POSIX host can run one, so this suite checks its shape and the `windows-latest` CI leg runs it.
+- **A GNU userland, locally.** `compat.rs` exercises the helpers rather than mocking the userland, so everything portability-related is asserted on whichever machine the suite runs on — and this one is BSD. The `ubuntu-latest` CI leg proves the other half by running the same tests.
 
-`schedule --install` is redirected by `LOOPSMITH_LAUNCH_AGENTS_DIR`, so the plist write is covered without touching `~/Library/LaunchAgents`. The bare `schedule` form only prints.
+---
 
-## Test-authoring rules
+## Traps that used to be prose
 
-Two constraints are properties of the harness rather than of the runtime, so they cannot be asserted — they have to be known:
+Each of these was a sentence someone had to remember. A remembered rule is one refactor away from being gone, so each is now something that fails.
 
-**Give every fixture a distinct tag.** Temp directories are named from it via `loopsmith_util::testing::temp_dir`, and the suite runs threaded. Two concurrent tests sharing a tag collide on the sled lock and report an error that reads like a backend bug, with nothing pointing at the tag. The `all_examples()` loops use `format!("all-{i}")` for this reason.
+| Trap | Pinned by |
+|---|---|
+| A `\` continuation in a non-raw `format!` eats the next line's indentation | `the_generated_scripts_keep_the_indentation_they_were_written_with` |
+| `cmd.exe` needs CRLF; LF-only makes the last token unparseable | `the_generated_cmd_launchers_are_crlf_and_shaped_for_cmd_exe` |
+| A bashism check that reads comments flags its own explanation | `strip_comments`, extended to `rem ` for the `.cmd` dialect |
+| The userland is probed with `sed --version`, never inferred from the OS | `the_userland_is_probed_and_never_inferred_from_the_operating_system` (`platform.rs`) |
+| Windows fell into the catch-all arm and was offered `crontab` | `every_os_has_a_scheduler_worth_probing_and_windows_gets_the_native_one` |
+| `HOME` is unset on Windows | `the_home_directory_is_found_by_this_platforms_variable` |
+| `require` / `need_bash` exit 2, not 1 | `need_bash_exits_two_so_a_missing_tool_is_not_read_as_a_failed_check` |
+| A new `ProposalKind` must decide its own staleness | `every_proposal_kind_has_a_decided_lifetime` (`loopsmith-memory`) |
+| Proposals written before `expires_ms` existed must still load | `a_proposal_written_before_the_field_existed_still_deserialises` |
 
-**Drop the store before removing its directory, and never open it while the binary is running.** sled holds an exclusive lock. Every test in the suite calls `drop(store)` before `f.cleanup()`; a store held open around a `Command` call reports a lock error that looks like corruption.
+---
 
-Three more are behaviours of the runtime that a fixture has to respect:
+## Adding a scenario
 
-- **A detector script runs with no shell and no timeout.** `command` is argv[0] and `args` are literal, so a stub needs a shebang (or a `.cmd` extension) and must not hang.
-- **Providers keep their ids when they are swapped for stubs**, or `enforce_judge_independence` stops checking anything.
-- **A judge PASS with no evidence is demoted to FAIL**, so any stub judge payload needs an `EVIDENCE:` line.
-
-## Deliberate gaps
-
-- **Loading a launch agent.** `--install` writes the plist and stops; `launchctl load -w` stays the user's call. The same reasoning applies to `schtasks /Create` — `schedule` prints the command rather than running it.
-- **Executing a `.cmd` launcher.** No POSIX host can, so this suite checks its shape and the `windows-latest` CI leg runs it.
-- **A GNU userland, locally.** `compat.rs` exercises the helpers against whichever userland the suite runs on rather than mocking one; the `ubuntu-latest` CI leg proves the other half by running the same tests.
+1. Pick a **unique tag**. Grep the suite if unsure.
+2. Start from `Fixture::example` when the point is that a *shipped config* works; from `Fixture::from_yaml` (or `NEVER_SATISFIED`) when the point is a shape no example has.
+3. Apply `cap` and, if the run must stay alive, `starve` — then `write_config()`.
+4. Chain the opt-ins the scenario actually needs. Stubbing and artifacts are not free; a test that stubs what it does not read is a test whose failure mode is unclear.
+5. Assert against `store()`, `log_text()`, or `export_dir()`. If you find yourself matching on stdout, the fact you want is probably in the ledger.
+6. End with `drop(store); f.cleanup();`.
