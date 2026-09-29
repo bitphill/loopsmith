@@ -30,6 +30,16 @@ __version__ = "1.0.0"
 REPO = "bitphill/loopsmith"
 _RELEASE_BASE = f"https://github.com/{REPO}/releases/download/v{__version__}"
 
+# Seconds for each blocking step of a download: connecting to one address, or
+# one read. `urllib` tries a host's addresses one after another and spends the
+# whole of this on each address that does not answer, so it is the cost of every
+# unreachable CDN node, paid in silence. GitHub serves release assets from four
+# anycast addresses, and a network that cannot reach one of them made the first
+# run sit for two minutes per download — with 120 here, and two downloads —
+# looking exactly like the hang this launcher's other comments warn about.
+# Twenty keeps a genuinely slow link working and makes a dead node a pause.
+_TIMEOUT = 20
+
 
 class ResolveError(RuntimeError):
     """This host has no prebuilt binary, or one could not be verified."""
@@ -77,7 +87,7 @@ def cache_dir() -> Path:
 
 
 def _read(url: str) -> bytes:
-    with urllib.request.urlopen(url, timeout=120) as response:  # noqa: S310
+    with urllib.request.urlopen(url, timeout=_TIMEOUT) as response:  # noqa: S310
         return response.read()
 
 
@@ -125,6 +135,14 @@ def ensure_binary() -> Path:
     # happens once per version. Not worth the failure mode.
     target = _target()
     asset = f"loopsmith-v{__version__}-{target}.{'zip' if windows else 'tar.gz'}"
+    # Said before the download, not after it. This runs once per version, it can
+    # take a while on a slow or partly broken network, and a first run that
+    # prints nothing until it is done is indistinguishable from a hang.
+    print(
+        f"[loopsmith] first run of {__version__}: fetching the {target} binary "
+        "from the GitHub release",
+        file=sys.stderr,
+    )
     want = _expected_digest(asset)
     payload = _read(f"{_RELEASE_BASE}/{asset}")
 
