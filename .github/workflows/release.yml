@@ -153,14 +153,19 @@ jobs:
   # repository `bitphill/loopsmith`, workflow `release.yml`.
   #
   # Off unless the repository variable `PUBLISH_CRATES` is `true` (Settings →
-  # Secrets and variables → Actions → Variables). 1.0.0 went to npm, PyPI and
-  # Homebrew without crates.io, which stayed at 0.3.1, because that release
-  # cannot be done by this job: it introduced three crates, a Trusted Publishing
-  # token cannot create a crate, and the nine that exist are set to accept
-  # nothing but Trusted Publishing. So 1.0.0 goes to crates.io by hand — unlock,
-  # publish all twelve in dependency order, give the three new ones a publisher
-  # config, lock again — and after that every crate exists and has a config, so
-  # this job can do every later release on its own. Set the variable then.
+  # Secrets and variables → Actions → Variables).
+  #
+  # 1.0.0 could not be published by this job. It introduced three crates —
+  # `loopsmith-run`, `-wizard`, `-web` — and a Trusted Publishing token cannot
+  # create a crate, while the nine that already existed accept nothing but
+  # Trusted Publishing. So all twelve went to crates.io by hand on 2026-09-26:
+  # unlocked, published in dependency order, the three new ones given a
+  # publisher config, every one locked again. The tag came four days later and
+  # this job was left off for it, so the tag could not touch crates.io at all.
+  #
+  # Every crate now exists and has a publisher config, so from 1.0.1 on this job
+  # does the whole crates.io release by itself. **Set the variable before the
+  # next tag**, or that release skips crates.io without saying so.
   #
   # Nothing depends on this job; `pypi`, `npm` and `homebrew` all hang off
   # `publish`. Skipping it skips crates.io and nothing else.

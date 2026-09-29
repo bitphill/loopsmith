@@ -8,15 +8,9 @@ All notable changes to loopsmith. Format follows
 
 The config is grouped, the commands are grouped, and the engine that runs both
 is split into crates that can be tested apart. A 0.3 config still loads and a
-0.3 command still works, so upgrading is a reinstall — but both now print where
-the thing they named has moved to, and `loopsmith loop migrate` rewrites a file
-in place.
-
-**1.0.0 is on npm, PyPI and Homebrew. crates.io follows by hand and is still on
-0.3.1 until it does**, because this release adds three crates and crates.io
-will not let the release workflow create one. Until then, `cargo install
-loopsmith` installs 0.3.1; to build 1.0.0 with cargo, take it from the tag:
-`cargo install --locked --git https://github.com/bitphill/loopsmith --tag v1.0.0 loopsmith`.
+0.3 command still works, so the upgrade is a `cargo install` — but both now
+print where the thing they named has moved to, and `loopsmith loop migrate`
+rewrites a file in place.
 
 Read [Migration 0.3 → 1.0](https://github.com/bitphill/loopsmith/wiki/Migration-0-3-To-1-0) before upgrading a
 loop you cannot afford to re-run.
