@@ -137,6 +137,19 @@ these implemented but wrong. Each is fixed with a test at the seam it failed at.
   `loopsmith run resume --answer` clears them and refunds each node's revisions.
   Refunding on every resume would have handed a stuck node a fresh budget
   unattended, which is the guarantee the stress suite holds.
+- **`install.bat` failed on every stock Windows machine.** It runs
+  `install.ps1` under Windows PowerShell 5.1, which reads a file with no
+  byte-order mark in the ANSI code page, where the last byte of an em dash is a
+  curly double quote — and PowerShell takes curly quotes as string delimiters.
+  One dash in a log message ended its string early and the script failed to
+  parse on first use. Nothing ran it on Windows until 1.0's CI did. The Windows
+  scripts are plain ASCII now, and a test keeps them that way.
+- **The PyPI package's first run could sit silent for minutes.** It downloads
+  the binary with Python's `urllib`, which spends its whole timeout on each
+  address that does not answer before trying the next; on a network that could
+  not reach one of GitHub's four CDN addresses, that was two minutes per
+  download and nothing printed. It now says what it is fetching before it
+  starts, and gives each step twenty seconds.
 - The expert editor edited a config the server did not serve.
 - The Homebrew formula's test invoked a command spelling that 1.0 had moved,
   which would have failed on the first 1.0 build. Nothing checked Ruby lists of

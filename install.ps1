@@ -17,7 +17,7 @@ $RepoRoot  = $ScriptDir
 # Every fact this shares with install.sh comes from one file, so moving the
 # repository or changing the build command is one edit rather than three.
 # `-Encoding UTF8` because Windows PowerShell 5.1, which install.bat runs, reads
-# a file without a byte-order mark in the ANSI code page — the manifest is UTF-8
+# a file without a byte-order mark in the ANSI code page - the manifest is UTF-8
 # with no BOM, so any non-ASCII character in it would print as mojibake.
 $Manifest   = Get-Content (Join-Path $ScriptDir 'installers\manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 
@@ -65,7 +65,7 @@ if (Test-Path (Join-Path $RepoRoot $Manifest.build_dir)) {
     git clone --depth 1 --branch $Branch $RepoUrl $SrcDir 2>&1 | Tee-Object -Append -FilePath $LogFile
 }
 
-Write-Log 'building release binary — a few minutes on a cold cache'
+Write-Log 'building release binary - a few minutes on a cold cache'
 Push-Location (Join-Path $SrcDir $Manifest.build_dir)
 try {
     & cargo @($Manifest.build_args) 2>&1 | Tee-Object -Append -FilePath $LogFile
@@ -86,7 +86,7 @@ Write-Log "installed $BinDst"
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if ($userPath -notlike "*$BinDir*") {
     [Environment]::SetEnvironmentVariable('PATH', "$BinDir;$userPath", 'User')
-    Write-Log "added $BinDir to your user PATH — open a new shell for it to take effect"
+    Write-Log "added $BinDir to your user PATH - open a new shell for it to take effect"
 } else {
     Write-Log "$BinDir is already on your user PATH"
 }

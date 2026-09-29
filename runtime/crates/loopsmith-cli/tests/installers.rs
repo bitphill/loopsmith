@@ -143,3 +143,48 @@ fn the_manifest_stays_flat_enough_for_a_shell_to_read() {
         assert!(!items.is_empty(), "`{key}` is empty");
     }
 }
+
+/// Every file Windows parses without being told its encoding is plain ASCII.
+///
+/// Windows PowerShell 5.1 — the one every Windows machine ships with, and the
+/// one `install.bat` runs — reads a script that has no byte-order mark in the
+/// ANSI code page. There the last byte of an em dash, `0x94`, is a curly closing
+/// double quote, and PowerShell accepts curly quotes as string delimiters: one
+/// `—` inside a double-quoted string ends it early and the rest of the file fails
+/// to parse. That is how `install.bat` failed on every stock Windows machine
+/// through 0.3.1, with a parse error on first use, and nothing noticed, because
+/// nothing ran it until the installer smoke test was added. `cmd.exe` reads
+/// `.bat` and `.cmd` files in the OEM code page, so the same rule holds there.
+///
+/// ASCII rather than "or has a BOM": a `.bat` with a BOM runs the BOM as a
+/// command, and ASCII survives an editor that re-saves the file without one.
+#[test]
+fn every_file_windows_parses_is_plain_ascii() {
+    let root = repo_root();
+    let mut checked = 0;
+    let mut bad = Vec::new();
+    for dir in ["", "installers", "runtime/crates/loopsmith-cli/templates/scaffold"] {
+        let entries = std::fs::read_dir(root.join(dir)).unwrap_or_else(|e| panic!("{dir}: {e}"));
+        for path in entries.flatten().map(|e| e.path()) {
+            if !matches!(path.extension().and_then(|e| e.to_str()), Some("ps1" | "bat" | "cmd")) {
+                continue;
+            }
+            checked += 1;
+            let bytes = std::fs::read(&path).expect("a Windows script is readable");
+            for (n, line) in bytes.split(|&b| b == b'\n').enumerate() {
+                if line.iter().any(|&b| b > 0x7f) {
+                    let name = path.strip_prefix(&root).unwrap_or(&path).display();
+                    bad.push(format!("{name}:{}: {}", n + 1, String::from_utf8_lossy(line).trim()));
+                }
+            }
+        }
+    }
+    // Seven today: two installers, the dependency script, four launcher
+    // templates. Fewer means something moved and this stopped looking at it.
+    assert!(checked >= 7, "only {checked} Windows scripts found");
+    assert!(
+        bad.is_empty(),
+        "Windows PowerShell 5.1 and cmd.exe read these as their legacy code page, not UTF-8:\n{}",
+        bad.join("\n")
+    );
+}
