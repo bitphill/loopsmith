@@ -36,8 +36,9 @@
 # The project's front door is the site, not the Wiki tab. GitHub offers no way
 # to point that tab elsewhere — no setting, and a wiki page cannot redirect,
 # because the renderer strips scripts and meta tags. So the tab stays, as a
-# signpost: every page carries a `_Header.md` banner to the site, and Home
-# opens with it. The pages themselves stay too, because links to them already
+# signpost: every page opens with a banner to the site, and so does Home.
+# The banner is written into each page rather than into `_Header.md`: GitHub
+# renders a wiki's `_Sidebar.md` and `_Footer.md` but silently ignores a header. The pages themselves stay too, because links to them already
 # exist in the READMEs, the crates, and the release notes.
 #
 # Neither surface is versioned with the release tags. Both always show the
@@ -151,6 +152,9 @@ import os, re
 
 src, dst, viewer = os.environ['SRC'], os.environ['DST'], os.environ['VIEWER']
 site = os.environ['SITE']
+banner = (f"> 📖 **loopsmith's documentation lives at "
+          f"[{site.split('//')[1].rstrip('/')}]({site}) →** "
+          "This wiki mirrors it so existing links keep working.\n")
 hand = os.environ['HAND']
 
 # Two sources, one set of pages. A generated page is named after the subsystem
@@ -198,7 +202,8 @@ for f in mds:
         text = re.sub(r'^# loops — Wiki\n+', '', text, count=1)
     titles[page] = heading(page, text)
     if stem != 'overview':
-        text = f"[← Wiki home](Home) · [Rendered viewer with search]({viewer})\n\n---\n\n" + text
+        text = (banner + "\n"
+                f"[← Wiki home](Home) · [Rendered viewer with search]({viewer})\n\n---\n\n" + text)
     open(os.path.join(dst, page + '.md'), 'w').write(text)
 
 pages = [p for p in sorted(stem2page.values()) if p != 'Home']
@@ -212,12 +217,6 @@ open(home, 'w').write(
     f"[code wiki with search]({viewer}). The pages below are the same content, kept\n"
     "here so that links already pointing at them still work.\n\n"
     "## All pages\n\n" + index + "\n\n---\n\n" + body + "\n")
-
-# Shown above every page, including ones reached by a deep link that never
-# passes through Home.
-open(os.path.join(dst, '_Header.md'), 'w').write(
-    f"> 📖 **loopsmith's documentation lives at [{site.split('//')[1].rstrip('/')}]({site}) →** "
-    "This wiki mirrors it so existing links keep working.\n")
 
 open(os.path.join(dst, '_Sidebar.md'), 'w').write(
     f"**[loopsmith]({site})**\n\n"
