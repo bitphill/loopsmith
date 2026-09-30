@@ -472,10 +472,10 @@ Those land in `proposals/` for you to read.
 
 | Message | What it means |
 |---|---|
-| `pre_execution: 2 step(s) not marked done` | Section **B** — do it by hand, set `done: true` |
-| `no overall validation` | One check in **D** needs `- target: overall` |
+| `intent.prerequisites: 2 step(s) not marked done` | Do those steps by hand, then set `done: true` on each under `intent.prerequisites` |
+| `no overall validation; the loop can only finish per-goal` | One check under `safety.checks` needs `target: overall` |
 | `unavailable  command not found` | That AI isn't installed. Run `loopsmith providers loop.md` and use one marked `available` |
-| Loop stops with nothing in `out/` | Check `logs/` — usually a budget in **F** ran out |
+| Loop stops with nothing in `out/` | Check `logs/` — usually a budget under `safety.gates.stop` ran out |
 
 Stuck? [Open an issue](https://github.com/bitphill/loopsmith/issues) and paste
 what the terminal said.

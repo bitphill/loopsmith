@@ -473,6 +473,37 @@ mod tests {
 
     }
 
+    /// Whether a line refers to a 0.3 section by its letter.
+    ///
+    /// Split on anything that is not a letter or a digit, not on whitespace:
+    /// the whitespace version read `section-J` as one word and `section J.` as
+    /// a two-character letter, so both got past, and the first was sitting in
+    /// the agent skill that tells an AI how to use this tool.
+    fn names_a_lettered_section(line: &str) -> bool {
+        if ["A–J", "A-J", "A–H", "A-H"].iter().any(|range| line.contains(range)) {
+            return true;
+        }
+        let words: Vec<&str> = line
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+        words.windows(2).any(|w| {
+            w[0].eq_ignore_ascii_case("section")
+                && w[1].len() == 1
+                && w[1].chars().all(|c| c.is_ascii_uppercase() && c <= 'J')
+        })
+    }
+
+    #[test]
+    fn a_lettered_section_is_found_however_it_is_punctuated() {
+        for hit in ["every section-J default_skill", "see section J.", "(Section D)", "section F, the stop gates", "A–J"] {
+            assert!(names_a_lettered_section(hit), "missed: {hit}");
+        }
+        for miss in ["sections by letter, A through J", "a section Journal", "Section K", "the J section", "section 4"] {
+            assert!(!names_a_lettered_section(miss), "flagged: {miss}");
+        }
+    }
+
     /// No document still describes the lettered model.
     ///
     /// `A` through `J` were the 0.3 section names, and they are gone from the
@@ -499,15 +530,7 @@ mod tests {
                 continue;
             };
             for (n, line) in text.lines().enumerate() {
-                let lettered = ["A–J", "A-J", "A–H", "A-H"]
-                    .iter()
-                    .any(|range| line.contains(range))
-                    || line.split_whitespace().collect::<Vec<_>>().windows(2).any(|w| {
-                        w[0].eq_ignore_ascii_case("section")
-                            && w[1].len() == 1
-                            && w[1].chars().all(|c| c.is_ascii_uppercase() && c <= 'J')
-                    });
-                if lettered {
+                if names_a_lettered_section(line) {
                     wrong.push(format!("{}:{}: {}", rel, n + 1, line.trim()));
                 }
             }

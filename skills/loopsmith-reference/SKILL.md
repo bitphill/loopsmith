@@ -2,9 +2,11 @@
 name: loopsmith-reference
 description: >
   Reference for designing agent loops: when a loop is worth building at all,
-  the four layered stop gates, why a verifier must be grounded outside the
-  model that produced the work, graph-vs-chain decomposition, Amdahl sizing for
-  agent fan-out, and cheap-vs-strong provider routing. Use this whenever
+  the four layered stop gates and the gates that halt without stopping, why a
+  verifier must be grounded outside the model that produced the work, recovery
+  per failure class, what a loop may remember and change about itself,
+  graph-vs-chain decomposition, Amdahl sizing for agent fan-out, and
+  cheap-vs-strong provider routing. Use this whenever
   designing, reviewing, or debugging any iterative agent system — a self-
   correcting loop, a multi-agent fan-out, a verification gate, a retry policy,
   or a run that will not converge — even when loopsmith itself is not involved.
@@ -104,6 +106,42 @@ they fail; they bill you in silence.
 constantly while others rarely do is a miscalibrated judge — invisible if you
 only record completions.
 
+## Gates that do not stop the run
+
+Stop gates end a run. Three other moments need a gate too, and each answers a
+different question:
+
+- **Entry** — checked once, before the first iteration. A failing entry gate
+  means the run never starts, which is the cheapest failure there is: a clean
+  tree, a present credential, a green test suite *before* anything is spent.
+- **Approval** — checked after an iteration. Failing halts for a person rather
+  than ending the run; the loop waits instead of guessing.
+- **Rollback** — checked after an iteration. Failing restores the last good
+  checkpoint, for when continuing would be worse than undoing. The spend is not
+  refunded, which is why this belongs after cheaper gates, not instead of them.
+
+In loopsmith these are `safety.gates.entry`, `.approval` and `.rollback`, beside
+`.stop`.
+
+## Recovery is per failure class
+
+One retry policy for every failure is how a loop retries a safety violation.
+The right answer depends on what failed:
+
+| Failure | Is about | Answer |
+|---|---|---|
+| Transient error | the world | Retry with backoff, unchanged |
+| Invalid output | the output | Revise — re-dispatch *telling it what was wrong* |
+| Tool unavailable | the route | Fall back to the next provider |
+| Repeated failure | the approach | Escalate to a person |
+| Resource exhaustion | the budget | Pause; the run did nothing wrong |
+| Safety violation | the rules | Stop. Never retry |
+| Corrupted state | the record | Restore the last good checkpoint |
+
+Retrying an output failure unchanged buys the same answer again; revising a
+world failure changes something that was never the problem. In loopsmith each
+class is set under `safety.recovery`.
+
 ## The grading test for any agent system
 
 **Can it take "done" back?** A gate that refuses a failing merge, a task that
@@ -155,6 +193,44 @@ Never git stash. Never git reset.
 No git command except committing a specific file.
 No slow commands before the test phase.
 ```
+
+## What a loop may remember
+
+State that outlives a run is where a loop learns — and where it learns
+superstition, if everything it observed is reused. So reuse needs a bar, set per
+kind of knowledge:
+
+- **Never** — an episode belongs to the run that wrote it.
+- **Automatic** — only where writing the record *is* the evidence, such as a
+  failure that was observed happening.
+- **After independent corroboration** — reusable once the same record has been
+  seen several times by runs that did not copy each other.
+- **Only when a person says so** — for anything a wrong generalisation would
+  make expensive.
+
+In loopsmith these are the promotion rules on each namespace under
+`execution.memory`, and `loopsmith memory promote` is the human half.
+
+## What a loop may change about itself
+
+A loop that proposes changes to its own configuration needs the same discipline
+as one that changes code:
+
+- **Measure against a baseline.** Without one a proposal can be recorded, never
+  adopted.
+- **Allow a little regression, on purpose.** A zero-tolerance gate refuses every
+  trade of a hair of accuracy for half the cost, and admits any change that
+  touches nothing measured.
+- **Trial in isolation, adopt with a person, keep the previous version.** Each
+  is cheap next to un-adopting a bad change from a loop that is already running
+  on it.
+- **Protect the goalposts.** Some parts — the checks, the protected list itself
+  — no proposal may touch, or the loop can make itself pass by moving what
+  passing means. That list is a safety statement, not an evolution setting,
+  because it has to hold whether or not self-change is on.
+
+In loopsmith: the `evolution` bundle, with the protected list at
+`safety.protected`.
 
 ## Cost
 

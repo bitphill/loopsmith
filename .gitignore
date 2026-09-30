@@ -79,3 +79,6 @@ runtime/crates/loopsmith-web/web/playwright-report/
 
 # Assembled by tools/build-site.sh; the sources are site/ and assets/.
 /build/
+
+# Agent skills installed locally by tools such as gitnexus; not part of the project.
+.claude/skills/

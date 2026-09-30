@@ -23,14 +23,15 @@ agent loops behind a deterministic verification gate.
 
 ## What this crate is
 
-A loop is described by ten sections, **A** to **J**: information, the manual
-work list, goals, validations, success criteria, stop gates, schedules,
-constraints, execution guidelines, default skills. This crate is that model,
+A loop is described by four bundles: `intent` (what it is for, and the manual
+steps done first), `execution` (goals, providers, triggers, memory, skills),
+`safety` (checks, gates, recovery, what must not change) and `evolution` (what
+it may change about itself). This crate is that model,
 its parser for both YAML and Markdown, and the validation that decides whether
 a config is coherent.
 
-The load-bearing behaviour: **validation fails while any `pre_execution` step is
-unfinished.** Automating a process you cannot describe in checkable terms
+The load-bearing behaviour: **validation fails while any `intent.prerequisites`
+step is unfinished.** Automating a process you cannot describe in checkable terms
 produces fast, confident garbage, so a config that has not been run by hand once
 is refused rather than accommodated.
 

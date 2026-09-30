@@ -11,6 +11,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Nothing here writes to the repository, so the token cannot either — whatever
+# the repository's default happens to be set to.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -30,7 +35,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # `rustup` is preinstalled on every GitHub-hosted runner, so this needs no
       # third-party action. That is not stylistic: action archives come from
@@ -245,7 +250,7 @@ jobs:
     name: linux on arm
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install the toolchain
         shell: bash
@@ -280,7 +285,7 @@ jobs:
     name: rust 1.85, the version the README promises
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install 1.85
         shell: bash
@@ -308,7 +313,7 @@ jobs:
     name: a container node really runs in a container
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: What runtime is here
         shell: bash
@@ -343,7 +348,7 @@ jobs:
       run:
         working-directory: runtime/crates/loopsmith-web/web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Node ships on the runner image, so this downloads no action. Same
       # reasoning as the toolchain step above: an action that cannot be fetched
@@ -385,7 +390,7 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Flesch-Kincaid grade 6 or below
         run: ./tools/check-readability.sh
@@ -436,7 +441,7 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: What is this machine
         run: node --version && npm --version
@@ -502,7 +507,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: rustup update stable --no-self-update && rustup default stable
       - run: cargo install cargo-audit --locked
       - run: cargo audit
