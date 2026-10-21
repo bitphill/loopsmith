@@ -105,17 +105,74 @@
         background: var(--surface);
       }
       header.top .wrap {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "brand nav"
+          "tagline stars";
+        align-items: center;
+        column-gap: 16px;
+        row-gap: 8px;
+        padding-block: 12px;
+      }
+      header.top .brand {
+        grid-area: brand;
         display: flex;
         align-items: center;
         gap: 12px;
-        padding-block: 12px;
-        flex-wrap: wrap;
+        min-width: 0;
       }
-      header.top img { display: block; border-radius: 6px; background: #fff; }
+      header.top img.logo { display: block; border-radius: 6px; background: #fff; }
       header.top .name { font-weight: 800; letter-spacing: -0.02em; font-size: 18px; }
-      nav.top { margin-left: auto; display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+      nav.top {
+        grid-area: nav;
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        font-size: 14px;
+        justify-content: flex-end;
+      }
+      /* Smaller than the hero line, in the forge accent already used for links. */
+      .tagline {
+        grid-area: tagline;
+        margin: 0;
+        min-width: 0;
+        font-size: 14px;
+        line-height: 1.45;
+        font-weight: 600;
+        color: var(--ember);
+        overflow-wrap: anywhere;
+      }
+      @media (max-width: 40rem) {
+        /* Brand and nav take full width so the one-liner is not crushed by
+           the nav's intrinsic size. Stars stay in the right column, under
+           the GitHub control, which is also end-aligned. */
+        header.top .wrap {
+          grid-template-areas:
+            "brand brand"
+            "nav nav"
+            "tagline stars";
+          align-items: start;
+        }
+      }
+      /* Same column as the header GitHub control, pinned to that right edge
+         even when the one-liner is short or wraps. */
+      .star-cluster {
+        grid-area: stars;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        justify-self: end;
+        flex-shrink: 0;
+      }
+      .star-cluster a { display: flex; align-items: center; line-height: 0; }
+      .star-cluster .stars-badge { height: 20px; width: auto; }
+      .star-cluster .github-mark { display: block; width: 20px; height: 20px; }
+      @media (prefers-color-scheme: dark) {
+        .star-cluster .github-mark { filter: invert(1); }
+      }
 
-      .hero { padding-block: 56px 40px; }
+      .hero { padding-block: 40px; }
       .hero h1 {
         margin: 0 0 12px;
         font-size: clamp(30px, 6vw, 46px);
@@ -176,8 +233,10 @@
   <body>
     <header class="top">
       <div class="wrap">
-        <img src="./loopsmith-logo-256.png" width="30" height="30" alt="" />
-        <span class="name">loopsmith</span>
+        <div class="brand">
+          <img class="logo" src="./loopsmith-logo-256.png" width="30" height="30" alt="" />
+          <span class="name">loopsmith</span>
+        </div>
         <nav class="top" aria-label="Project">
           <a href="#what">What it is</a>
           <a href="#install">Install</a>
@@ -185,6 +244,28 @@
           <a href="./wiki/">Code wiki</a>
           <a href="https://github.com/bitphill/loopsmith">GitHub</a>
         </nav>
+        <p class="tagline">The skill to create self evolving loops based purpose specific skills</p>
+        <div class="star-cluster">
+          <a
+            href="https://github.com/bitphill/loopsmith"
+            aria-label="Star loopsmith on GitHub"
+          >
+            <img
+              class="stars-badge"
+              src="https://img.shields.io/github/stars/bitphill/loopsmith?style=social"
+              alt="GitHub stars"
+              height="20"
+            />
+          </a>
+          <a
+            href="https://github.com/bitphill/loopsmith"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="loopsmith on GitHub"
+          >
+            <img class="github-mark" src="./mark-github.svg" width="20" height="20" alt="" />
+          </a>
+        </div>
       </div>
     </header>
 
