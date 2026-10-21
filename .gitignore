@@ -62,12 +62,12 @@ docs/
 .env.*
 *.pem
 *.key
-.claude/settings.local.json
 
 # ── macOS / editors ───────────────────────────────────────────────
 .DS_Store
 .idea/
 .vscode/
+.cursor/
 *.swp
 
 # ── Playwright ────────────────────────────────────────────────────
@@ -80,5 +80,5 @@ runtime/crates/loopsmith-web/web/playwright-report/
 # Assembled by tools/build-site.sh; the sources are site/ and assets/.
 /build/
 
-# Agent skills installed locally by tools such as gitnexus; not part of the project.
-.claude/skills/
+# Local agent dirs. Not source for this repository.
+.claude/

@@ -44,9 +44,11 @@ if grep -rq "__SITE_URL__" "$OUT"; then
 fi
 
 # The mark, at the two sizes the page asks for: the favicon and touch icon at
-# 256, and the OpenGraph card at 512.
+# 256, and the OpenGraph card at 512. The GitHub Octicon is vendored so the
+# landing page does not hotlink a third-party icon host.
 cp "$ROOT/assets/loopsmith-logo-256.png" "$OUT/"
 cp "$ROOT/assets/loopsmith-logo-512.png" "$OUT/"
+cp "$ROOT/assets/mark-github.svg" "$OUT/"
 
 # GitHub Pages runs Jekyll over a branch unless told not to, and Jekyll hides
 # anything beginning with an underscore.
