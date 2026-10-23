@@ -1,6 +1,6 @@
 //! The example library shown down the left of the web UI.
 //!
-//! Thirteen working loops ship inside the binary. That is the point: the
+//! Fifteen working loops ship inside the binary. That is the point: the
 //! fastest way to understand what a validation or a stop gate is for is to
 //! load one that already works and read it with every field explained beside
 //! it, which beats staring at an empty form and a schema reference.

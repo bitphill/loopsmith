@@ -47,7 +47,7 @@ export function LeftRail({
             <input className="input" placeholder="Filter examples…" value={q}
               onChange={(e) => setQ(e.target.value)} aria-label="Filter examples" />
             <p className="hint mt-2">
-              Thirteen working loops. Loading one fills in every section, which is the quickest
+              Fifteen working loops. Loading one fills in every section, which is the quickest
               way to see what a validation or a stop gate looks like in practice.
             </p>
           </div>

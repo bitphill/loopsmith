@@ -107,6 +107,7 @@ to run someone else's build instructions. Older Homebrew does not need it.
 Or the universal installer, which detects the host and needs no package manager:
 
 ```bash
+git clone https://github.com/bitphill/loopsmith && cd loopsmith
 ./install.sh      # Linux, macOS, BSD — calls installers/deps.sh
 install.bat       # Windows — calls installers/deps.ps1
 ```
@@ -115,6 +116,17 @@ It installs `rustup` and `cargo` if they are missing, ensures `git`, builds in
 release mode, puts the binary in `~/.loopsmith/bin/loopsmith`, and symlinks
 `/usr/local/bin` if it can write there. Re-runnable, idempotent, logs to
 `~/.loopsmith/install.log`.
+
+To use loopsmith from inside a coding agent, add the two skills this repository
+ships, `loopsmith` and `loopsmith-reference`, with the
+[skills CLI](https://skills.sh):
+
+```bash
+npx skills add bitphill/loopsmith
+```
+
+The skills drive the `loopsmith` binary, so install the binary with one of the
+options above as well.
 
 ### Packages
 
@@ -399,5 +411,17 @@ something written down.
 
 The loop never edits its own config. Goals, validations, success criteria, and
 sub-agent adoption are written as proposals for you to apply.
+
+---
+
+## Contributing
+
+Bug reports, example loops, docs fixes and code are welcome. Start with
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for how to build, test and open a pull
+request, and look for issues labelled
+[`good first issue`](https://github.com/bitphill/loopsmith/labels/good%20first%20issue).
+Questions and ideas go in
+[Discussions](https://github.com/bitphill/loopsmith/discussions). If loopsmith is
+useful to you, a star on the repository helps other people find it.
 
 MIT licensed. See [`LICENSE`](LICENSE).
