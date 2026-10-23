@@ -50,7 +50,7 @@ const PANELS: Panel[] = [
   {
     title: "The fastest way to learn this",
     body: [
-      "Load an example from the left. Thirteen working loops ship with this, covering research, refactoring, outreach, publishing and more. Loading one fills in every section so you can read a real config with all the explanations attached.",
+      "Load an example from the left. Fifteen working loops ship with this, covering research, refactoring, outreach, publishing and more. Loading one fills in every section so you can read a real config with all the explanations attached.",
       "Then change one thing, watch the right-hand panel react, and press Dry run — it walks the entire loop without calling a single model or spending anything.",
     ],
     aside: "Dry run costs nothing. Use it as often as you like.",
