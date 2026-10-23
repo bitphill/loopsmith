@@ -280,6 +280,25 @@ $EDITOR loop.yaml            # your goals, and how each one is checked
 loopsmith loop validate loop.yaml && loopsmith loop plan loop.yaml && ./run.sh   # run.cmd on Windows
 ```
 
+After installing with Cargo, the same steps in Windows PowerShell are:
+
+```powershell
+$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"  # this session, if needed
+$env:EDITOR = "notepad"                          # or your editor's executable
+loopsmith loop new --path "$env:USERPROFILE\loops\nightly-refactor" --purpose "keep the module simple"
+
+Set-Location "$env:USERPROFILE\loops\nightly-refactor"
+& $env:EDITOR .\loop.yaml    # save and close the config before continuing
+loopsmith loop validate .\loop.yaml
+if ($LASTEXITCODE -eq 0) {
+    loopsmith loop plan .\loop.yaml
+    if ($LASTEXITCODE -eq 0) { .\run.cmd }
+}
+```
+
+To resume an existing run, use `.\resume.cmd RUN_ID`, replacing `RUN_ID` with
+the run ID printed by the previous run.
+
 `new` writes the config, the directories, an MCP definition, a permission grant,
 `scripts/compat.sh`, and `run.sh` / `resume.sh` / `run.cmd` / `resume.cmd` with
 absolute paths filled in. Both script flavours are written on every platform, so
