@@ -1,0 +1,39 @@
+name: Example loop or new idea
+description: Propose a new worked example under config/examples/, or a use case loopsmith should cover.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every shipped example is a job someone repeats, with a gate a script can decide. See "Proposing a new example loop" in [CONTRIBUTING.md](https://github.com/bitphill/loopsmith/blob/main/CONTRIBUTING.md).
+  - type: input
+    id: job
+    attributes:
+      label: The job, in one line
+      placeholder: "Keep the changelog in step with merged pull requests"
+    validations:
+      required: true
+  - type: textarea
+    id: who
+    attributes:
+      label: Who does this today, and how often
+    validations:
+      required: true
+  - type: textarea
+    id: good
+    attributes:
+      label: How would anyone tell it was done well
+      description: Say it in terms a script could check: a file exists, a number is under a limit, a command exits 0. If you can only say "it reads well", say that too.
+    validations:
+      required: true
+  - type: textarea
+    id: stop
+    attributes:
+      label: What must the loop never do
+      description: Files it must not touch, money it must not spend, messages it must not send.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Helping out
+      options:
+        - label: I would like to write this example myself.

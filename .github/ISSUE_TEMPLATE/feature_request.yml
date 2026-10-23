@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a change to how loopsmith works.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The change you have in mind, as a command, a config key, or a sentence.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways you considered
+  - type: checkboxes
+    id: gate
+    attributes:
+      label: Fit with the design
+      description: loopsmith's one rule is that a model must not certify its own completion.
+      options:
+        - label: This does not let a model decide that a goal is satisfied.
+          required: true
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Helping out
+      options:
+        - label: I would be willing to send a pull request for this.
