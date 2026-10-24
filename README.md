@@ -3,6 +3,10 @@
   <h1>loopsmith</h1>
   <p><em>Self-evolving agent loops. The gate is code, so "done" cannot be argued.</em></p>
   <p>
+    <a href="https://github.com/bitphill/loopsmith/raw/main/assets/demo/loopsmith-demo.mp4"><img src="assets/demo/loopsmith-demo.gif" alt="A 20-second animated demo: loopsmith loop run -f loop.yaml, the gate reads the real files and prints PASS, and the model's own claim of done is ignored." width="640" /></a><br />
+    <a href="https://github.com/bitphill/loopsmith/raw/main/assets/demo/loopsmith-demo.mp4"><strong>Watch the 20s demo with sound</strong></a> · <a href="https://bitphill.github.io/loopsmith/">Website</a>
+  </p>
+  <p>
     <a href="https://github.com/bitphill/loopsmith/releases"><img alt="release" src="https://img.shields.io/github/v/release/bitphill/loopsmith?include_prereleases&color=C1272D" /></a>
     <a href="https://github.com/bitphill/loopsmith/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/bitphill/loopsmith?color=2A5A8A" /></a>
     <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" /></a>
