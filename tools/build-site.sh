@@ -50,6 +50,12 @@ cp "$ROOT/assets/loopsmith-logo-256.png" "$OUT/"
 cp "$ROOT/assets/loopsmith-logo-512.png" "$OUT/"
 cp "$ROOT/assets/mark-github.svg" "$OUT/"
 
+# The 20-second demo: the GIF is what the page shows, and it links to the mp4
+# (with sound). Both live in assets/demo/ and are copied rather than committed
+# twice, for the same reason as the logos.
+cp "$ROOT/assets/demo/loopsmith-demo.gif" "$OUT/"
+cp "$ROOT/assets/demo/loopsmith-demo.mp4" "$OUT/"
+
 # GitHub Pages runs Jekyll over a branch unless told not to, and Jekyll hides
 # anything beginning with an underscore.
 : > "$OUT/.nojekyll"
