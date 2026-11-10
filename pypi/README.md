@@ -5,7 +5,7 @@
 </div>
 
 [![PyPI](https://img.shields.io/pypi/v/loopsmith-cli?logo=pypi&logoColor=white&label=PyPI&color=3775A9)](https://pypi.org/project/loopsmith-cli/)
-[![license](https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0-blue?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
 ![platforms](https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A)
 ![python](https://img.shields.io/badge/python-%E2%89%A53.8-3776AB?logo=python&logoColor=white)
 
@@ -110,4 +110,4 @@ resume` picks up from the last checkpoint.
 - [**Code wiki**](https://bitphill.github.io/loopsmith/wiki/#overview)
   — a page per subsystem, generated from the code
 
-Runs on Linux, macOS, and Windows. MIT licensed.
+Runs on Linux, macOS, and Windows. AGPL-3.0 licensed.

@@ -5,7 +5,7 @@
 </div>
 
 [![crates.io](https://img.shields.io/crates/v/loopsmith?logo=rust&logoColor=white&label=crates.io&color=C1272D)](https://crates.io/crates/loopsmith)
-[![license](https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0-blue?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
 ![platforms](https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A)
 ![rust](https://img.shields.io/badge/rust-1.85%2B-C1272D?logo=rust&logoColor=white)
 

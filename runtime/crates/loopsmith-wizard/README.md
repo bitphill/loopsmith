@@ -5,7 +5,7 @@
 </div>
 
 [![crates.io](https://img.shields.io/crates/v/loopsmith-wizard?logo=rust&logoColor=white&label=crates.io&color=e6522c)](https://crates.io/crates/loopsmith-wizard)
-[![license](https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
+[![license](https://img.shields.io/badge/license-AGPL--3.0-blue?labelColor=222)](https://github.com/bitphill/loopsmith/blob/main/LICENSE)
 ![rust](https://img.shields.io/badge/rust-1.85%2B-C1272D?logo=rust&logoColor=white)
 
 Part of **[loopsmith](https://github.com/bitphill/loopsmith)** — self-evolving
@@ -81,4 +81,4 @@ satisfied goal flips back.
 
 Full documentation: <https://github.com/bitphill/loopsmith#readme>
 
-MIT licensed. © bitphill
+AGPL-3.0 licensed. © bitphill

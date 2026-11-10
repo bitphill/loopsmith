@@ -9,11 +9,12 @@ name = "loopsmith-cli"
 version = "1.0.0"
 description = "Self-evolving agent loops behind a deterministic verification gate. Installs the prebuilt Rust binary as `loopsmith`."
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.8"
 authors = [{ name = "Vaibhav Agarwal", email = "bitphill@duck.com" }]
 keywords = ["agent", "loop", "llm", "orchestration", "cli", "rust"]
 classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",

@@ -9,7 +9,7 @@
   <p>
     <a href="https://github.com/bitphill/loopsmith/releases"><img alt="release" src="https://img.shields.io/github/v/release/bitphill/loopsmith?include_prereleases&color=C1272D" /></a>
     <a href="https://github.com/bitphill/loopsmith/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/bitphill/loopsmith?color=2A5A8A" /></a>
-    <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-C8CAD1?labelColor=222" /></a>
+    <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-blue?labelColor=222" /></a>
     <img alt="rust" src="https://img.shields.io/badge/rust-1.85%2B-C1272D?logo=rust&logoColor=white" />
     <img alt="platforms" src="https://img.shields.io/badge/os-linux%20%7C%20macos%20%7C%20windows-2A5A8A" />
     <img alt="tests" src="https://img.shields.io/badge/tests-623%20passing-2A5A8A" />
@@ -447,4 +447,4 @@ Questions and ideas go in
 [Discussions](https://github.com/bitphill/loopsmith/discussions). If loopsmith is
 useful to you, a star on the repository helps other people find it.
 
-MIT licensed. See [`LICENSE`](LICENSE).
+AGPL-3.0 licensed. See [`LICENSE`](LICENSE).

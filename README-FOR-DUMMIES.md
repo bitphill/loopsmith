@@ -498,4 +498,4 @@ Optional. None of it is needed to run a loop.
 - [skills/loopsmith/SKILL.md](skills/loopsmith/SKILL.md) — the Claude skill for running loops
 - [skills/loopsmith-reference/SKILL.md](skills/loopsmith-reference/SKILL.md) — the Claude skill for designing them
 
-MIT licensed. See [LICENSE](LICENSE).
+AGPL-3.0 licensed. See [LICENSE](LICENSE).

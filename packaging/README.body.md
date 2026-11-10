@@ -87,4 +87,4 @@ resume` picks up from the last checkpoint.
 - [**Code wiki**](https://bitphill.github.io/loopsmith/wiki/#overview)
   — a page per subsystem, generated from the code
 
-Runs on Linux, macOS, and Windows. MIT licensed.
+Runs on Linux, macOS, and Windows. AGPL-3.0 licensed.
