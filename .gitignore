@@ -82,3 +82,6 @@ runtime/crates/loopsmith-web/web/playwright-report/
 
 # Local agent dirs. Not source for this repository.
 .claude/
+
+# Regenerable Kokoro TTS env for brag renders (see brag-output/).
+**/.tts-venv/

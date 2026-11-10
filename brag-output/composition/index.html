@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --ground: #faf7f2;
+        --surface: #ffffff;
+        --raised: #f4efe6;
+        --line: #e2dacd;
+        --text: #191410;
+        --dim: #6a6055;
+        --ember: #c2410c;
+        --on-ember: #fffaf5;
+        --quench: #0e7490;
+        --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--ground);
+        font-family: var(--font-display);
+        color: var(--text);
+      }
+      .clip {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 80px 120px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .brand-mini {
+        position: absolute;
+        top: 56px;
+        left: 96px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-weight: 800;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+      .brand-mini img { width: 40px; height: 40px; border-radius: 8px; background: #fff; }
+      .tagline {
+        max-width: 1500px;
+        text-align: center;
+        font-size: 52px;
+        line-height: 1.18;
+        font-weight: 700;
+        color: var(--ember);
+        letter-spacing: -0.02em;
+      }
+      .hero-title {
+        max-width: 1400px;
+        text-align: center;
+        font-size: 72px;
+        line-height: 1.08;
+        letter-spacing: -0.03em;
+        font-weight: 800;
+      }
+      .hero-sub {
+        margin-top: 28px;
+        max-width: 980px;
+        text-align: center;
+        font-size: 28px;
+        line-height: 1.45;
+        color: var(--dim);
+      }
+      .terminal {
+        width: 1180px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        box-shadow: 0 24px 80px rgba(25, 20, 16, 0.08);
+        overflow: hidden;
+      }
+      .terminal-bar {
+        background: var(--raised);
+        border-bottom: 1px solid var(--line);
+        padding: 14px 18px;
+        font-size: 18px;
+        color: var(--dim);
+        font-weight: 600;
+      }
+      .terminal-body {
+        padding: 28px 32px 36px;
+        font-family: ui-monospace, Menlo, Consolas, monospace;
+        font-size: 26px;
+        line-height: 1.65;
+      }
+      .terminal-body > div { opacity: 0; }
+      #s2-title, #s2-sub { opacity: 0; }
+      .outro-logo { opacity: 0; }
+      .t-dim { color: var(--dim); }
+      .t-ember { color: var(--ember); font-weight: 700; }
+      .t-quench { color: var(--quench); font-weight: 800; }
+      .t-strike { text-decoration: line-through; opacity: 0.55; }
+      .cards {
+        display: grid;
+        gap: 22px;
+        width: 1200px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-left: 6px solid var(--ember);
+        border-radius: 12px;
+        padding: 26px 32px;
+        font-size: 34px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        transform: translateY(24px);
+        opacity: 0;
+      }
+      .outro-logo {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 28px;
+      }
+      .outro-logo img {
+        width: 160px;
+        height: 160px;
+        border-radius: 20px;
+        background: #fff;
+        box-shadow: 0 20px 60px rgba(194, 65, 12, 0.15);
+      }
+      .outro-name {
+        font-size: 88px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+      .outro-bar {
+        width: 220px;
+        height: 8px;
+        background: var(--ember);
+        border-radius: 999px;
+      }
+      #glow {
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(circle at 50% 40%, rgba(194, 65, 12, 0.12), transparent 55%);
+        opacity: 0.35;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="20"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div id="glow" class="clip" data-start="0" data-duration="20" data-track-index="0"></div>
+
+      <audio
+        id="music"
+        data-start="0"
+        data-duration="20"
+        data-track-index="1"
+        data-volume="0.32"
+        data-fade-in="0.35"
+        data-fade-out="0.8"
+        src="assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3"
+      ></audio>
+      <audio
+        id="vo"
+        data-start="0.4"
+        data-duration="19"
+        data-track-index="3"
+        data-volume="1"
+        src="assets/voiceover.wav"
+      ></audio>
+
+      <audio
+        id="sfx-hero"
+        data-start="3.55"
+        data-duration="1"
+        data-track-index="2"
+        data-volume="0.55"
+        src="assets/sfx/impact/impactSoft_medium_002.ogg"
+      ></audio>
+      <audio
+        id="sfx-pass"
+        data-start="11.2"
+        data-duration="1"
+        data-track-index="2"
+        data-volume="0.65"
+        src="assets/sfx/interface/click_003.ogg"
+      ></audio>
+      <audio
+        id="sfx-c1"
+        data-start="12.65"
+        data-duration="1"
+        data-track-index="2"
+        data-volume="0.45"
+        src="assets/sfx/interface/select_008.ogg"
+      ></audio>
+      <audio
+        id="sfx-c2"
+        data-start="13.85"
+        data-duration="1"
+        data-track-index="2"
+        data-volume="0.45"
+        src="assets/sfx/interface/select_008.ogg"
+      ></audio>
+      <audio
+        id="sfx-c3"
+        data-start="15.05"
+        data-duration="1"
+        data-track-index="2"
+        data-volume="0.45"
+        src="assets/sfx/interface/select_008.ogg"
+      ></audio>
+
+      <!-- Scene 1: tagline -->
+      <section id="scene-tagline" class="clip scene-1" data-start="0" data-duration="3.5" data-track-index="0">
+        <div class="brand-mini">
+          <img src="assets/img/loopsmith-logo.png" alt="" />
+          <span>loopsmith</span>
+        </div>
+        <p class="tagline" id="s1-tag">
+          The skill to create self evolving loops based purpose specific skills
+        </p>
+      </section>
+
+      <!-- Scene 2: hero -->
+      <section id="scene-hero" class="clip scene-2" data-start="3.5" data-duration="3.5" data-track-index="0">
+        <h1 class="hero-title" id="s2-title">Describe a job once. It runs until it is actually done.</h1>
+        <p class="hero-sub" id="s2-sub">
+          Write what you want and how anyone would tell it is good — in one plain text file.
+        </p>
+      </section>
+
+      <!-- Scene 3: gate terminal -->
+      <section id="scene-gate" class="clip scene-3" data-start="7" data-duration="5" data-track-index="0">
+        <div class="terminal">
+          <div class="terminal-bar">loop run · research-brief</div>
+          <div class="terminal-body">
+            <div id="t1"><span class="t-dim">$</span> loopsmith loop run -f loop.yaml</div>
+            <div id="t2" class="t-dim">agent · iteration 4 · writing brief.md</div>
+            <div id="t3"><span class="t-dim">gate ›</span> reading artifacts…</div>
+            <div id="t4"><span class="t-quench">PASS</span> · citations verified</div>
+            <div id="t5"><span class="t-strike">model: "done"</span> <span class="t-ember">ignored</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Scene 4: cards -->
+      <section id="scene-cards" class="clip scene-4" data-start="12" data-duration="5" data-track-index="0">
+        <div class="cards">
+          <div class="card" id="c1">The gate is compiled code</div>
+          <div class="card" id="c2">The model never gets to say "done"</div>
+          <div class="card" id="c3">Runs until it actually passes</div>
+        </div>
+      </section>
+
+      <!-- Scene 5: outro -->
+      <section id="scene-outro" class="clip scene-5" data-start="17" data-duration="3" data-track-index="0">
+        <div class="outro-logo">
+          <img src="assets/img/loopsmith-logo.png" alt="" />
+          <div class="outro-name" id="outro-name">loopsmith</div>
+          <div class="outro-bar" id="outro-bar"></div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      const show = (sel, start, dur) => {
+        tl.set(sel, { opacity: 1 }, start);
+        tl.set(sel, { opacity: 0 }, start + dur);
+      };
+
+      show(".scene-1", 0, 3.5);
+      show(".scene-2", 3.5, 3.5);
+      show(".scene-3", 7, 5);
+      show(".scene-4", 12, 5);
+      show(".scene-5", 17, 3);
+
+      // beat-locked: tagline settle ~3.02s
+      tl.fromTo(
+        "#s1-tag",
+        { opacity: 0, y: 36, scale: 0.96 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "power3.out" },
+        0.15
+      );
+
+      tl.fromTo(
+        "#s2-title",
+        { opacity: 0, y: 40 },
+        { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" },
+        3.55
+      );
+      tl.fromTo(
+        "#s2-sub",
+        { opacity: 0, y: 20 },
+        { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" },
+        3.95
+      );
+
+      ["#t1", "#t2", "#t3", "#t4", "#t5"].forEach((sel, i) => {
+        tl.fromTo(
+          sel,
+          { opacity: 0, x: -16 },
+          { opacity: 1, x: 0, duration: 0.35, ease: "power2.out" },
+          7.2 + i * 0.55
+        );
+      });
+
+      // beat-grid: cards every ~1.2s
+      ["#c1", "#c2", "#c3"].forEach((sel, i) => {
+        tl.to(
+          sel,
+          { opacity: 1, y: 0, duration: 0.42, ease: "power3.out" },
+          12.65 + i * 1.2
+        );
+      });
+
+      tl.fromTo(
+        ".outro-logo",
+        { opacity: 0, scale: 0.92 },
+        { opacity: 1, scale: 1, duration: 0.55, ease: "power3.out" },
+        17.1
+      );
+      tl.fromTo(
+        "#outro-bar",
+        { scaleX: 0 },
+        { scaleX: 1, duration: 0.45, ease: "power2.out", transformOrigin: "left center" },
+        17.45
+      );
+
+      tl.to("#glow", { opacity: 0.55, duration: 0.6, yoyo: true, repeat: 3, ease: "sine.inOut" }, 0.2);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

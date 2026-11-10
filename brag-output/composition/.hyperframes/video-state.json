@@ -1,0 +1,198 @@
+{
+  "version": 1,
+  "historyId": "d1baa085-37ac-4535-bbeb-6ad667d363fc",
+  "currentRevision": "c3cd607e-3c79-4e5f-a8b0-3d21321c1cf0",
+  "pendingChanges": false,
+  "files": {
+    "AGENTS.md": {
+      "hash": "1b36171117cb7c18f4100a0db6a3782ff2e096115995733200445cc2e80a4060",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/1b/1b36171117cb7c18f4100a0db6a3782ff2e096115995733200445cc2e80a4060"
+    },
+    "CLAUDE.md": {
+      "hash": "1b36171117cb7c18f4100a0db6a3782ff2e096115995733200445cc2e80a4060",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/1b/1b36171117cb7c18f4100a0db6a3782ff2e096115995733200445cc2e80a4060"
+    },
+    "hyperframes.json": {
+      "hash": "3af6ecb4d7f8c0cf28a50880f71291f27406c4548e5db2ea2d57430abd99e0e1",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/3a/3af6ecb4d7f8c0cf28a50880f71291f27406c4548e5db2ea2d57430abd99e0e1"
+    },
+    "index.html": {
+      "hash": "36ec9a07a20c76bdddd9f8513a5a433a82b9be61b2b9fd4ec2968d8fc08e9b49",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/36/36ec9a07a20c76bdddd9f8513a5a433a82b9be61b2b9fd4ec2968d8fc08e9b49"
+    },
+    "meta.json": {
+      "hash": "baae0773a03470770cd9b17d81a216616eba58ab7001ebaad29d72371b1c94a2",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/ba/baae0773a03470770cd9b17d81a216616eba58ab7001ebaad29d72371b1c94a2"
+    },
+    "package.json": {
+      "hash": "819e9c9648b65c9dc39429e817c344c8263f5c0580699739aa887d43d5fc7be6",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/81/819e9c9648b65c9dc39429e817c344c8263f5c0580699739aa887d43d5fc7be6"
+    },
+    "assets/img/loopsmith-logo.png": {
+      "hash": "bb38f1186dc65a49a4d11edd3c65f787bd8ca77d308bb9a6d88683d711380363",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/bb/bb38f1186dc65a49a4d11edd3c65f787bd8ca77d308bb9a6d88683d711380363"
+    },
+    "assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3": {
+      "hash": "aa56ab1cdcbef6b05566c6a7c114323078580ccf6a740a9e6c6b6c4b40b4389f",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/aa/aa56ab1cdcbef6b05566c6a7c114323078580ccf6a740a9e6c6b6c4b40b4389f"
+    },
+    "assets/sfx/impact/impactSoft_medium_002.ogg": {
+      "hash": "5069e3571a77d7f7aae9ef71d0364aa245fb7d64a7c8cc9956f221d03088c089",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/50/5069e3571a77d7f7aae9ef71d0364aa245fb7d64a7c8cc9956f221d03088c089"
+    },
+    "assets/sfx/interface/click_003.ogg": {
+      "hash": "2fa929138bc3a0f432696588f66eac94b8f6d463905ec8808c6461ce4b054292",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/2f/2fa929138bc3a0f432696588f66eac94b8f6d463905ec8808c6461ce4b054292"
+    },
+    "assets/sfx/interface/select_008.ogg": {
+      "hash": "f703b6b1c62dae1c246a46d5c2442802588f68be2df4d17e0d65cf7e0dbfc826",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/f7/f703b6b1c62dae1c246a46d5c2442802588f68be2df4d17e0d65cf7e0dbfc826"
+    },
+    "assets/voiceover.wav": {
+      "hash": "046a2a4f30d840167441f2f9742c7dbe6362d605e976c13e45f5b1bb37a5b8fc",
+      "content": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/04/046a2a4f30d840167441f2f9742c7dbe6362d605e976c13e45f5b1bb37a5b8fc"
+    }
+  },
+  "revisions": {
+    "4113e061-67cb-40c0-9909-4f6426205285": {
+      "actor": {
+        "kind": "outside",
+        "name": "Outside"
+      },
+      "label": "Changed outside the app",
+      "startedAt": 1792818508440,
+      "endedAt": 1792818508482,
+      "files": {
+        "assets/img/loopsmith-logo.png": {
+          "before": null,
+          "after": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/bb/bb38f1186dc65a49a4d11edd3c65f787bd8ca77d308bb9a6d88683d711380363"
+        },
+        "assets/music/happy-beats-business-moves-vol-1-by-ende-dot-app.mp3": {
+          "before": null,
+          "after": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/aa/aa56ab1cdcbef6b05566c6a7c114323078580ccf6a740a9e6c6b6c4b40b4389f"
+        },
+        "assets/sfx/impact/impactSoft_medium_002.ogg": {
+          "before": null,
+          "after": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/50/5069e3571a77d7f7aae9ef71d0364aa245fb7d64a7c8cc9956f221d03088c089"
+        },
+        "assets/sfx/interface/click_003.ogg": {
+          "before": null,
+          "after": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/2f/2fa929138bc3a0f432696588f66eac94b8f6d463905ec8808c6461ce4b054292"
+        },
+        "assets/sfx/interface/select_008.ogg": {
+          "before": null,
+          "after": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/f7/f703b6b1c62dae1c246a46d5c2442802588f68be2df4d17e0d65cf7e0dbfc826"
+        },
+        "assets/voiceover.wav": {
+          "before": null,
+          "after": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/04/046a2a4f30d840167441f2f9742c7dbe6362d605e976c13e45f5b1bb37a5b8fc"
+        },
+        "index.html": {
+          "before": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/e3/e3a044b70410bd2c2dbfe02b7a60ee7bf92355e5998c3d5bc33b141f677cb955",
+          "after": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/32/320529babfaa84ffba47db8b665484fa58f91253db166e1a8cefeb6e14105830"
+        }
+      }
+    },
+    "c3cd607e-3c79-4e5f-a8b0-3d21321c1cf0": {
+      "actor": {
+        "kind": "outside",
+        "name": "Outside"
+      },
+      "label": "Changed outside the app",
+      "startedAt": 1792818545803,
+      "endedAt": 1792818545805,
+      "files": {
+        "index.html": {
+          "before": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/32/320529babfaa84ffba47db8b665484fa58f91253db166e1a8cefeb6e14105830",
+          "after": "/Users/vaibhav/.cache/hyperframes/history/d1baa085-37ac-4535-bbeb-6ad667d363fc/blobs/36/36ec9a07a20c76bdddd9f8513a5a433a82b9be61b2b9fd4ec2968d8fc08e9b49"
+        }
+      }
+    }
+  },
+  "checks": {
+    "latest": {
+      "revision": "c3cd607e-3c79-4e5f-a8b0-3d21321c1cf0",
+      "id": "5e5b1702-4bac-4f13-ab24-b32b143c3c05"
+    },
+    "revisions": {
+      "4113e061-67cb-40c0-9909-4f6426205285": [
+        {
+          "id": "93a057a6-e721-4887-8d47-d0e419a7153a",
+          "scope": "project",
+          "metadata": {
+            "ok": false,
+            "browserSkipped": true,
+            "options": {
+              "samples": 9,
+              "atTransitions": false,
+              "maxIssues": 80,
+              "collapseStatic": true,
+              "tolerance": 2,
+              "timeout": 3000,
+              "contrast": true,
+              "strict": false,
+              "snapshots": false,
+              "browserGpuMode": "auto"
+            }
+          },
+          "createdAt": 1792818525503,
+          "contentHash": "5d80c6bfc427d972fb96d8a1dc8ce9037a75bfd645aaa67a90eecd63409c41c2",
+          "revision": "4113e061-67cb-40c0-9909-4f6426205285",
+          "inputFingerprint": "4e04f94cff634e20db6ecb78d79237163ced49bfd886a68d2dc3419976f8a004",
+          "inputScope": "local-project-files",
+          "attribution": "recorded-revision",
+          "status": "cleaned",
+          "cleanedAfterRender": "04120a17-dff9-4dd0-a35d-6413ae6c051f"
+        }
+      ],
+      "c3cd607e-3c79-4e5f-a8b0-3d21321c1cf0": [
+        {
+          "id": "5e5b1702-4bac-4f13-ab24-b32b143c3c05",
+          "scope": "project",
+          "report": "/Users/vaibhav/projects/workspace/loopsmith/brag-output/composition/.hyperframes/artifacts/checks/5e5b1702-4bac-4f13-ab24-b32b143c3c05.json",
+          "metadata": {
+            "ok": true,
+            "browserSkipped": false,
+            "options": {
+              "samples": 9,
+              "atTransitions": false,
+              "maxIssues": 80,
+              "collapseStatic": true,
+              "tolerance": 2,
+              "timeout": 3000,
+              "contrast": true,
+              "strict": false,
+              "snapshots": false,
+              "browserGpuMode": "auto"
+            }
+          },
+          "createdAt": 1792818571798,
+          "contentHash": "beb8867f855f650695d9c8d5709cc8b4084feede4900460c43c1d8593f02410c",
+          "revision": "c3cd607e-3c79-4e5f-a8b0-3d21321c1cf0",
+          "inputFingerprint": "8367a70c870fbb64e435e8f8e4581282ad86a7f0918392042e4bb5a1f612df47",
+          "inputScope": "local-project-files",
+          "attribution": "recorded-revision"
+        }
+      ]
+    },
+    "unversioned": []
+  },
+  "snapshots": {
+    "latest": null,
+    "revisions": {},
+    "unversioned": []
+  },
+  "renders": {
+    "latest": {
+      "id": "04120a17-dff9-4dd0-a35d-6413ae6c051f",
+      "completedAt": 1792818691077,
+      "output": "/Users/vaibhav/projects/workspace/loopsmith/brag-output/brag.mp4",
+      "status": "completed",
+      "revision": "c3cd607e-3c79-4e5f-a8b0-3d21321c1cf0"
+    },
+    "retainedRevisions": [
+      "c3cd607e-3c79-4e5f-a8b0-3d21321c1cf0"
+    ]
+  },
+  "pendingArtifactCleanup": []
+}

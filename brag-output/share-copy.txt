@@ -1,0 +1,1 @@
+The skill to create self evolving loops based purpose specific skills — describe the job once, and loopsmith runs until compiled code says it's actually done. The model never gets to say "done."
