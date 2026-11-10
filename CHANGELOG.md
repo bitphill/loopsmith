@@ -4,6 +4,14 @@ All notable changes to loopsmith. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning is
 [semver](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-11-10
+
+### Changed
+
+- **License is now AGPL-3.0-or-later** (was MIT). See [`LICENSE`](LICENSE).
+- Package and registry metadata (crates.io, npm, PyPI, Homebrew formula) aligned
+  to **1.0.1**.
+
 ## [1.0.0] — 2026-09-30
 
 The config is grouped, the commands are grouped, and the engine that runs both
